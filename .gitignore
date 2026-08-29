@@ -1,0 +1,15 @@
+# Artefacts de build
+/build/
+/out/
+*.img
+*.iso
+*.rom
+*.deb
+
+# Relevés matériel générés par tools/probe-hardware.sh
+/hardware-report-*.md
+
+# Divers
+*.log
+*.swp
+.DS_Store
