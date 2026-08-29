@@ -55,10 +55,18 @@ que seule la machine cible peut donner. Le script de relevé doit être lancé
 **depuis ChromeOS, avant tout effacement** : c'est le seul moment où le HWID,
 l'état du write-protect et la version du CR50 sont lisibles.
 
-Sur le Chromebook, en mode développeur, ouvrir `crosh` (Ctrl+Alt+T) puis `shell` :
+Le dépôt étant **privé**, `curl` ne peut pas récupérer le script sans jeton.
+La voie fiable passe par le navigateur, déjà authentifié sur GitHub :
+
+1. Sur le Chromebook, ouvrir le fichier [`tools/probe-hardware.sh`](tools/probe-hardware.sh)
+   dans GitHub, cliquer sur **Raw**, puis enregistrer la page
+   (Ctrl+S) sous le nom `probe.sh`.
+2. Passer en mode développeur si ce n'est pas déjà fait
+   (⚠️ **cela efface les données locales de la machine**).
+3. Ouvrir `crosh` avec Ctrl+Alt+T, puis taper `shell` :
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/leptitane-fr/claude-os/claude/claude-os-chromebook-nhoec4/tools/probe-hardware.sh -o probe.sh
+cd /home/chronos/user/MyFiles/Downloads
 sudo bash probe.sh
 ```
 
