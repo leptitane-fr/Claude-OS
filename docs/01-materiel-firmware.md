@@ -65,33 +65,84 @@ L'activation du mode développeur **efface les données locales** de la machine.
 
 ---
 
-## 1.3 Points de non-retour
+## 1.3 Décisions arrêtées
 
-C'est la seule phase du projet où une erreur coûte du matériel. Trois règles.
+Deux arbitrages ont été tranchés en amont ; ils conditionnent la procédure.
 
-**1. Sauvegarder le firmware d'origine, sur un support externe.**
-Le script MrChromebox propose cette sauvegarde ; elle doit être écrite sur une
-clé USB, pas sur l'eMMC qui sera effacé. Sans elle, revenir à ChromeOS n'est
-plus possible sans reconstruire une image firmware depuis une source tierce.
+### Levée du write-protect : décidée après le relevé
 
-**2. Ce n'est pas « débrickable » sans matériel.**
-Contrairement à une idée répandue, un flash raté du firmware complet ne se
-répare pas depuis le logiciel : il faut un programmateur SPI externe (type
-CH341A) et une pince SOIC-8 pour réécrire directement la puce. À prévoir *avant*
-de flasher, pas après.
+Le choix entre **déconnexion de la batterie** et **câble SuzyQ** est reporté
+après l'exécution de `tools/probe-hardware.sh`. Motif : la procédure CCD exacte
+dépend de la version du CR50 embarquée, que le relevé donne (`gsctool -a -f`),
+et l'état courant du write-protect (`crossystem wpsw_cur`) peut déjà être
+différent de celui supposé. Décider avant de savoir n'apporterait rien.
 
-**3. Ne pas interrompre l'alimentation pendant le flash.**
+Le relevé fournit les trois entrées de la décision : version du CR50, état CCD,
+état du write-protect matériel.
+
+### Récupération : sauvegarde USB, sans programmateur externe
+
+**Aucun programmateur SPI externe ne sera acquis.** Conséquence directe et
+structurante : la sauvegarde du firmware d'origine devient **le seul filet de
+sécurité du projet**. Un flash interrompu ou une sauvegarde corrompue ne serait
+pas rattrapable.
+
+Cela ne rend pas l'opération déraisonnable — les flashs réussissent dans
+l'immense majorité des cas — mais cela déplace toute l'exigence sur la qualité
+de la sauvegarde. D'où le protocole ci-dessous, qui n'est pas optionnel.
+
+---
+
+## 1.4 Protocole de sauvegarde
+
+Une sauvegarde de firmware peut avoir la bonne taille et un contenu faux : une
+lecture SPI échoue parfois silencieusement. Le protocole retenu :
+
+1. **Lire la puce deux fois**, dans deux fichiers distincts. Le script
+   MrChromebox propose la sauvegarde ; la relancer une seconde fois.
+2. **Vérifier et comparer** avec l'outil du dépôt :
+
+   ```sh
+   bash tools/verify-firmware-backup.sh dump1.rom dump2.rom
+   ```
+
+   Il contrôle la taille (une puce SPI fait 4, 8, 16 ou 32 Mio — toute autre
+   taille signale une troncature), l'absence de dump vide (0x00 ou 0xFF
+   intégral, symptôme d'une lecture ratée), la présence de la signature
+   `__FMAP__`, celle des neuf régions attendues (`GBB`, `RO_SECTION`,
+   `WP_RO`…), puis compare les deux lectures octet à octet.
+
+   Codes de retour : `0` exploitable, `1` réserves, `2` **ne pas flasher**.
+
+3. **Copier le `.rom` sur deux supports distincts** — la clé USB de travail
+   n'est pas une sauvegarde à elle seule.
+4. **Committer le manifeste**, pas le firmware. Le script produit
+   `firmware-backup-manifest.txt` (tailles et sommes SHA-256) : c'est lui qui
+   va dans le dépôt.
+
+> ⚠️ **Ne jamais committer ni publier le fichier `.rom`.** Un dump de firmware
+> ChromeOS contient les régions VPD, donc le **numéro de série** de la machine
+> et son **adresse MAC**. `.gitignore` exclut déjà `*.rom` par précaution.
+
+---
+
+## 1.5 Règles pendant le flash
+
+**1. Ne pas interrompre l'alimentation.**
 Sur secteur, batterie rebranchée si elle avait été déconnectée pour le
 write-protect — sauf si la procédure impose l'inverse, auquel cas s'assurer que
 l'alimentation secteur est stable.
 
-**Conséquence sur ChromeOS :** le flash UEFI Full ROM remplace intégralement le
-firmware. ChromeOS ne démarre plus. C'est l'objectif, mais c'est définitif tant
-que la sauvegarde n'est pas restaurée.
+**2. Le flash est définitif pour ChromeOS.**
+Le firmware UEFI Full ROM remplace intégralement le firmware d'origine :
+ChromeOS ne démarre plus. C'est l'objectif, mais il n'y a pas de retour sans
+restaurer la sauvegarde.
 
+**3. Ne pas flasher si la vérification renvoie 2.**
+Sans programmateur externe, ce serait un pari sans issue de secours.
 ---
 
-## 1.4 Risques logiciels identifiés
+## 1.6 Risques logiciels identifiés
 
 À valider en live USB **après** le flash, avant de construire l'image finale.
 
@@ -105,7 +156,7 @@ que la sauvegarde n'est pas restaurée.
 
 ---
 
-## 1.5 Sources
+## 1.7 Sources
 
 - Base de données des périphériques MrChromebox — `MrChromebox/scripts`, fichier
   `device-db.sh` (entrée `MADOO`, lue et vérifiée).

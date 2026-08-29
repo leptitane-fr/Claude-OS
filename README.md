@@ -34,6 +34,8 @@ comme environnement de travail principal, doté de privilèges étendus sur le s
 | Session graphique v1 | **X11 léger** | Anthropic indique que le raccourci global *Quick Entry* de Claude Desktop exige X11 **ou** le portail Wayland `GlobalShortcuts` — que les compositeurs wlroots légers n'implémentent pas de façon fiable. X11 garantit la fonctionnalité complète dès la v1. Wayland sera réévalué en v2. |
 | Système de fichiers | **btrfs + compression zstd** | Gain d'espace notable sur un eMMC de faible capacité, et surtout **snapshots instantanés** — le mécanisme qui rend les privilèges étendus de Claude réversibles. |
 | Mémoire | **zram (zstd)** | Indispensable si la machine est en 4 Go, une fois Electron chargé. |
+| Levée du write-protect | **Décidée après le relevé** | La procédure CCD dépend de la version du CR50, que seul le relevé donne. |
+| Filet de récupération | **Sauvegarde USB seule** | Pas de programmateur SPI externe. La sauvegarde du firmware devient donc le seul recours, d'où un protocole de vérification strict. |
 
 Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 
@@ -45,6 +47,13 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 |---|---|
 | [`docs/01-materiel-firmware.md`](docs/01-materiel-firmware.md) | Le matériel, le déverrouillage du firmware, les points de non-retour et la procédure de sauvegarde. **À lire avant toute manipulation de la machine.** |
 | [`docs/02-architecture.md`](docs/02-architecture.md) | Le socle logiciel, le budget mémoire, et le modèle de privilèges de Claude sur le système. |
+
+### Outils
+
+| Outil | Rôle |
+|---|---|
+| [`tools/probe-hardware.sh`](tools/probe-hardware.sh) | Relevé matériel en lecture seule, 13 sections. À lancer depuis ChromeOS **avant** tout effacement. |
+| [`tools/verify-firmware-backup.sh`](tools/verify-firmware-backup.sh) | Valide une sauvegarde de firmware avant de flasher : taille, dump vide, signature `__FMAP__`, régions, et comparaison de deux lectures. Retourne `2` si la sauvegarde est inutilisable. |
 
 ---
 
@@ -83,8 +92,14 @@ Il répond notamment à :
 
 ## Étapes suivantes
 
-2. Analyse du relevé et gel des spécifications réelles.
-3. Sauvegarde du firmware d'origine, déverrouillage du write-protect, flash UEFI.
-4. Validation matérielle sous live USB Debian 13 (audio, Wi-Fi, tactile, veille).
-5. Construction de l'image Claude OS reproductible.
-6. Intégration de Claude Desktop et du courtier de privilèges.
+2. **Analyse du relevé** — gel des specs réelles (RAM, eMMC, CPU, audio, Wi-Fi)
+   et choix de la méthode de levée du write-protect, sur faits.
+3. **Sauvegarde du firmware d'origine** — double lecture, validation par
+   `tools/verify-firmware-backup.sh`, copie sur deux supports.
+   *Sans programmateur externe, cette étape est le seul filet : elle ne se
+   bâcle pas.*
+4. **Levée du write-protect et flash UEFI Full ROM.**
+5. **Validation matérielle sous live USB Debian 13** — audio en premier
+   (risque n°1), puis Wi-Fi, tactile, veille, autonomie.
+6. **Construction de l'image Claude OS** reproductible.
+7. **Intégration de Claude Desktop et du courtier de privilèges** (`claude-osd`).

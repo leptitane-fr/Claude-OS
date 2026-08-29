@@ -13,3 +13,7 @@
 *.log
 *.swp
 .DS_Store
+
+# Manifeste de sauvegarde produit par tools/verify-firmware-backup.sh
+# (celui-ci se committe ; le .rom associé, jamais)
+!firmware-backup-manifest.txt
