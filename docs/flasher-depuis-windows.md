@@ -7,8 +7,11 @@ clé, tu démarres dessus.
 
 Depuis l'onglet **Releases** du dépôt :
 
-- `claude-os.img.xz` — l'image compressée
+- `claude-os.img.xz` — l'image compressée, environ **840 Mo**
 - `claude-os.img.xz.sha256` — son empreinte
+
+Une fois écrite, elle occupe 11 Gio sur la clé, puis la partition racine
+s'étend au premier démarrage jusqu'à environ 170 Go.
 
 ## 2. Vérifier l'empreinte
 

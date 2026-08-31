@@ -125,6 +125,7 @@ cryptographique que celle du firmware du portable.
 | Réserve d'usure préservée | `sgdisk -v` après extension | 12 Gio laissés hors partition sur 40 |
 | Outils présents | auto-contrôle en fin de build | `fsck.ext4`, `resize2fs`, `sgdisk`, `chromium`, `tlp` |
 | Services activés | auto-contrôle en fin de build | dGPU, premier démarrage, TLP, NetworkManager, lightdm |
+| Taille de l'image | `xz -9` après `fstrim` | **836 Mio** compressés (limite GitHub : 2048) |
 
 Transposé à une clé de 256 Go : racine d'environ 170 Go, et près de 76 Go
 laissés hors partition comme réserve de wear-leveling.
