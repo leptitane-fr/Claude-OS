@@ -331,7 +331,17 @@ if [ -n "${EXTRA_CA_CERT:-}" ] && [ -r "$EXTRA_CA_CERT" ]; then
     info "autorite de certification supplementaire installee dans le chroot"
 fi
 
-in_chroot() { chroot "$MNT" /usr/bin/env DEBIAN_FRONTEND=noninteractive LC_ALL=C "$@"; }
+# Les variables TLS de l'environnement hote designent des chemins qui
+# n'existent pas dans le chroot : heritees telles quelles, elles font echouer
+# curl avec "error setting certificate file" avant meme toute connexion. On
+# les neutralise pour que le chroot utilise son propre magasin de certificats.
+in_chroot() {
+    chroot "$MNT" /usr/bin/env \
+        -u CURL_CA_BUNDLE -u SSL_CERT_FILE -u SSL_CERT_DIR \
+        -u REQUESTS_CA_BUNDLE -u NODE_EXTRA_CA_CERTS -u AWS_CA_BUNDLE \
+        -u NIX_SSL_CERT_FILE -u HTTPLIB2_CA_CERTS -u CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE \
+        DEBIAN_FRONTEND=noninteractive LC_ALL=C "$@"
+}
 
 cat > "$MNT/etc/apt/sources.list" <<APTEOF
 deb $MIRROR $SUITE $COMPONENTS
@@ -512,10 +522,21 @@ step "Installation de GRUB (Secure Boot, cible amovible)"
 # Sans efivarfs, grub-install ne peut pas toucher a la NVRAM meme s'il le
 # voulait. Ceinture et bretelles, en complement de --no-nvram.
 in_chroot debconf-set-selections <<'DEBEOF'
-grub2/force_efi_extra_removable boolean true
-grub-efi/install_devices_empty   boolean true
+grub-efi-amd64 grub2/force_efi_extra_removable boolean true
+grub-efi-amd64 grub-efi/install_devices_empty boolean true
 DEBEOF
 
+# --force est indispensable ici, et sans danger.
+#
+# grub-install verifie que le repertoire EFI reside sur un systeme de
+# fichiers FAT, et s'arrete net sinon. Pendant la construction, /boot/efi
+# n'est qu'un repertoire sur la racine ext4 : ses fichiers sont transferes
+# juste apres dans une vraie image FAT, elle-meme ecrite dans la partition
+# EFI. --force ramene ce controle a un simple avertissement.
+#
+# L'avertissement decrit donc exactement la situation qu'on a organisee.
+# La partition EFI finale est bien du FAT ; la verification de la chaine
+# signee, plus bas, controle le resultat reel plutot que l'intention.
 in_chroot grub-install \
     --target=x86_64-efi \
     --efi-directory=/boot/efi \
@@ -523,6 +544,7 @@ in_chroot grub-install \
     --removable \
     --no-nvram \
     --uefi-secure-boot \
+    --force \
     --recheck >>"$LOGFILE" 2>&1 || die "grub-install a echoue -- voir $LOGFILE"
 
 in_chroot update-grub >>"$LOGFILE" 2>&1 || die "update-grub a echoue -- voir $LOGFILE"
@@ -548,10 +570,29 @@ else
     warn "le demarrage echouera probablement avec Secure Boot actif"
 fi
 
-for f in EFI/BOOT/grubx64.efi EFI/debian/grub.cfg; do
-    [ -e "$MNT/boot/efi/$f" ] && ok "present : $f" \
-                              || warn "absent : $f -- GRUB pourrait ne pas trouver sa configuration"
-done
+[ -e "$MNT/boot/efi/EFI/BOOT/grubx64.efi" ] \
+    && ok "present : EFI/BOOT/grubx64.efi" \
+    || die "grubx64.efi absent : shim n'aura rien a charger"
+
+# En installation amovible, GRUB depose sa configuration a cote de son
+# binaire et l'y retrouve via $cmdpath. Une installation classique la place
+# dans EFI/debian. On accepte les deux plutot que d'en imposer une.
+if [ -e "$MNT/boot/efi/EFI/BOOT/grub.cfg" ]; then
+    ok "present : EFI/BOOT/grub.cfg (amorcage amovible)"
+elif [ -e "$MNT/boot/efi/EFI/debian/grub.cfg" ]; then
+    ok "present : EFI/debian/grub.cfg (amorcage classique)"
+else
+    die "aucun grub.cfg sur l'ESP : GRUB ne trouvera pas sa configuration"
+fi
+
+# Le grub.cfg de l'ESP n'est qu'un relais : il doit designer la racine par
+# UUID pour que la cle demarre quelle que soit la machine.
+if grep -q "$UUID_ROOT" "$MNT/boot/efi/EFI/BOOT/grub.cfg" 2>/dev/null; then
+    ok "le relais grub.cfg designe bien la racine par UUID"
+else
+    warn "le relais grub.cfg ne mentionne pas l'UUID de la racine -- a verifier"
+    sed 's/^/      /' "$MNT/boot/efi/EFI/BOOT/grub.cfg" 2>/dev/null | head -10
+fi
 
 # Aucune entree NVRAM ne doit avoir ete creee. Le chroot n'a pas d'efivarfs
 # monte : grub-install y etait materiellement hors d'etat d'ecrire.
