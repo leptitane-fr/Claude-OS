@@ -48,38 +48,16 @@ jobs:
       # refuserait de demarrer : atteindre l'invite de connexion prouve que
       # toute la chaine shim -> GRUB -> noyau est valide.
       # ---------------------------------------------------------------------
+      # Le test vit dans tools/boot-test.sh : une seule definition, utilisable
+      # a l'identique en local et ici. OVMF_VARS_4M.ms.fd embarque les cles
+      # Microsoft et applique reellement Secure Boot -- un shim mal signe
+      # serait refuse par le firmware et ferait echouer la construction.
       - name: Tester le demarrage sous Secure Boot (QEMU + OVMF)
         run: |
-          cp /usr/share/OVMF/OVMF_VARS_4M.ms.fd /mnt/build/vars.fd
-          chmod +w /mnt/build/vars.fd
-          KVM=""; [ -w /dev/kvm ] && KVM="-enable-kvm -cpu host"
-          echo "acceleration : ${KVM:-aucune (TCG, plus lent)}"
-
-          set +e
-          timeout 600 qemu-system-x86_64 $KVM -m 2048 -smp 2 -nographic \
-            -machine q35 \
-            -drive if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.secboot.fd \
-            -drive if=pflash,format=raw,unit=1,file=/mnt/build/vars.fd \
-            -drive id=usbdisk,file=/mnt/build/claude-os.img,format=raw,if=none \
-            -device qemu-xhci -device usb-storage,drive=usbdisk \
-            -serial mon:stdio -display none \
-            | tee /mnt/build/boot.log
-          set -e
-
-          echo "::group::Sortie serie"
-          tail -80 /mnt/build/boot.log
-          echo "::endgroup::"
-
-          if grep -qi 'Security Violation\|access denied' /mnt/build/boot.log; then
-            echo "::error::Le firmware a refuse le binaire : chaine Secure Boot invalide"
-            exit 1
-          fi
-          if grep -q 'login:' /mnt/build/boot.log; then
-            echo "OK : invite de connexion atteinte sous Secure Boot applique"
-          else
-            echo "::error::Invite de connexion jamais atteinte -- voir la sortie serie"
-            exit 1
-          fi
+          # Sans KVM l'emulation est environ vingt fois plus lente.
+          if [ -w /dev/kvm ]; then LIMITE=300; else LIMITE=1800; fi
+          echo "duree maximale accordee : ${LIMITE}s"
+          sudo ./tools/boot-test.sh /mnt/build/claude-os.img "$LIMITE"
 
       - name: Compresser
         run: |
