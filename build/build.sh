@@ -710,6 +710,23 @@ in_chroot ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/n
 : > "$MNT/etc/machine-id"
 sync
 
+# Liberer les blocs des fichiers supprimes.
+#
+# apt-get clean efface les .deb telecharges, mais leurs blocs continuent de
+# porter les anciennes donnees : environ 1 Gio de contenu aleatoire qui
+# gonfle l'image et resiste a la compression. fstrim les rend a nouveau
+# nuls, ce qui reduit l'image d'autant et ameliore nettement le taux de
+# compression.
+#
+# Sur une vraie cle, l'operation a un second interet : elle indique au
+# controleur quels blocs sont libres, information qu'il n'a autrement pas.
+if fstrim -v "$MNT" >>"$LOGFILE" 2>&1; then
+    ok "blocs inutilises liberes : $(grep -o '[0-9.]* [KMG]iB' "$LOGFILE" | tail -1)"
+else
+    info "fstrim indisponible sur ce support (sans consequence sur le fonctionnement)"
+fi
+sync
+
 echo
 printf '%s' "$c_grn"
 cat <<DONEEOF
