@@ -335,11 +335,24 @@ fi
 # n'existent pas dans le chroot : heritees telles quelles, elles font echouer
 # curl avec "error setting certificate file" avant meme toute connexion. On
 # les neutralise pour que le chroot utilise son propre magasin de certificats.
+# Execute une commande DANS le systeme cible.
+#
+# L'environnement de l'hote n'a pas cours dans le chroot : ses chemins n'y
+# existent pas. Les variables TLS sont neutralisees (elles designent des
+# fichiers de certificats propres a l'hote), et HOME/USER/PATH sont poses
+# explicitement plutot qu'herites.
+#
+# HOME merite une mention : lance par `sudo -E`, le script herite du HOME de
+# l'appelant -- /home/runner sur un runner GitHub. Ce repertoire n'existe pas
+# dans le chroot, et gpg, qui veut y creer son trousseau, echoue alors avec
+# "Fatal: can't create directory". Tout outil touchant a $HOME est concerne.
 in_chroot() {
     chroot "$MNT" /usr/bin/env \
         -u CURL_CA_BUNDLE -u SSL_CERT_FILE -u SSL_CERT_DIR \
         -u REQUESTS_CA_BUNDLE -u NODE_EXTRA_CA_CERTS -u AWS_CA_BUNDLE \
         -u NIX_SSL_CERT_FILE -u HTTPLIB2_CA_CERTS -u CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE \
+        HOME=/root USER=root LOGNAME=root \
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
         DEBIAN_FRONTEND=noninteractive LC_ALL=C "$@"
 }
 
@@ -491,27 +504,51 @@ ok "services actives"
 # ---------------------------------------------------------------------------
 step "Claude Desktop"
 CLAUDE_KEY_FPR="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
-if in_chroot curl -fsSLo /usr/share/keyrings/claude-desktop-archive-keyring.asc \
-        https://downloads.claude.ai/claude-desktop/key.asc 2>/dev/null; then
-    fpr="$(in_chroot gpg --show-keys --with-colons \
-            /usr/share/keyrings/claude-desktop-archive-keyring.asc 2>/dev/null \
-          | awk -F: '/^fpr:/{print $10; exit}')"
-    if [ "$fpr" = "$CLAUDE_KEY_FPR" ]; then
-        echo "deb [arch=amd64 signed-by=/usr/share/keyrings/claude-desktop-archive-keyring.asc] https://downloads.claude.ai/claude-desktop/apt/stable stable main" \
-            > "$MNT/etc/apt/sources.list.d/claude-desktop.list"
-        in_chroot apt-get update -qq
-        if in_chroot apt-get install -y --no-install-recommends claude-desktop >/dev/null 2>&1; then
-            ok "Claude Desktop installe depuis le depot officiel"
-        else
-            warn "installation echouee -- depot enregistre, reessayer apres le premier demarrage"
-        fi
-    else
-        rm -f "$MNT/usr/share/keyrings/claude-desktop-archive-keyring.asc"
-        warn "empreinte de cle inattendue ($fpr) -- depot NON enregistre"
-        warn "attendue : $CLAUDE_KEY_FPR"
+CLAUDE_KEYRING="/usr/share/keyrings/claude-desktop-archive-keyring.asc"
+
+# Composant optionnel : son echec ne doit pas interrompre une construction
+# par ailleurs saine. Le systeme reste parfaitement utilisable, et
+# l'application peut etre installee apres le premier demarrage.
+#
+# Aucune erreur n'est envoyee vers /dev/null : c'est precisement ce qui a
+# rendu un echec precedent indiagnosticable. Tout part dans le journal.
+install_claude_desktop() {
+    if ! in_chroot curl -fsSLo "$CLAUDE_KEYRING" \
+            https://downloads.claude.ai/claude-desktop/key.asc >>"$LOGFILE" 2>&1; then
+        warn "cle de signature inaccessible (reseau ?)"
+        return 1
     fi
+
+    local fpr
+    fpr="$(in_chroot gpg --show-keys --with-colons "$CLAUDE_KEYRING" 2>>"$LOGFILE" \
+           | awk -F: '$1=="fpr" && !seen {print $10; seen=1}')" || true
+
+    if [ "$fpr" != "$CLAUDE_KEY_FPR" ]; then
+        rm -f "$MNT$CLAUDE_KEYRING"
+        warn "empreinte de cle inattendue : ${fpr:-<illisible, voir le journal>}"
+        warn "attendue : $CLAUDE_KEY_FPR"
+        return 1
+    fi
+    ok "empreinte de la cle Anthropic verifiee"
+
+    echo "deb [arch=amd64 signed-by=$CLAUDE_KEYRING] https://downloads.claude.ai/claude-desktop/apt/stable stable main" \
+        > "$MNT/etc/apt/sources.list.d/claude-desktop.list"
+
+    in_chroot apt-get update -qq >>"$LOGFILE" 2>&1 \
+        || { warn "depot Claude Desktop injoignable"; return 1; }
+    in_chroot apt-get install -y --no-install-recommends claude-desktop >>"$LOGFILE" 2>&1 \
+        || { warn "installation de claude-desktop echouee"; return 1; }
+
+    ok "Claude Desktop installe depuis le depot officiel"
+    return 0
+}
+
+if install_claude_desktop; then
+    CLAUDE_DESKTOP_OK=1
 else
-    warn "cle de signature inaccessible (reseau ?) -- Claude Desktop a installer manuellement"
+    CLAUDE_DESKTOP_OK=0
+    warn "Claude Desktop absent de cette image ; l'installer apres le premier"
+    warn "demarrage :  sudo apt update && sudo apt install claude-desktop"
 fi
 
 # ---------------------------------------------------------------------------
@@ -668,7 +705,8 @@ rm -rf "$ESP_WORK"
 step "Auto-controle du systeme construit"
 selftest_fail=0
 
-for b in fsck.ext4 resize2fs sgdisk partx udevadm chromium tlp; do
+[ "${CLAUDE_DESKTOP_OK:-0}" = "1" ] && SELFTEST_BINS="claude-desktop" || SELFTEST_BINS=""
+for b in fsck.ext4 resize2fs sgdisk partx udevadm chromium tlp $SELFTEST_BINS; do
     if in_chroot sh -c "command -v $b" >/dev/null 2>&1; then
         ok "present : $b"
     else
