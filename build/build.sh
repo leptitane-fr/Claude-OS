@@ -547,7 +547,30 @@ in_chroot grub-install \
     --force \
     --recheck >>"$LOGFILE" 2>&1 || die "grub-install a echoue -- voir $LOGFILE"
 
+# grub-mkconfig n'ecrit root=UUID= que si /dev/disk/by-uuid/<uuid> existe
+# reellement ; sinon il retombe SILENCIEUSEMENT sur le nom de peripherique
+# de construction (/dev/loop0p2, /dev/sdb2...). L'image demarrerait alors
+# uniquement sur une machine ou la cle porte ce meme nom -- autant dire
+# nulle part. Ces liens sont poses par udev, absent de bien des conteneurs
+# de construction : on cree donc le lien attendu avant de generer la config.
+BYUUID="$MNT/dev/disk/by-uuid"
+mkdir -p "$BYUUID"
+ln -sf "$P_ROOT" "$BYUUID/$UUID_ROOT"
+
 in_chroot update-grub >>"$LOGFILE" 2>&1 || die "update-grub a echoue -- voir $LOGFILE"
+
+rm -f "$BYUUID/$UUID_ROOT"
+
+# Verification imperative : une racine designee par nom de peripherique
+# produit une image qui ne demarre pas, et le defaut est invisible jusqu'au
+# premier essai. On echoue ici plutot que de livrer cette image.
+if grep -q "root=UUID=$UUID_ROOT" "$MNT/boot/grub/grub.cfg"; then
+    ok "la racine est designee par UUID dans grub.cfg"
+else
+    warn "grub.cfg designe la racine ainsi :"
+    grep -oE 'root=[^ ]+' "$MNT/boot/grub/grub.cfg" | sort -u | sed 's/^/      /'
+    die "la racine n'est pas designee par UUID : l'image ne demarrerait que sur cette machine"
+fi
 in_chroot update-initramfs -u -k all >>"$LOGFILE" 2>&1 \
     || die "generation de l'initramfs echouee -- voir $LOGFILE"
 
