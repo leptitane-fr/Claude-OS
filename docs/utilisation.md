@@ -106,3 +106,33 @@ mais pas encore éprouvés sur le Vivobook :
 - **L'énumération USB au démarrage.** L'initramfs conserve `MODULES=most`
   pour que la clé démarre sur un contrôleur quelconque, mais un délai
   d'énumération trop long resterait à corriger par `rootdelay=`.
+
+## Ce qui a été vérifié, et comment
+
+Résultats obtenus sur une image construite de zéro, démarrée sous QEMU avec
+un firmware OVMF portant les clés Microsoft et **appliquant réellement**
+Secure Boot. Ce n'est pas une simulation : c'est la même vérification
+cryptographique que celle du firmware du portable.
+
+| Point vérifié | Méthode | Résultat |
+|---|---|---|
+| Chaîne shim → GRUB → noyau | démarrage sous OVMF Secure Boot | invite de connexion atteinte en 80–90 s, aucune violation |
+| Démarrage depuis un périphérique USB | clé présentée en `usb-storage` à QEMU | `BdsDxe: starting … USB HARDDRIVE` |
+| Racine désignée par UUID | inspection de `grub.cfg` + démarrage | `root=UUID=…`, contrôle bloquant dans le build |
+| Vérification du système de fichiers | sortie série | `claudeos-root: clean, 48982/688128 files` |
+| Extension de la partition | image de 11 Gio écrite sur un support de 40 Gio | racine portée de 10,5 à 27,5 Gio (70 %) |
+| Réparation du GPT | `sgdisk -v` avant / après | « 1 problème » → « No problems found » |
+| Réserve d'usure préservée | `sgdisk -v` après extension | 12 Gio laissés hors partition sur 40 |
+| Outils présents | auto-contrôle en fin de build | `fsck.ext4`, `resize2fs`, `sgdisk`, `chromium`, `tlp` |
+| Services activés | auto-contrôle en fin de build | dGPU, premier démarrage, TLP, NetworkManager, lightdm |
+
+Transposé à une clé de 256 Go : racine d'environ 170 Go, et près de 76 Go
+laissés hors partition comme réserve de wear-leveling.
+
+### Ce que ces tests ne disent pas
+
+Aucun d'eux ne s'est exécuté sur le Vivobook. En particulier, **rien ici ne
+prédit le comportement de la RTX 4060** : QEMU n'a pas de GPU discret, donc
+`claude-os-dgpu-power` n'a rien eu à éteindre. C'est la première chose à
+vérifier après le premier démarrage réel, et la seule qui décide de
+l'autonomie.
