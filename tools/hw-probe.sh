@@ -68,7 +68,7 @@ for d in /sys/bus/pci/devices/*/; do
   ven=$(cat "$d/vendor" 2>/dev/null)
   cls=$(cat "$d/class"  2>/dev/null)
   case "$ven:$cls" in
-    0x10de:0x030*|0x10de:0x0302*)
+    0x10de:0x030*)
       bdf=$(basename "$d")
       note ""
       note "  dGPU trouve : $bdf"

@@ -1,0 +1,29 @@
+# Claude-OS -- genere par build.sh
+
+GRUB_DEFAULT=0
+GRUB_TIMEOUT=3
+GRUB_DISTRIBUTOR="Claude-OS"
+
+# --- Ligne de commande noyau -----------------------------------------------
+#
+# module_blacklist= agit au niveau du noyau, avant tout udev : c'est plus
+# fiable qu'un fichier modprobe.d, qui n'empeche pas un chargement precoce.
+#
+# pcie_port_pm=force  : autorise la gestion d'energie des ports PCIe meme si
+#                       le firmware ne l'annonce pas. C'est la condition pour
+#                       que le pont portant le dGPU descende en D3cold.
+# nmi_watchdog=0      : supprime un reveil periodique par cœur.
+# i915.enable_psr=1   : Panel Self Refresh -- l'ecran se rafraichit tout seul
+#                       sur image fixe, le GPU se rendort. Gain reel sur
+#                       batterie ; a passer a 0 en cas de scintillement.
+GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 @CMDLINE_DGPU@ nmi_watchdog=0 i915.enable_psr=1"
+GRUB_CMDLINE_LINUX=""
+
+# Indispensable : recherche de la racine par UUID.
+GRUB_DISABLE_LINUX_UUID=false
+
+# Pas de sonde des autres systemes : os-prober irait lire le disque interne
+# pour y detecter Windows. On s'interdit formellement d'y toucher.
+GRUB_DISABLE_OS_PROBER=true
+
+GRUB_DISABLE_RECOVERY=false

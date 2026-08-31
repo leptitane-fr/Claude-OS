@@ -1,0 +1,18 @@
+# Claude-OS -- genere par build.sh
+#
+# Montage par UUID exclusivement : la cle apparait comme sdb, sdc ou autre
+# selon la machine et les peripheriques presents. Un nom de device en dur
+# rendrait le systeme non amorcable.
+#
+# noatime           : supprime une ecriture a chaque lecture de fichier
+# commit=600        : regroupe les ecritures du journal (10 min au lieu de 5 s)
+# Ces deux options reduisent l'usure du flash ET les reveils du controleur.
+
+UUID=@UUID_ROOT@  /          ext4  noatime,errors=remount-ro,commit=600  0 1
+UUID=@UUID_HOME@  /home      ext4  noatime,commit=600                    0 2
+UUID=@UUID_ESP@   /boot/efi  vfat  umask=0077,noatime                    0 1
+
+# /tmp et /var/tmp en RAM : aucune ecriture sur la cle pour des fichiers
+# par definition jetables.
+tmpfs  /tmp      tmpfs  rw,nosuid,nodev,noatime,size=2G   0 0
+tmpfs  /var/tmp  tmpfs  rw,nosuid,nodev,noatime,size=1G   0 0

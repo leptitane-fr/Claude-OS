@@ -1,0 +1,120 @@
+# Claude-OS -- paquets installes dans le systeme cible.
+# Une ligne par paquet ; # commence un commentaire.
+#
+# Le systeme est volontairement reduit : Chromium et Claude Desktop, plus
+# ce qu'il faut pour les faire tourner. Chaque paquet en plus, c'est de
+# l'espace, des ecritures, des mises a jour et de la surface d'attaque.
+
+# --- Noyau et amorcage ------------------------------------------------------
+linux-image-amd64
+initramfs-tools
+grub-efi-amd64                # GRUB non signe : fournit grub-install
+grub-efi-amd64-signed         # image GRUB signee par Debian
+shim-signed                   # maillon signe par Microsoft : la cle de voute
+efibootmgr                    # inspection uniquement -- jamais d'ecriture NVRAM
+
+# --- Firmwares (composant non-free-firmware) --------------------------------
+intel-microcode               # correctifs CPU ; aussi des gains d'energie
+firmware-linux-free
+firmware-misc-nonfree
+firmware-iwlwifi              # Wi-Fi Intel AX
+firmware-sof-signed           # audio Alder Lake : muet sans ce paquet
+
+# --- Base systeme -----------------------------------------------------------
+systemd
+systemd-timesyncd
+systemd-zram-generator        # swap compresse en RAM, aucune ecriture flash
+dbus
+sudo
+locales
+console-setup
+keyboard-configuration
+ca-certificates
+apt-utils
+
+# --- Reseau -----------------------------------------------------------------
+network-manager
+network-manager-gnome         # applet de barre des taches
+iproute2
+iputils-ping
+wpasupplicant
+
+# --- Graphique : Intel uniquement -------------------------------------------
+# Aucun paquet NVIDIA nulle part, par construction. Un pilote DKMS casserait
+# de toute facon Secure Boot faute de signature.
+xserver-xorg-core
+xserver-xorg-input-libinput
+xserver-xorg-video-intel      # au profit de modesetting si besoin
+libgl1-mesa-dri
+mesa-va-drivers
+intel-media-va-driver-non-free  # iHD : decodage video materiel Alder Lake
+vainfo                        # verification de l'acceleration
+mesa-utils
+
+# --- Bureau Xfce ------------------------------------------------------------
+# Composants choisis un par un plutot que le metapaquet xfce4, qui tire
+# beaucoup d'applications inutiles ici.
+xfce4-session
+xfwm4
+xfdesktop4
+xfce4-panel
+xfce4-settings
+xfce4-terminal
+xfce4-power-manager
+xfce4-notifyd
+xfce4-screenshooter
+xfce4-whiskermenu-plugin
+thunar
+thunar-volman
+gvfs
+gvfs-backends
+lightdm
+lightdm-gtk-greeter
+xdg-utils
+xdg-desktop-portal
+xdg-desktop-portal-gtk        # dialogues de fichiers pour Chromium/Electron
+
+# --- Trousseau : indispensable a Claude Desktop et Chromium -----------------
+# Electron stocke le jeton de session via libsecret. Sans fournisseur Secret
+# Service, il faut se reconnecter a chaque demarrage.
+gnome-keyring
+libsecret-1-0
+seahorse
+
+# --- Audio ------------------------------------------------------------------
+pipewire
+pipewire-pulse
+pipewire-alsa
+wireplumber
+pavucontrol
+
+# --- Energie ----------------------------------------------------------------
+tlp
+tlp-rdw
+thermald                      # regulation thermique Intel
+powertop
+acpi
+lm-sensors
+
+# --- Polices : le systeme sert a afficher du web ---------------------------
+fonts-dejavu
+fonts-liberation2             # substituts metriques Arial/Times/Courier
+fonts-noto-core
+fonts-noto-color-emoji
+
+# --- Applications -----------------------------------------------------------
+chromium
+chromium-l10n
+
+# --- Outils de diagnostic ---------------------------------------------------
+pciutils
+usbutils
+lsof
+htop
+nano
+less
+curl
+gnupg
+git
+rsync
+acpica-tools                  # acpidump/iasl : analyse du dGPU sur site

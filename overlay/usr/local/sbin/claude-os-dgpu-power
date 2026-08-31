@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# Claude-OS -- met le GPU NVIDIA discret hors tension.
+#
+# POURQUOI CE SCRIPT EXISTE
+#
+# Blacklister nouveau et nvidia empeche le pilote de se charger, mais ne
+# coupe rien : le peripherique PCIe reste alimente en etat D0 et consomme
+# 10 a 20 W en permanence. C'est le premier poste de consommation de la
+# machine, devant le retroeclairage. Un blacklist seul degrade donc
+# l'autonomie par rapport a une configuration ou le pilote endort la carte.
+#
+# Le seul etat reellement interessant est D3cold : alimentation coupee. On y
+# accede par les "power resources" ACPI (_PR3) portees par le pont PCIe
+# parent, que le noyau actionne via le runtime PM.
+#
+# Strategie choisie par /etc/default/claude-os-dgpu (variable DGPU_STRATEGY).
+
+set -uo pipefail
+
+STRATEGY="pr3"
+[ -r /etc/default/claude-os-dgpu ] && . /etc/default/claude-os-dgpu
+
+log() { echo "claude-os-dgpu: $*"; }
+
+# --- Localisation du dGPU ---------------------------------------------------
+GPU=""
+for d in /sys/bus/pci/devices/*/; do
+    [ "$(cat "$d/vendor" 2>/dev/null)" = "0x10de" ] || continue
+    case "$(cat "$d/class" 2>/dev/null)" in
+        0x0300*|0x0302*) GPU="$d"; break ;;
+    esac
+done
+
+if [ -z "$GPU" ]; then
+    log "aucun GPU NVIDIA present -- rien a faire (deja retire, ou desactive par le firmware)"
+    exit 0
+fi
+
+BDF="$(basename "$GPU")"
+BRIDGE="$(basename "$(dirname "$(readlink -f "$GPU")")")"
+BRIDGE_PATH="/sys/bus/pci/devices/$BRIDGE"
+
+log "dGPU $BDF sous le pont $BRIDGE ; etat initial $(cat "$GPU/power_state" 2>/dev/null)"
+
+# --- Voie ideale : desactivation cote firmware ------------------------------
+# Si le Vivobook expose un MUX, le firmware coupe la carte lui-meme. Rien
+# n'egale cette methode : le peripherique disparait entierement du bus.
+if [ "$STRATEGY" = "mux" ]; then
+    for knob in /sys/devices/platform/asus-nb-wmi/dgpu_disable \
+                /sys/devices/platform/asus-nb-wmi/gpu_mux_mode; do
+        if [ -w "$knob" ]; then
+            echo 1 > "$knob" 2>/dev/null \
+                && { log "desactive via $(basename "$knob") -- redemarrage requis pour effet complet"; exit 0; }
+        fi
+    done
+    log "MUX demande mais indisponible ; repli sur la methode pr3"
+    STRATEGY="pr3"
+fi
+
+# --- Detacher tout pilote qui se serait accroche ----------------------------
+if [ -e "$GPU/driver" ]; then
+    drv="$(basename "$(readlink -f "$GPU/driver")")"
+    log "pilote $drv attache -- detachement"
+    echo "$BDF" > "$GPU/driver/unbind" 2>/dev/null \
+        || log "echec du detachement de $drv"
+fi
+
+# --- Autoriser puis demander la coupure -------------------------------------
+# d3cold_allowed doit etre pose AVANT de basculer le runtime PM en auto.
+[ -w "$GPU/d3cold_allowed" ] && echo 1 > "$GPU/d3cold_allowed"
+
+if [ "$STRATEGY" = "remove" ]; then
+    # Repli lorsque _PR3 est absent : on retire le peripherique du bus pour
+    # que plus rien ne le maintienne eveille, puis on laisse le pont
+    # descendre de lui-meme.
+    log "retrait du peripherique $BDF"
+    echo 1 > "$GPU/remove" 2>/dev/null || log "echec du retrait"
+else
+    echo auto > "$GPU/power/control" 2>/dev/null
+fi
+
+# Le pont doit lui aussi passer en auto : c'est lui qui porte les power
+# resources et qui coupe effectivement l'alimentation en aval.
+[ -w "$BRIDGE_PATH/power/control" ] && echo auto > "$BRIDGE_PATH/power/control"
+[ -w "$BRIDGE_PATH/d3cold_allowed" ] && echo 1 > "$BRIDGE_PATH/d3cold_allowed"
+
+# --- Verification -----------------------------------------------------------
+# La transition n'est pas instantanee : le noyau applique le delai d'inactivite
+# du runtime PM avant de descendre en D3.
+sleep 3
+
+if [ -r "$GPU/power_state" ]; then
+    state="$(cat "$GPU/power_state")"
+    log "etat final du dGPU : $state"
+    case "$state" in
+        D3cold) log "OK -- alimentation coupee, gain attendu de l'ordre de 15 W" ;;
+        D3hot)  log "PARTIEL -- carte suspendue mais toujours alimentee ;"
+                log "          _PR3 est probablement absent, essayer DGPU_STRATEGY=remove" ;;
+        D0)     log "ECHEC -- la carte consomme toujours pleinement ;"
+                log "          verifier pcie_port_pm=force sur la ligne de commande noyau" ;;
+    esac
+else
+    log "peripherique retire du bus ; etat du pont : $(cat "$BRIDGE_PATH/power_state" 2>/dev/null)"
+fi
+
+exit 0

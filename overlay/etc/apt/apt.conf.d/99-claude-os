@@ -1,0 +1,9 @@
+// Pas de recommandes par defaut : on garde le systeme reduit a son role.
+// Exception notable, Claude Desktop tire QEMU en recommande pour Cowork ;
+// build.sh l'installe explicitement lorsque ENABLE_COWORK=yes.
+APT::Install-Recommends "false";
+APT::Install-Suggests "false";
+
+// Aucun telechargement automatique en tache de fond : c'est du reseau,
+// du CPU et des ecritures sur la cle a un moment non choisi.
+APT::Periodic::Enable "0";

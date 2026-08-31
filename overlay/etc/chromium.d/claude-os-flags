@@ -1,0 +1,19 @@
+# Claude-OS -- options Chromium.
+#
+# Le navigateur est ici LE poste de consommation : c'est quasiment le seul
+# programme qui tourne. Ces options pesent plus sur l'autonomie que tout le
+# reste de la configuration systeme reuni.
+#
+# Le lanceur Debian /usr/bin/chromium source les fichiers de /etc/chromium.d/
+# et concatene CHROMIUM_FLAGS.
+
+# Decodage video materiel par le GPU Intel integre. Sans cela, chaque video
+# est decodee par le CPU : plusieurs watts d'ecart, et un ventilateur qui se
+# declenche pour une simple visioconference.
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --enable-features=VaapiVideoDecodeLinuxGL,VaapiVideoEncoder"
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --ignore-gpu-blocklist"
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --enable-gpu-rasterization"
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --enable-zero-copy"
+
+# Stockage des mots de passe dans le trousseau plutot qu'en clair sur la cle.
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --password-store=gnome-libsecret"

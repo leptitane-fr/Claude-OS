@@ -1,0 +1,19 @@
+[Unit]
+Description=Coupe l'alimentation du GPU NVIDIA discret
+Documentation=file:///usr/local/sbin/claude-os-dgpu-power
+# Apres l'enumeration PCI et le peuplement udev, sinon le peripherique
+# n'est pas encore visible dans sysfs.
+After=systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+DefaultDependencies=no
+Before=basic.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/claude-os-dgpu-power
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=basic.target
