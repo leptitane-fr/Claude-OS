@@ -647,21 +647,45 @@ fi
     && ok "present : EFI/BOOT/grubx64.efi" \
     || die "grubx64.efi absent : shim n'aura rien a charger"
 
-# En installation amovible, GRUB depose sa configuration a cote de son
-# binaire et l'y retrouve via $cmdpath. Une installation classique la place
-# dans EFI/debian. On accepte les deux plutot que d'en imposer une.
-if [ -e "$MNT/boot/efi/EFI/BOOT/grub.cfg" ]; then
-    ok "present : EFI/BOOT/grub.cfg (amorcage amovible)"
-elif [ -e "$MNT/boot/efi/EFI/debian/grub.cfg" ]; then
-    ok "present : EFI/debian/grub.cfg (amorcage classique)"
-else
-    die "aucun grub.cfg sur l'ESP : GRUB ne trouvera pas sa configuration"
+# LE POINT QUI DECIDE DU DEMARRAGE SUR MATERIEL REEL.
+#
+# Le grubx64.efi signe par Debian embarque un prefixe code en dur,
+# /EFI/debian, et y cherche sa configuration. En installation amovible,
+# grub-install ne depose celle-ci que dans /EFI/BOOT : GRUB ne la trouve
+# alors qu'en retombant sur $cmdpath, le repertoire d'ou il a ete charge.
+#
+# Ce repli fonctionne sous OVMF mais PAS sur tous les firmwares : un AMI de
+# portable ASUS n'expose pas le chemin de peripherique de la meme maniere,
+# et GRUB tombe dans son interpreteur avec "Minimal BASH-like line editing".
+# Le test QEMU ne peut pas detecter cette difference.
+#
+# On depose donc la configuration AUX DEUX emplacements : le prefixe
+# embarque est satisfait directement, sans dependre d'aucun repli.
+[ -e "$MNT/boot/efi/EFI/BOOT/grub.cfg" ] \
+    || die "aucun grub.cfg sur l'ESP : GRUB ne trouverait pas sa configuration"
+ok "present : EFI/BOOT/grub.cfg (chemin amovible)"
+
+mkdir -p "$MNT/boot/efi/EFI/debian"
+cp "$MNT/boot/efi/EFI/BOOT/grub.cfg" "$MNT/boot/efi/EFI/debian/grub.cfg"
+ok "present : EFI/debian/grub.cfg (prefixe embarque dans le GRUB signe)"
+
+# Verification que le prefixe attendu par le binaire est bien celui qu'on
+# vient de servir : si Debian le changeait, ce controle le signalerait.
+GRUB_PREFIX="$(strings -a "$MNT/boot/efi/EFI/BOOT/grubx64.efi" 2>/dev/null \
+               | grep -m1 '^/EFI/' || true)"
+if [ -n "$GRUB_PREFIX" ]; then
+    if [ -e "$MNT/boot/efi$GRUB_PREFIX/grub.cfg" ]; then
+        ok "prefixe embarque $GRUB_PREFIX : configuration en place"
+    else
+        die "le GRUB signe attend sa configuration dans $GRUB_PREFIX, absente de l'ESP"
+    fi
 fi
 
 # Le grub.cfg de l'ESP n'est qu'un relais : il doit designer la racine par
 # UUID pour que la cle demarre quelle que soit la machine.
-if grep -q "$UUID_ROOT" "$MNT/boot/efi/EFI/BOOT/grub.cfg" 2>/dev/null; then
-    ok "le relais grub.cfg designe bien la racine par UUID"
+if grep -q "$UUID_ROOT" "$MNT/boot/efi/EFI/BOOT/grub.cfg" 2>/dev/null \
+   && grep -q "$UUID_ROOT" "$MNT/boot/efi/EFI/debian/grub.cfg" 2>/dev/null; then
+    ok "les deux relais grub.cfg designent la racine par UUID"
 else
     warn "le relais grub.cfg ne mentionne pas l'UUID de la racine -- a verifier"
     sed 's/^/      /' "$MNT/boot/efi/EFI/BOOT/grub.cfg" 2>/dev/null | head -10

@@ -137,3 +137,31 @@ prédit le comportement de la RTX 4060** : QEMU n'a pas de GPU discret, donc
 `claude-os-dgpu-power` n'a rien eu à éteindre. C'est la première chose à
 vérifier après le premier démarrage réel, et la seule qui décide de
 l'autonomie.
+
+### Une limite du test QEMU, découverte sur matériel réel
+
+Le premier démarrage sur le Vivobook s'est arrêté sur l'interpréteur GRUB
+(« Minimal BASH-like line editing is supported »), alors que la même image
+atteignait l'invite de connexion sous QEMU.
+
+Le `grubx64.efi` signé par Debian embarque un préfixe codé en dur,
+`/EFI/debian`, et y cherche sa configuration. En installation amovible,
+`grub-install` ne la dépose que dans `/EFI/BOOT` : GRUB ne la trouve alors
+qu'en retombant sur `$cmdpath`, le répertoire d'où il a été chargé. Ce
+repli fonctionne sous OVMF, mais pas sur le firmware AMI de l'ASUS, qui
+n'expose pas le chemin de périphérique de la même manière.
+
+La configuration est désormais déposée **aux deux emplacements**, et le
+build vérifie que le préfixe réellement embarqué dans le binaire est servi.
+
+La leçon dépasse ce cas : **un démarrage réussi sous QEMU ne prouve pas un
+démarrage réussi sur une machine donnée.** OVMF valide la chaîne
+cryptographique Secure Boot — ce qui reste précieux — mais pas les
+particularités d'un firmware constructeur.
+
+En cas de rechute, on démarre manuellement depuis l'invite `grub>` :
+
+```
+search --no-floppy --file --set=root /boot/grub/grub.cfg
+configfile ($root)/boot/grub/grub.cfg
+```
