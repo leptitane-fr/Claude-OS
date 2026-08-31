@@ -67,6 +67,12 @@ jobs:
           ls -lh claude-os.img.xz
 
           # Une release GitHub refuse tout fichier de plus de 2 Gio.
+          # Un fichier absent doit echouer, jamais etre lu comme une taille
+          # nulle qui passerait le controle.
+          if [ ! -s claude-os.img.xz ]; then
+            echo "::error::Aucune image compressee produite."
+            exit 1
+          fi
           SIZE=$(stat -c%s claude-os.img.xz)
           echo "taille compressee : $(( SIZE / 1048576 )) Mio"
           if [ "$SIZE" -gt $(( 2 * 1024 * 1024 * 1024 )) ]; then
