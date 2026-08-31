@@ -1,99 +1,108 @@
-# Construire et utiliser Claude-OS
+# Construire et vérifier Claude-OS
 
-## 1. Sonder la machine (à faire en premier)
+Pour simplement installer le système sur la clé, voir
+**[flasher-depuis-windows.md](flasher-depuis-windows.md)**. Ce document
+s'adresse à la construction et au diagnostic.
 
-Depuis ton live Mint, sur le Vivobook :
+## Construire
 
-```bash
-sudo apt install acpica-tools          # pour l'analyse ACPI du dGPU
-sudo ./tools/hw-probe.sh
-```
+### Par l'intégration continue (la voie normale)
 
-Le rapport `claude-os-hw-report.txt` détermine trois réglages de
-`build/config/local.conf` qu'on ne peut pas deviner à l'avance :
+Onglet **Actions** → *Construire l'image Claude-OS* → *Run workflow*.
+Cocher *Publier* pour créer une release, sinon l'image reste disponible
+comme artefact pendant 14 jours.
 
-| Ce que dit le rapport | Réglage à poser |
-|---|---|
-| `asus-nb-wmi` expose `dgpu_disable` | `DGPU_STRATEGY="mux"` |
-| Le pont PCIe a des `power_resource_*` / `_PR3` présent | `DGPU_STRATEGY="pr3"` |
-| Ni l'un ni l'autre | `DGPU_STRATEGY="remove"` |
-| `lspci` montre « Volume Management Device » | `BLACKLIST_VMD="yes"` |
+Le workflow construit l'image, **la démarre sous QEMU avec un firmware
+OVMF appliquant Secure Boot**, puis la compresse. Si la chaîne de
+démarrage est invalide, la construction échoue au lieu de publier une
+image qui ne démarrerait pas.
 
-## 2. Construire
+### En local, sur un hôte Linux
 
 ```bash
-cp build/config/default.conf build/config/local.conf
-$EDITOR build/config/local.conf        # au minimum : TARGET_DEVICE, USERNAME
-sudo ./build/build.sh
+sudo apt install debootstrap gdisk dosfstools e2fsprogs mtools
+sudo ./build/build.sh --image claude-os.img     # image à flasher
+sudo ./build/build.sh --device /dev/sdb         # écriture directe sur clé
 ```
 
-Compter 20 à 40 minutes selon le débit réseau. Tout est journalisé dans
-`build.log` ; suivre l'avancement depuis un autre terminal avec
-`tail -f build.log`.
+Compter 20 à 40 minutes. Tout est journalisé dans `build.log` ; suivre
+depuis un autre terminal avec `tail -f build.log`.
 
-Le script **refuse d'écrire** si la cible n'est pas sur le bus USB, si
-elle porte une partition montée, si elle héberge le système en cours, ou
-si sa taille est incohérente. Il exige en plus que tu retapes le chemin
-exact. Un `/dev/nvme*` est rejeté sans discussion.
+Pour personnaliser : `cp build/config/default.conf build/config/local.conf`
+et éditer. `local.conf` est lu après `default.conf` et n'est pas versionné.
 
-Relancer le script reconstruit la clé de zéro : on itère sur la recette,
-jamais sur le résultat.
+Le mode `--device` refuse d'écrire si la cible n'est pas sur le bus USB, si
+elle porte une partition montée, si elle héberge le système en cours, ou si
+sa taille est incohérente ; un `/dev/nvme*` est rejeté sans discussion, et
+il faut retaper le chemin exact.
 
-## 3. Démarrer
-
-Redémarrer, maintenir **Échap** (ou **F8** selon le firmware), choisir la
-clé dans le menu. **Ne toucher à aucun réglage du BIOS** — ni Secure
-Boot, ni le mode VMD/RST, ni l'ordre de démarrage.
-
-Si la clé n'apparaît pas dans le menu, la cause la plus fréquente est
-*Fast Boot*, qui abrège l'énumération USB. C'est le seul réglage BIOS
-qu'il puisse être nécessaire de changer.
-
-## 4. Vérifier après le premier démarrage
+## Vérifier après le premier démarrage
 
 ```bash
 mokutil --sb-state                        # attendu : SecureBoot enabled
-journalctl -b -u claude-os-dgpu-power     # état final du dGPU
+df -h /                                   # racine étendue (~170 Gio)
+journalctl -b -u claude-os-firstboot      # extension + exclusion USB
+journalctl -b -u claude-os-dgpu-power     # état du GPU NVIDIA
 vainfo                                    # accélération vidéo Intel
-sudo tlp-stat -s -b                       # politique d'énergie active
+sudo tlp-stat -s -b                       # politique d'énergie
 sudo powertop                             # consommation réelle
 ```
 
-### Lire le résultat sur le GPU
+### Le GPU : la vérification qui compte
 
-C'est la vérification qui compte le plus pour l'autonomie.
+C'est de loin le premier levier d'autonomie. Le service choisit sa méthode
+seul, puis annonce le résultat obtenu :
 
-| Message du journal | Signification | Suite à donner |
+| État final | Signification | Suite à donner |
 |---|---|---|
 | `D3cold` | Alimentation coupée. Objectif atteint. | rien |
-| `D3hot` | Carte suspendue mais toujours alimentée. | passer à `DGPU_STRATEGY="remove"` |
-| `D0` | Carte à pleine consommation. | vérifier `pcie_port_pm=force` dans `/proc/cmdline` |
+| `D3hot` | Carte suspendue mais toujours alimentée. | forcer `DGPU_STRATEGY="remove"` dans `/etc/default/claude-os-dgpu`, puis redémarrer |
+| `D0` | Carte à pleine consommation. | vérifier que `pcie_port_pm=force` figure bien dans `/proc/cmdline` |
 
-Comparer la consommation au repos avant/après via `powertop` : l'écart
-attendu entre `D0` et `D3cold` est de l'ordre de 15 W, soit un facteur
-deux sur l'autonomie totale.
+L'écart attendu entre `D0` et `D3cold` est de l'ordre de 15 W — un facteur
+deux sur l'autonomie totale. Mesurer au repos avec `powertop` pour comparer.
 
-## 5. Ce qui n'a pas été touché
+## La sonde matérielle
 
-- L'ESP du disque interne : aucune écriture.
-- La NVRAM du firmware : aucune entrée créée (`--no-nvram`, et l'`efivarfs`
-  n'est délibérément pas monté dans le chroot pendant le build).
+`tools/hw-probe.sh` n'est plus nécessaire à la construction : l'image
+s'adapte seule au matériel. Elle reste utile pour comprendre *pourquoi* le
+GPU ne descend pas en `D3cold`.
+
+```bash
+sudo apt install acpica-tools
+sudo ./tools/hw-probe.sh
+```
+
+Strictement en lecture seule : ne monte rien, n'écrit que son rapport,
+masque les numéros de série. La section 4 détaille l'état du dGPU, la
+présence d'un MUX `asus-nb-wmi` et celle de `_PR3` dans la DSDT.
+
+## Ce qui n'est jamais touché
+
+- La partition EFI du disque interne : aucune écriture.
+- La mémoire du firmware : aucune entrée créée. `grub-install` reçoit
+  `--no-nvram`, et le chroot de construction n'a pas d'`efivarfs` monté —
+  il en est donc matériellement incapable.
 - L'ordre de démarrage : inchangé. Clé retirée, la machine démarre sur
   Windows exactement comme avant.
 
-## Points restant à valider sur le matériel
+## Points restant à valider sur le matériel réel
 
-Ces éléments sont écrits selon la documentation mais n'ont pas encore été
-vérifiés sur la machine réelle :
+Écrits d'après la documentation, vérifiés en CI pour ce qui peut l'être,
+mais pas encore éprouvés sur le Vivobook :
 
-- **La chaîne Secure Boot.** `build.sh` compare l'empreinte SHA-256 de
-  `EFI/BOOT/BOOTX64.EFI` avec celle du shim signé Debian et avertit en cas
-  d'écart. À confirmer par `mokutil --sb-state` après démarrage.
+- **La méthode retenue pour le GPU.** Le choix automatique est testé en
+  logique, pas contre une RTX 4060 réelle. C'est le premier point à
+  regarder après le premier démarrage.
 - **`/etc/chromium.d/`.** Le lanceur Chromium de Debian lit ce répertoire ;
-  vérifier avec `chrome://gpu` que le décodage vidéo est bien matériel.
+  confirmer via `chrome://gpu` que le décodage vidéo est bien matériel.
 - **Le trousseau sous Xfce.** `gnome-keyring` doit être démarré par la
   session pour que Claude Desktop conserve sa connexion. Si l'application
   redemande une authentification à chaque démarrage, c'est le point à
   regarder en premier.
 - **`i915.enable_psr=1`.** Gain réel sur batterie, mais peut provoquer un
-  scintillement sur certaines dalles. Passer à `0` le cas échéant.
+  scintillement sur certaines dalles. Passer à `0` le cas échéant dans
+  `/etc/default/grub`, puis `sudo update-grub`.
+- **L'énumération USB au démarrage.** L'initramfs conserve `MODULES=most`
+  pour que la clé démarre sur un contrôleur quelconque, mais un délai
+  d'énumération trop long resterait à corriger par `rootdelay=`.
