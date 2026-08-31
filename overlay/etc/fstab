@@ -8,9 +8,10 @@
 # commit=600        : regroupe les ecritures du journal (10 min au lieu de 5 s)
 # Ces deux options reduisent l'usure du flash ET les reveils du controleur.
 
+# Une partition racine unique : /home separe serait coince entre la racine et
+# la fin du support, donc impossible a agrandir au premier demarrage.
 UUID=@UUID_ROOT@  /          ext4  noatime,errors=remount-ro,commit=600  0 1
-UUID=@UUID_HOME@  /home      ext4  noatime,commit=600                    0 2
-UUID=@UUID_ESP@   /boot/efi  vfat  umask=0077,noatime                    0 1
+UUID=@UUID_ESP@   /boot/efi  vfat  umask=0077,noatime                    0 2
 
 # /tmp et /var/tmp en RAM : aucune ecriture sur la cle pour des fichiers
 # par definition jetables.

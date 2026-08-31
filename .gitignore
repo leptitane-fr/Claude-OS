@@ -1,0 +1,4 @@
+build.log
+*.img
+*.img.xz
+build/config/local.conf

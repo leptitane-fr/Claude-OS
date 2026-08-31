@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# Claude-OS -- adaptation de la partition racine au premier demarrage.
+#
+# L'image distribuee fait une dizaine de Gio pour rester telechargeable.
+# Une fois ecrite sur la cle de 256 Go, tout l'espace au-dela est inutilise :
+# ce service etend la partition racine, puis le systeme de fichiers.
+#
+# Une part du support est laissee HORS partition a dessein. Une cle flash n'a
+# pas de TRIM fiable : le controleur ne sait pas quels blocs sont libres, et
+# ne peut donc pas les recycler. Des secteurs jamais ecrits, en revanche, lui
+# restent disponibles pour son wear-leveling. C'est la seule reserve d'usure
+# reellement garantie sur ce type de support.
+
+set -uo pipefail
+
+FILL_PERCENT=70
+[ -r /etc/default/claude-os-firstboot ] && . /etc/default/claude-os-firstboot
+
+log() { echo "claude-os-firstboot: $*"; }
+
+# --- Localiser la partition racine et son disque ----------------------------
+ROOT_SRC="$(findmnt -no SOURCE /)"
+case "$ROOT_SRC" in
+    /dev/*) ;;
+    *) log "racine sur $ROOT_SRC, non redimensionnable -- abandon"; exit 0 ;;
+esac
+
+DISK="/dev/$(lsblk -nro PKNAME "$ROOT_SRC" | head -1)"
+PARTNUM="$(cat "/sys/class/block/$(basename "$ROOT_SRC")/partition" 2>/dev/null)"
+[ -b "$DISK" ] && [ -n "$PARTNUM" ] \
+    || { log "disque ou numero de partition introuvable -- abandon"; exit 0; }
+
+SECTOR=$(cat "/sys/block/$(basename "$DISK")/queue/logical_block_size")
+TOTAL=$(( $(blockdev --getsize64 "$DISK") / SECTOR ))
+START=$(cat "/sys/class/block/$(basename "$ROOT_SRC")/start")
+CUR_SIZE=$(cat "/sys/class/block/$(basename "$ROOT_SRC")/size")
+
+# 33 secteurs pour l'en-tete GPT de secours en fin de disque, plus une marge.
+TARGET_END=$(( TOTAL * FILL_PERCENT / 100 ))
+[ "$TARGET_END" -gt $(( TOTAL - 34 )) ] && TARGET_END=$(( TOTAL - 34 ))
+TARGET_SIZE=$(( TARGET_END - START ))
+
+log "disque $DISK : $(( TOTAL * SECTOR / 1073741824 )) Gio"
+log "racine $ROOT_SRC : $(( CUR_SIZE * SECTOR / 1073741824 )) Gio actuellement"
+log "cible : $(( TARGET_SIZE * SECTOR / 1073741824 )) Gio (${FILL_PERCENT} % du support)"
+
+# Marge de 1 Gio : sans elle, un ecart de quelques secteurs relancerait un
+# redimensionnement a chaque demarrage.
+if [ "$TARGET_SIZE" -le $(( CUR_SIZE + 1073741824 / SECTOR )) ]; then
+    log "la partition occupe deja la place prevue -- rien a faire"
+    exit 0
+fi
+
+# --- Replacer l'en-tete GPT de secours --------------------------------------
+# Apres l'ecriture d'une petite image sur un grand support, la copie de
+# secours de la table GPT se retrouve au milieu du disque. Toute modification
+# de partition echouerait tant qu'elle n'est pas remise en fin de support.
+log "replacement de l'en-tete GPT de secours en fin de support"
+sgdisk --move-second-header "$DISK" >/dev/null 2>&1 || log "  (deja en place)"
+
+# --- Etendre la partition ---------------------------------------------------
+# Supprimer puis recreer la partition avec le MEME secteur de depart ne touche
+# a aucune donnee : seule la table des partitions change.
+PART_NAME="$(sgdisk -i "$PARTNUM" "$DISK" 2>/dev/null | sed -n 's/^Partition name: .\(.*\).$/\1/p')"
+PART_TYPE="$(sgdisk -i "$PARTNUM" "$DISK" 2>/dev/null | sed -n 's/^Partition GUID code: \([0-9A-F-]*\).*/\1/p')"
+
+if ! sgdisk --delete="$PARTNUM" \
+            --new="$PARTNUM:$START:$TARGET_END" \
+            --typecode="$PARTNUM:${PART_TYPE:-8304}" \
+            --change-name="$PARTNUM:${PART_NAME:-claudeos-root}" \
+            "$DISK" >/dev/null 2>&1; then
+    log "ECHEC de la modification de la table -- systeme intact, taille inchangee"
+    exit 0
+fi
+
+# La partition racine est montee : le noyau refuse de relire toute la table.
+# partx met a jour la seule partition concernee, ce qu'il accepte a chaud.
+partx --update --nr "$PARTNUM" "$DISK" >/dev/null 2>&1 \
+    || log "  partx : mise a jour differee au prochain demarrage"
+
+# --- Etendre le systeme de fichiers -----------------------------------------
+if resize2fs "$ROOT_SRC" >/dev/null 2>&1; then
+    log "OK -- racine portee a $(df -h / | awk 'NR==2{print $2}')"
+else
+    log "resize2fs a echoue ; la partition est agrandie, le systeme de fichiers non"
+    log "reessayer manuellement :  sudo resize2fs $ROOT_SRC"
+    exit 0
+fi
+
+# --- Exclure la cle de l'autosuspend USB ------------------------------------
+# Endormir le controleur USB qui porte la racine gele la machine. La cle
+# n'etant pas connue au moment de fabriquer l'image, on l'identifie ici.
+USB_ID="$(udevadm info --query=property --name="$DISK" 2>/dev/null \
+          | awk -F= '/^ID_VENDOR_ID=/{v=$2} /^ID_MODEL_ID=/{m=$2} END{if (v && m) print v":"m}')"
+if [ -n "$USB_ID" ]; then
+    cat > /etc/tlp.d/02-claude-os-rootusb.conf <<TLPEOF
+# Genere au premier demarrage par claude-os-firstboot.
+# $USB_ID est la cle qui porte la racine du systeme : l'endormir gelerait
+# la machine. Elle est exclue, ce qui permet de reactiver l'autosuspend
+# pour tous les autres peripheriques USB.
+USB_AUTOSUSPEND=1
+USB_DENYLIST="$USB_ID"
+TLPEOF
+    log "cle $USB_ID exclue de l'autosuspend USB ; autosuspend actif au prochain demarrage"
+else
+    log "identifiant USB de la cle indetermine -- autosuspend laisse desactive (choix sur)"
+fi
+
+# --- Ne plus se relancer ----------------------------------------------------
+systemctl disable claude-os-firstboot.service >/dev/null 2>&1 || true
+log "termine"
+exit 0

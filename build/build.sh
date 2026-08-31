@@ -2,18 +2,29 @@
 #
 # Claude-OS -- construction du systeme sur la cle USB.
 #
-# A lancer depuis un Linux live (Mint, Debian live...) en root :
-#     sudo ./build/build.sh
+# Deux modes :
 #
-# Le script est idempotent au sens ou il repart toujours d'un partitionnement
-# neuf : relancer reconstruit la cle a l'identique. C'est voulu -- on itere
-# sur la recette, pas sur le resultat.
+#   sudo ./build/build.sh --image claude-os.img
+#       Produit un fichier image, a ecrire ensuite sur la cle depuis
+#       n'importe quel systeme (balenaEtcher, Rufus, dd). C'est le mode
+#       utilise par l'integration continue, et le seul necessaire si l'on
+#       ne dispose pas d'un hote Linux.
+#
+#   sudo ./build/build.sh --device /dev/sdb
+#       Ecrit directement sur une cle branchee, depuis un hote Linux.
+#
+# Le script repart toujours d'un partitionnement neuf : relancer reconstruit
+# le systeme a l'identique. C'est voulu -- on itere sur la recette, pas sur
+# le resultat.
 
 set -Eeuo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MNT="/mnt/claude-os-build"
 LOGFILE="${REPO_DIR}/build.log"
+MODE=""            # image | device
+IMAGE_PATH=""
+LOOP_DEV=""
 
 # ---------------------------------------------------------------------------
 # Journalisation et garde-fous
@@ -31,12 +42,15 @@ cleanup() {
     set +e
     if mountpoint -q "$MNT" 2>/dev/null; then
         step "Demontage"
-        for m in dev/pts dev proc sys/firmware/efi/efivars sys run boot/efi home ''; do
+        for m in dev/pts dev proc sys run ''; do
             umount -l "$MNT/$m" 2>/dev/null
         done
         sync
-        ok "cle demontee -- extraction sans risque"
     fi
+    if [ -n "$LOOP_DEV" ] && losetup "$LOOP_DEV" >/dev/null 2>&1; then
+        losetup -d "$LOOP_DEV" 2>/dev/null && ok "peripherique loop detache"
+    fi
+    [ -n "$MODE" ] && ok "support libere"
 }
 trap cleanup EXIT
 trap 'die "interrompu ligne $LINENO"' ERR
@@ -47,6 +61,25 @@ trap 'die "interrompu ligne $LINENO"' ERR
 : >"$LOGFILE"
 [ "$(id -u)" -eq 0 ] || die "a lancer en root : sudo $0"
 
+usage() {
+    cat >&2 <<USAGEEOF
+Usage :
+    sudo $0 --image <fichier.img>   construit une image a flasher
+    sudo $0 --device /dev/sdX       ecrit directement sur une cle USB
+USAGEEOF
+    exit 1
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --image)  MODE="image";  IMAGE_PATH="${2:-}"; shift 2 || usage ;;
+        --device) MODE="device"; TARGET_DEVICE_ARG="${2:-}"; shift 2 || usage ;;
+        -h|--help) usage ;;
+        *) echo "argument inconnu : $1" >&2; usage ;;
+    esac
+done
+[ -n "$MODE" ] || usage
+
 # shellcheck source=config/default.conf
 . "${REPO_DIR}/build/config/default.conf"
 if [ -r "${REPO_DIR}/build/config/local.conf" ]; then
@@ -56,11 +89,11 @@ fi
 
 step "Verification des outils requis"
 missing=()
-for t in debootstrap sgdisk mkfs.ext4 mkfs.vfat blkid udevadm partprobe chroot; do
+for t in debootstrap sgdisk mkfs.ext4 mkfs.vfat mcopy blkid partprobe chroot losetup; do
     command -v "$t" >/dev/null 2>&1 || missing+=("$t")
 done
 [ ${#missing[@]} -eq 0 ] || die "outils manquants : ${missing[*]}
-    Installer avec :  apt install debootstrap gdisk dosfstools e2fsprogs"
+    Installer avec :  apt install debootstrap gdisk dosfstools e2fsprogs mtools"
 ok "tous les outils sont presents"
 
 # ---------------------------------------------------------------------------
@@ -70,132 +103,202 @@ ok "tous les outils sont presents"
 # Windows -- exactement ce que le projet s'interdit. Chaque garde-fou ci-dessous
 # est une raison independante de refuser d'ecrire.
 # ---------------------------------------------------------------------------
-step "Validation du peripherique cible"
+step "Preparation du support cible"
 
-if [ -z "${TARGET_DEVICE}" ]; then
+if [ "$MODE" = "image" ]; then
+    # --- Mode image ---------------------------------------------------------
+    # Rien de destructif ici : on fabrique un fichier creux et on l'expose via
+    # un peripherique loop. Le reste du script ne fait aucune difference entre
+    # un loop et une vraie cle.
+    [ -n "$IMAGE_PATH" ] || die "--image exige un chemin de fichier"
+    [ -e "$IMAGE_PATH" ] && die "$IMAGE_PATH existe deja -- le supprimer ou choisir un autre nom"
+
+    MIN_MB=$(( SIZE_ESP + 4096 ))
+    [ "$IMAGE_SIZE_MB" -ge "$MIN_MB" ] \
+        || die "IMAGE_SIZE_MB=$IMAGE_SIZE_MB trop petit ; ${MIN_MB} MiB minimum"
+
+    info "creation d'une image creuse de ${IMAGE_SIZE_MB} MiB"
+    truncate -s "${IMAGE_SIZE_MB}M" "$IMAGE_PATH"
+    LOOP_DEV="$(losetup -f --show -P "$IMAGE_PATH")" \
+        || die "losetup a echoue -- le conteneur autorise-t-il les peripheriques loop ?"
+    TARGET_DEVICE="$LOOP_DEV"
+    DEV_BYTES=$(( IMAGE_SIZE_MB * 1048576 ))
+
+    # La cle reelle est inconnue a la construction : impossible de renseigner
+    # l'exclusion d'autosuspend USB. On la desactive, et claude-os-firstboot
+    # la reactivera une fois la cle identifiee.
+    USB_DENYLIST=""
+    USB_AUTOSUSPEND=0
+    ok "image exposee via $LOOP_DEV"
+
+else
+    # --- Mode peripherique --------------------------------------------------
+    # Section la plus sensible du script. Une erreur ici detruit le disque
+    # Windows -- exactement ce que le projet s'interdit. Chaque garde-fou
+    # ci-dessous est une raison independante de refuser d'ecrire.
+    TARGET_DEVICE="${TARGET_DEVICE_ARG:-$TARGET_DEVICE}"
+    if [ -z "$TARGET_DEVICE" ]; then
+        echo; lsblk -o NAME,SIZE,TYPE,TRAN,RM,MODEL,MOUNTPOINTS; echo
+        read -rp "Peripherique cible (ex. /dev/sdb) : " TARGET_DEVICE
+    fi
+
+    [ -b "$TARGET_DEVICE" ] || die "$TARGET_DEVICE n'est pas un peripherique bloc"
+    case "$TARGET_DEVICE" in
+        *[0-9]) die "$TARGET_DEVICE designe une partition. Indiquer le disque entier (ex. /dev/sdb)" ;;
+        /dev/nvme*|/dev/mmcblk*) die "$TARGET_DEVICE est un disque interne. Refus categorique." ;;
+    esac
+
+    DEV_NAME="$(basename "$TARGET_DEVICE")"
+
+    # Garde-fou 1 : le peripherique doit etre annonce comme USB par udev.
+    eval "$(udevadm info --query=property --name="$TARGET_DEVICE" \
+            | grep -E '^(ID_BUS|ID_VENDOR_ID|ID_MODEL_ID|ID_MODEL)=' | sed 's/^/UD_/')"
+    [ "${UD_ID_BUS:-}" = "usb" ] \
+        || die "$TARGET_DEVICE n'est pas sur le bus USB (ID_BUS=${UD_ID_BUS:-inconnu}). Refus."
+
+    # Garde-fou 2 : le noyau doit le declarer amovible.
+    [ "$(cat "/sys/block/$DEV_NAME/removable" 2>/dev/null)" = "1" ] \
+        || warn "le noyau ne declare pas $TARGET_DEVICE amovible (certains SSD USB non plus)"
+
+    # Garde-fou 3 : il ne doit porter aucun systeme de fichiers monte.
+    if lsblk -nro MOUNTPOINT "$TARGET_DEVICE" | grep -q .; then
+        lsblk -o NAME,SIZE,MOUNTPOINTS "$TARGET_DEVICE"
+        die "$TARGET_DEVICE porte des partitions montees. Les demonter d'abord."
+    fi
+
+    # Garde-fou 4 : il ne doit surtout pas heberger le systeme en cours.
+    ROOT_SRC="$(findmnt -no SOURCE / 2>/dev/null || true)"
+    ROOT_DISK="$(lsblk -nro PKNAME "$ROOT_SRC" 2>/dev/null | head -1 || true)"
+    [ -n "$ROOT_DISK" ] && [ "$ROOT_DISK" = "$DEV_NAME" ] \
+        && die "$TARGET_DEVICE heberge le systeme en cours d'execution. Refus."
+
+    # Garde-fou 5 : taille plausible pour une cle.
+    DEV_BYTES="$(blockdev --getsize64 "$TARGET_DEVICE")"
+    DEV_GB=$(( DEV_BYTES / 1000000000 ))
+    [ "$DEV_GB" -ge 32 ]   || die "$TARGET_DEVICE ne fait que ${DEV_GB} Go ; il en faut au moins 32."
+    [ "$DEV_GB" -le 2000 ] || die "$TARGET_DEVICE fait ${DEV_GB} Go -- trop gros pour une cle. Verifier la cible."
+
     echo
-    lsblk -o NAME,SIZE,TYPE,TRAN,RM,MODEL,MOUNTPOINTS
-    echo
-    read -rp "Peripherique cible (ex. /dev/sdb) : " TARGET_DEVICE
-fi
-
-[ -b "$TARGET_DEVICE" ] || die "$TARGET_DEVICE n'est pas un peripherique bloc"
-
-case "$TARGET_DEVICE" in
-    *[0-9]) die "$TARGET_DEVICE designe une partition. Indiquer le disque entier (ex. /dev/sdb)" ;;
-    /dev/nvme*|/dev/mmcblk*) die "$TARGET_DEVICE est un disque interne. Refus categorique." ;;
-esac
-
-DEV_NAME="$(basename "$TARGET_DEVICE")"
-
-# Garde-fou 1 : le peripherique doit etre annonce comme USB par udev.
-eval "$(udevadm info --query=property --name="$TARGET_DEVICE" \
-        | grep -E '^(ID_BUS|ID_VENDOR_ID|ID_MODEL_ID|ID_MODEL)=' | sed 's/^/UD_/')"
-[ "${UD_ID_BUS:-}" = "usb" ] \
-    || die "$TARGET_DEVICE n'est pas sur le bus USB (ID_BUS=${UD_ID_BUS:-inconnu}). Refus."
-
-# Garde-fou 2 : le noyau doit le declarer amovible.
-[ "$(cat "/sys/block/$DEV_NAME/removable" 2>/dev/null)" = "1" ] \
-    || warn "le noyau ne declare pas $TARGET_DEVICE amovible (certains SSD USB non plus)"
-
-# Garde-fou 3 : il ne doit porter aucun systeme de fichiers monte.
-if lsblk -nro MOUNTPOINT "$TARGET_DEVICE" | grep -q .; then
-    lsblk -o NAME,SIZE,MOUNTPOINTS "$TARGET_DEVICE"
-    die "$TARGET_DEVICE porte des partitions montees. Les demonter d'abord."
-fi
-
-# Garde-fou 4 : il ne doit surtout pas heberger le systeme en cours.
-ROOT_SRC="$(findmnt -no SOURCE / 2>/dev/null || true)"
-ROOT_DISK="$(lsblk -nro PKNAME "$ROOT_SRC" 2>/dev/null | head -1 || true)"
-[ -n "$ROOT_DISK" ] && [ "$ROOT_DISK" = "$DEV_NAME" ] \
-    && die "$TARGET_DEVICE heberge le systeme en cours d'execution. Refus."
-
-# Garde-fou 5 : taille plausible pour une cle.
-DEV_BYTES="$(blockdev --getsize64 "$TARGET_DEVICE")"
-DEV_GB=$(( DEV_BYTES / 1000000000 ))
-[ "$DEV_GB" -ge 32 ] || die "$TARGET_DEVICE ne fait que ${DEV_GB} Go ; il en faut au moins 32."
-[ "$DEV_GB" -le 2000 ] || die "$TARGET_DEVICE fait ${DEV_GB} Go -- trop gros pour une cle. Verifier la cible."
-
-MIN_MB=$(( SIZE_ESP + SIZE_ROOT + SIZE_HOME + 64 ))
-[ $(( DEV_BYTES / 1048576 )) -ge "$MIN_MB" ] \
-    || die "cle trop petite : ${MIN_MB} MiB requis par la configuration"
-
-echo
-printf '%s' "$c_yel"
-cat <<BANNER
-  ┌─────────────────────────────────────────────────────────────┐
-  │  TOUTES LES DONNEES DE CE PERIPHERIQUE SERONT DETRUITES      │
-  └─────────────────────────────────────────────────────────────┘
+    printf '%s' "$c_yel"
+    cat <<BANNER
+  +-------------------------------------------------------------+
+  |  TOUTES LES DONNEES DE CE PERIPHERIQUE SERONT DETRUITES      |
+  +-------------------------------------------------------------+
 BANNER
-printf '%s' "$c_off"
-printf '    Peripherique : %s\n' "$TARGET_DEVICE"
-printf '    Modele       : %s\n' "${UD_ID_MODEL:-inconnu}"
-printf '    Identifiant  : %s:%s\n' "${UD_ID_VENDOR_ID:-????}" "${UD_ID_MODEL_ID:-????}"
-printf '    Taille       : %s Go\n' "$DEV_GB"
-echo
-read -rp "    Retaper le chemin exact du peripherique pour confirmer : " confirm
-[ "$confirm" = "$TARGET_DEVICE" ] || die "confirmation non conforme -- rien n'a ete ecrit"
+    printf '%s' "$c_off"
+    printf '    Peripherique : %s\n' "$TARGET_DEVICE"
+    printf '    Modele       : %s\n' "${UD_ID_MODEL:-inconnu}"
+    printf '    Identifiant  : %s:%s\n' "${UD_ID_VENDOR_ID:-????}" "${UD_ID_MODEL_ID:-????}"
+    printf '    Taille       : %s Go\n' "$DEV_GB"
+    echo
+    read -rp "    Retaper le chemin exact du peripherique pour confirmer : " confirm
+    [ "$confirm" = "$TARGET_DEVICE" ] || die "confirmation non conforme -- rien n'a ete ecrit"
 
-USB_DENYLIST="${UD_ID_VENDOR_ID:-}:${UD_ID_MODEL_ID:-}"
-[ "$USB_DENYLIST" = ":" ] && USB_DENYLIST=""
-ok "cible validee ; exclusion TLP d'autosuspend : ${USB_DENYLIST:-<aucune>}"
+    # Ici la cle est connue : on peut exclure precisement son controleur de
+    # l'autosuspend USB, qui gelerait la racine du systeme.
+    USB_DENYLIST="${UD_ID_VENDOR_ID:-}:${UD_ID_MODEL_ID:-}"
+    [ "$USB_DENYLIST" = ":" ] && USB_DENYLIST=""
+    USB_AUTOSUSPEND=1
+    ok "cible validee ; exclusion TLP d'autosuspend : ${USB_DENYLIST:-<aucune>}"
+fi
 
 # ---------------------------------------------------------------------------
 # Mot de passe du compte
 # ---------------------------------------------------------------------------
 step "Compte utilisateur"
-while :; do
-    read -rsp "    Mot de passe pour '$USERNAME' : " PW1; echo
-    read -rsp "    Confirmer                     : " PW2; echo
-    [ -n "$PW1" ] && [ "$PW1" = "$PW2" ] && break
-    warn "mots de passe vides ou differents"
-done
+FORCE_PW_CHANGE=0
+if [ -n "${CLAUDE_OS_PASSWORD:-}" ]; then
+    PW1="$CLAUDE_OS_PASSWORD"
+    FORCE_PW_CHANGE=1
+    info "mot de passe pris dans CLAUDE_OS_PASSWORD ; changement impose a la 1re connexion"
+elif [ -t 0 ]; then
+    while :; do
+        read -rsp "    Mot de passe pour '$USERNAME' : " PW1; echo
+        read -rsp "    Confirmer                     : " PW2; echo
+        [ -n "$PW1" ] && [ "$PW1" = "$PW2" ] && break
+        warn "mots de passe vides ou differents"
+    done
+else
+    # Construction non interactive : l'image est publique, le mot de passe
+    # initial n'a donc aucune valeur de secret. Il doit imperativement etre
+    # change a la premiere connexion, ce que chage impose plus bas.
+    PW1="claude"
+    FORCE_PW_CHANGE=1
+    warn "construction non interactive : mot de passe initial 'claude'"
+    warn "il DOIT etre change a la premiere connexion (impose par chage)"
+fi
 
 # ---------------------------------------------------------------------------
 # Partitionnement
 # ---------------------------------------------------------------------------
-step "Partitionnement de $TARGET_DEVICE"
-wipefs -a "$TARGET_DEVICE" >/dev/null
-sgdisk --zap-all "$TARGET_DEVICE" >/dev/null
+step "Partitionnement"
+wipefs -a "$TARGET_DEVICE" >/dev/null 2>&1 || true
+sgdisk --zap-all "$TARGET_DEVICE" >/dev/null 2>&1 || true
+
+# Deux partitions seulement : ESP puis racine. Un /home distinct serait coince
+# entre la racine et la fin du support, donc impossible a agrandir au premier
+# demarrage -- or c'est precisement ce qu'il faut pouvoir faire quand une
+# image de 11 Gio arrive sur une cle de 256 Go.
+if [ "$MODE" = "image" ]; then
+    # La racine occupe tout le reste de l'image ; l'extension a la taille
+    # reelle du support a lieu au premier demarrage.
+    ROOT_END=0
+else
+    SECTOR_SZ=$(blockdev --getss "$TARGET_DEVICE")
+    TOTAL_SECT=$(( DEV_BYTES / SECTOR_SZ ))
+    ROOT_END=$(( TOTAL_SECT * FILL_PERCENT / 100 ))
+fi
 
 sgdisk \
     -n 1:0:+${SIZE_ESP}M   -t 1:ef00 -c 1:"CLAUDEOS-ESP"  \
-    -n 2:0:+${SIZE_ROOT}M  -t 2:8304 -c 2:"CLAUDEOS-ROOT" \
-    -n 3:0:+${SIZE_HOME}M  -t 3:8302 -c 3:"CLAUDEOS-HOME" \
+    -n 2:0:${ROOT_END}     -t 2:8304 -c 2:"claudeos-root" \
     "$TARGET_DEVICE" >/dev/null
 
-partprobe "$TARGET_DEVICE"; udevadm settle; sleep 2
+partprobe "$TARGET_DEVICE" >/dev/null 2>&1 || true
+partx -u "$TARGET_DEVICE" >/dev/null 2>&1 || true
+command -v udevadm >/dev/null 2>&1 && udevadm settle
+sleep 2
 
-# Les cles USB n'utilisent pas le suffixe p ; les lecteurs NVMe/MMC si. On
-# resout les noms plutot que de les supposer.
+# Les noms de partition varient : sdb1 pour une cle, loop0p1 pour un loop,
+# nvme0n1p1 ailleurs. On les resout plutot que de les deviner.
 mapfile -t PARTS < <(lsblk -nro NAME "$TARGET_DEVICE" | tail -n +2)
-[ "${#PARTS[@]}" -ge 3 ] || die "partitionnement incomplet : ${#PARTS[@]} partitions detectees"
-P_ESP="/dev/${PARTS[0]}"; P_ROOT="/dev/${PARTS[1]}"; P_HOME="/dev/${PARTS[2]}"
-ok "ESP=$P_ESP  root=$P_ROOT  home=$P_HOME"
-info "espace non alloue laisse au wear-leveling du controleur : $(( (DEV_BYTES/1048576 - MIN_MB) / 1024 )) GiB"
+[ "${#PARTS[@]}" -ge 2 ] || die "partitionnement incomplet : ${#PARTS[@]} partition(s) detectee(s)"
+P_ESP="/dev/${PARTS[0]}"; P_ROOT="/dev/${PARTS[1]}"
+ok "ESP=$P_ESP  racine=$P_ROOT"
+
+if [ "$MODE" = "device" ]; then
+    info "espace laisse hors partition (reserve d'usure) : $(( (DEV_BYTES/1048576) * (100-FILL_PERCENT) / 100 / 1024 )) Gio"
+fi
 
 step "Formatage"
-mkfs.vfat -F32 -n CLAUDEOS-EFI "$P_ESP" >/dev/null
-# -O ^has_journal serait tentant pour le flash, mais un arrachage de cle sans
-# journal corrompt le systeme de fichiers. On garde le journal et on espace
-# ses ecritures via commit=600 dans fstab.
+
+# La partition EFI est fabriquee comme un FICHIER image, peuple avec mtools,
+# puis recopie tel quel dans la partition. Elle n'est jamais montee.
+#
+# Ce detour evite d'exiger la prise en charge du FAT par le noyau de l'hote :
+# beaucoup de conteneurs de construction en sont depourvus, et rien ne
+# justifie que le build en depende.
+ESP_WORK="$(mktemp -d)"
+ESP_IMG="$ESP_WORK/esp.img"
+mkfs.vfat -F32 -n CLAUDE-EFI -C "$ESP_IMG" $(( SIZE_ESP * 1024 )) >/dev/null
+
+# Desactiver le journal ext4 menagerait le flash, mais un arrachage de cle
+# sans journal corrompt le systeme de fichiers. On garde le journal et on
+# espace ses ecritures via commit=600 dans fstab.
 mkfs.ext4 -q -F -L claudeos-root -m 1 "$P_ROOT"
-mkfs.ext4 -q -F -L claudeos-home -m 0 "$P_HOME"
 ok "systemes de fichiers crees"
 
-UUID_ESP="$(blkid -s UUID -o value "$P_ESP")"
+UUID_ESP="$(blkid -s UUID -o value "$ESP_IMG")"
 UUID_ROOT="$(blkid -s UUID -o value "$P_ROOT")"
-UUID_HOME="$(blkid -s UUID -o value "$P_HOME")"
+[ -n "$UUID_ROOT" ] && [ -n "$UUID_ESP" ] || die "UUID illisibles apres formatage"
+info "UUID racine $UUID_ROOT / ESP $UUID_ESP"
 
-# ---------------------------------------------------------------------------
-# Montage
-# ---------------------------------------------------------------------------
 step "Montage sur $MNT"
 mkdir -p "$MNT"
 mount -o noatime "$P_ROOT" "$MNT"
-mkdir -p "$MNT/home" "$MNT/boot/efi"
-mount -o noatime "$P_HOME" "$MNT/home"
-mount -o umask=0077 "$P_ESP" "$MNT/boot/efi"
+# Simple repertoire pendant la construction ; il deviendra le point de
+# montage de l'ESP une fois le systeme demarre.
+mkdir -p "$MNT/boot/efi"
 ok "monte"
 
 # ---------------------------------------------------------------------------
@@ -218,6 +321,15 @@ mount -t proc  proc   "$MNT/proc"
 mount -t sysfs sysfs  "$MNT/sys"
 mount -t tmpfs tmpfs  "$MNT/run"
 cp /etc/resolv.conf "$MNT/etc/resolv.conf"
+
+# Autorite de certification supplementaire, si l'on construit derriere un
+# proxy TLS interceptant : sans elle, la recuperation de la cle de signature
+# de Claude Desktop echoue a la verification du certificat.
+if [ -n "${EXTRA_CA_CERT:-}" ] && [ -r "$EXTRA_CA_CERT" ]; then
+    mkdir -p "$MNT/usr/local/share/ca-certificates"
+    cp "$EXTRA_CA_CERT" "$MNT/usr/local/share/ca-certificates/build-proxy.crt"
+    info "autorite de certification supplementaire installee dans le chroot"
+fi
 
 in_chroot() { chroot "$MNT" /usr/bin/env DEBIAN_FRONTEND=noninteractive LC_ALL=C "$@"; }
 
@@ -250,6 +362,7 @@ in_chroot apt-get install -y --no-install-recommends "${PKGS[@]}" >>"$LOGFILE" 2
     || die "installation des paquets echouee -- voir $LOGFILE"
 in_chroot dpkg -l linux-image-amd64 shim-signed grub-efi-amd64-signed >/dev/null \
     || die "paquets d'amorcage absents -- Secure Boot serait impossible"
+[ -n "${EXTRA_CA_CERT:-}" ] && in_chroot update-ca-certificates >/dev/null 2>&1
 ok "paquets installes"
 
 if [ "$ENABLE_COWORK" = "yes" ]; then
@@ -295,15 +408,16 @@ info "modules blacklistes au noyau : ${BLACKLIST_MODS:-<aucun>}"
 grep -rlZ '@[A-Z_]*@' "$MNT/etc" "$MNT/usr/local" 2>/dev/null | while IFS= read -r -d '' f; do
     sed -i \
         -e "s|@UUID_ROOT@|$UUID_ROOT|g" \
-        -e "s|@UUID_HOME@|$UUID_HOME|g" \
         -e "s|@UUID_ESP@|$UUID_ESP|g" \
         -e "s|@USB_DENYLIST@|$USB_DENYLIST|g" \
+        -e "s|@USB_AUTOSUSPEND@|$USB_AUTOSUSPEND|g" \
         -e "s|@DGPU_BDF@|$DGPU_BDF|g" \
         -e "s|@CMDLINE_DGPU@|$CMDLINE_DGPU|g" \
         "$f"
 done
 
 echo "DGPU_STRATEGY=\"$DGPU_STRATEGY\"" > "$MNT/etc/default/claude-os-dgpu"
+echo "FILL_PERCENT=$FILL_PERCENT" > "$MNT/etc/default/claude-os-firstboot"
 
 if [ "$BLACKLIST_VMD" = "yes" ]; then
     cat > "$MNT/etc/modprobe.d/claude-os-vmd.conf" <<'VMDEOF'
@@ -348,12 +462,15 @@ in_chroot useradd -m -s /bin/bash -G sudo,audio,video,netdev,plugdev \
     -c "$USER_FULLNAME" "$USERNAME"
 echo "$USERNAME:$PW1" | in_chroot chpasswd
 in_chroot passwd -l root >/dev/null   # pas de connexion root directe ; sudo suffit
+if [ "$FORCE_PW_CHANGE" = "1" ]; then
+    in_chroot chage -d 0 "$USERNAME"   # expire le mot de passe : changement force
+fi
 unset PW1 PW2
 ok "compte '$USERNAME' cree"
 
 step "Activation des services"
 in_chroot systemctl enable lightdm NetworkManager tlp thermald \
-    claude-os-dgpu-power.service >/dev/null 2>&1 || true
+    claude-os-dgpu-power.service claude-os-firstboot.service >/dev/null 2>&1 || true
 # TLP et power-profiles-daemon se marchent dessus ; TLP l'emporte.
 in_chroot systemctl mask power-profiles-daemon.service >/dev/null 2>&1 || true
 in_chroot systemctl mask systemd-rfkill.service systemd-rfkill.socket >/dev/null 2>&1 || true
@@ -436,16 +553,41 @@ for f in EFI/BOOT/grubx64.efi EFI/debian/grub.cfg; do
                               || warn "absent : $f -- GRUB pourrait ne pas trouver sa configuration"
 done
 
-# Aucune entree NVRAM ne doit avoir ete creee.
-if command -v efibootmgr >/dev/null 2>&1 && efibootmgr 2>/dev/null | grep -qi 'claude\|debian'; then
-    warn "une entree NVRAM 'debian' existe -- verifier qu'elle preexistait a ce build"
+# Aucune entree NVRAM ne doit avoir ete creee. Le chroot n'a pas d'efivarfs
+# monte : grub-install y etait materiellement hors d'etat d'ecrire.
+if [ "$MODE" = "device" ]; then
+    if command -v efibootmgr >/dev/null 2>&1 && efibootmgr 2>/dev/null | grep -qi 'claude'; then
+        warn "une entree NVRAM 'claude' existe -- inattendu, a verifier"
+    else
+        ok "aucune entree NVRAM creee : l'amorcage de Windows est intact"
+    fi
 else
-    ok "aucune entree NVRAM creee : l'amorcage de Windows est intact"
+    ok "mode image : aucun acces a la NVRAM par construction"
 fi
 
 echo
 info "Contenu de l'ESP :"
 find "$MNT/boot/efi" -type f | sed "s|$MNT/boot/efi|      |" | sort
+
+step "Ecriture de la partition EFI"
+( cd "$MNT/boot/efi" && mcopy -s -i "$ESP_IMG" ./* :: ) \
+    || die "mcopy a echoue -- impossible de peupler la partition EFI"
+dd if="$ESP_IMG" of="$P_ESP" bs=1M conv=fsync status=none \
+    || die "ecriture de la partition EFI impossible"
+
+# Relecture depuis la partition elle-meme : on verifie ce qui a reellement
+# ete ecrit, pas ce qu'on croit avoir ecrit.
+if mdir -i "$P_ESP" -/ :: >/dev/null 2>&1; then
+    ok "partition EFI ecrite et relue"
+    mdir -i "$P_ESP" -/ :: 2>/dev/null | grep -iE 'BOOTX64|grubx64|grub.cfg' | sed 's/^/      /' || true
+else
+    die "la partition EFI est illisible apres ecriture"
+fi
+
+# Les fichiers ne servent plus sur la racine : /boot/efi redevient un point
+# de montage vide, comme le declare fstab.
+rm -rf "${MNT:?}/boot/efi"/*
+rm -rf "$ESP_WORK"
 
 # ---------------------------------------------------------------------------
 # Finalisation
@@ -462,20 +604,40 @@ sync
 echo
 printf '%s' "$c_grn"
 cat <<DONEEOF
-  ┌─────────────────────────────────────────────────────────────┐
-  │  Claude-OS construit                                        │
-  └─────────────────────────────────────────────────────────────┘
+  +-------------------------------------------------------------+
+  |  Claude-OS construit                                        |
+  +-------------------------------------------------------------+
 DONEEOF
 printf '%s' "$c_off"
-cat <<NEXTEOF
+
+if [ "$MODE" = "image" ]; then
+    cleanup; trap - EXIT
+    IMG_SIZE="$(du -h "$IMAGE_PATH" | cut -f1)"
+    cat <<IMGEOF
+    Image : $IMAGE_PATH ($IMG_SIZE)
+
+    L'ecrire ensuite sur la cle depuis n'importe quel systeme :
+      Windows : balenaEtcher, ou Rufus en mode "Image DD"
+      Linux   : dd if=... of=/dev/sdX bs=4M status=progress conv=fsync
+
+    La partition racine s'adaptera d'elle-meme a la taille de la cle
+    au premier demarrage.
+IMGEOF
+else
+    cat <<DEVEOF
     Pour demarrer : redemarrer, maintenir Echap (ou F8) et choisir la cle
     dans le menu du firmware. Ne rien changer dans le BIOS.
+DEVEOF
+fi
+
+cat <<NEXTEOF
 
     Au premier demarrage :
-      1. verifier l'etat du dGPU :   journalctl -b -u claude-os-dgpu-power
-      2. verifier Secure Boot :      mokutil --sb-state
-      3. verifier l'acceleration :   vainfo
-      4. mesurer la consommation :   powertop
+      1. etat du dGPU        journalctl -b -u claude-os-dgpu-power
+      2. Secure Boot         mokutil --sb-state
+      3. taille de la racine df -h /
+      4. acceleration video  vainfo
+      5. consommation reelle sudo powertop
 
     Journal complet : $LOGFILE
 NEXTEOF

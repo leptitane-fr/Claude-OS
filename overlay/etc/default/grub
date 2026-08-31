@@ -17,7 +17,10 @@ GRUB_DISTRIBUTOR="Claude-OS"
 #                       sur image fixe, le GPU se rendort. Gain reel sur
 #                       batterie ; a passer a 0 en cas de scintillement.
 GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3 @CMDLINE_DGPU@ nmi_watchdog=0 i915.enable_psr=1"
-GRUB_CMDLINE_LINUX=""
+# console=tty0 garde l'ecran comme console principale ; ttyS0 permet en plus
+# a l'integration continue de lire le demarrage sous QEMU. Sans port serie
+# physique, la seconde est simplement ignoree.
+GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200"
 
 # Indispensable : recherche de la racine par UUID.
 GRUB_DISABLE_LINUX_UUID=false

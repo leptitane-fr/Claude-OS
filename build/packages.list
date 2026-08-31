@@ -16,7 +16,12 @@ efibootmgr                    # inspection uniquement -- jamais d'ecriture NVRAM
 # --- Firmwares (composant non-free-firmware) --------------------------------
 intel-microcode               # correctifs CPU ; aussi des gains d'energie
 firmware-linux-free
-firmware-misc-nonfree
+# Trixie a scinde linux-firmware par constructeur. On ne prend que l'Intel :
+# le paquet fourre-tout firmware-misc-nonfree pese plusieurs centaines de Mo
+# de firmwares AMD, Qualcomm et autres, sans aucune utilite ici.
+firmware-intel-graphics       # GuC/HuC : decodage video efficace sur l'iGPU
+firmware-intel-misc
+firmware-intel-sound
 firmware-iwlwifi              # Wi-Fi Intel AX
 firmware-sof-signed           # audio Alder Lake : muet sans ce paquet
 
@@ -117,4 +122,5 @@ curl
 gnupg
 git
 rsync
+gdisk                         # sgdisk : extension de la racine au 1er demarrage
 acpica-tools                  # acpidump/iasl : analyse du dGPU sur site

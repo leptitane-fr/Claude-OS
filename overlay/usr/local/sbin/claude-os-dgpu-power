@@ -17,7 +17,7 @@
 
 set -uo pipefail
 
-STRATEGY="pr3"
+STRATEGY="auto"
 [ -r /etc/default/claude-os-dgpu ] && . /etc/default/claude-os-dgpu
 
 log() { echo "claude-os-dgpu: $*"; }
@@ -42,6 +42,23 @@ BRIDGE_PATH="/sys/bus/pci/devices/$BRIDGE"
 
 log "dGPU $BDF sous le pont $BRIDGE ; etat initial $(cat "$GPU/power_state" 2>/dev/null)"
 
+# --- Choix automatique de la methode ----------------------------------------
+# L'image est fabriquee sans connaitre la machine cible : plutot que de figer
+# une methode a la construction, on interroge le materiel au demarrage.
+if [ "$STRATEGY" = "auto" ]; then
+    if [ -e /sys/devices/platform/asus-nb-wmi/dgpu_disable ] \
+    || [ -e /sys/devices/platform/asus-nb-wmi/gpu_mux_mode ]; then
+        STRATEGY="mux"
+        log "auto -> mux (interface asus-nb-wmi presente : coupure cote firmware)"
+    elif ls "$BRIDGE_PATH/firmware_node/" 2>/dev/null | grep -q 'power_resource'; then
+        STRATEGY="pr3"
+        log "auto -> pr3 (le pont expose des power resources ACPI : D3cold accessible)"
+    else
+        STRATEGY="remove"
+        log "auto -> remove (aucune power resource ACPI : repli sur le retrait PCI)"
+    fi
+fi
+
 # --- Voie ideale : desactivation cote firmware ------------------------------
 # Si le Vivobook expose un MUX, le firmware coupe la carte lui-meme. Rien
 # n'egale cette methode : le peripherique disparait entierement du bus.
@@ -54,7 +71,7 @@ if [ "$STRATEGY" = "mux" ]; then
         fi
     done
     log "MUX demande mais indisponible ; repli sur la methode pr3"
-    STRATEGY="pr3"
+    STRATEGY="auto"
 fi
 
 # --- Detacher tout pilote qui se serait accroche ----------------------------
