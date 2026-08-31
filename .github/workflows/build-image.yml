@@ -38,7 +38,12 @@ jobs:
       - name: Construire l'image
         env:
           CLAUDE_OS_PASSWORD: claude
-        run: sudo -E ./build/build.sh --image /mnt/build/claude-os.img
+        run: |
+          sudo -E ./build/build.sh --image /mnt/build/claude-os.img
+          # Le build tourne sous sudo : l'image appartient a root. Les etapes
+          # suivantes s'executent sous l'utilisateur runner, et xz echoue en
+          # tentant de donner au fichier produit le groupe du fichier source.
+          sudo chown "$USER:$USER" /mnt/build/claude-os.img
 
       # ---------------------------------------------------------------------
       # Verification de la chaine Secure Boot.
@@ -62,7 +67,9 @@ jobs:
       - name: Compresser
         run: |
           cd /mnt/build
-          xz -9 -T0 --verbose claude-os.img
+          # Sans relever la limite memoire, xz retombe a un seul fil
+          # (« Reduced the number of threads ») et met 25 minutes.
+          xz -9 -T0 --memlimit-compress=75% --verbose claude-os.img
           sha256sum claude-os.img.xz > claude-os.img.xz.sha256
           ls -lh claude-os.img.xz
 
@@ -81,15 +88,6 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: claude-os-image
-          path: |
-            /mnt/build/claude-os.img.xz
-            /mnt/build/claude-os.img.xz.sha256
-          retention-days: 14
-          compression-level: 0     # deja compresse en xz
-
       - name: Publier la release
         if: startsWith(github.ref, 'refs/tags/') || inputs.publier
         env:
@@ -106,3 +104,12 @@ jobs:
           Demarrage verifie sous Secure Boot applique (OVMF avec cles Microsoft).
           Mot de passe initial : \`claude\` -- changement impose a la premiere connexion." \
             || gh release upload "$TAG" /mnt/build/claude-os.img.xz --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: claude-os-image
+          path: |
+            /mnt/build/claude-os.img.xz
+            /mnt/build/claude-os.img.xz.sha256
+          retention-days: 14
+          compression-level: 0     # deja compresse en xz
