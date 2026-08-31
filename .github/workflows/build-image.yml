@@ -53,6 +53,16 @@ jobs:
       # refuserait de demarrer : atteindre l'invite de connexion prouve que
       # toute la chaine shim -> GRUB -> noyau est valide.
       # ---------------------------------------------------------------------
+      # Sans cette etape, un echec ne laisse qu'un message d'une ligne : le
+      # detail reste dans build.log, sur un runner deja detruit. C'est ce qui
+      # a rendu deux echecs precedents indiagnosticables.
+      - name: Publier le journal en cas d'echec
+        if: failure()
+        run: |
+          echo "::group::build.log (300 dernieres lignes)"
+          sudo tail -300 build.log 2>/dev/null || echo "(aucun build.log)"
+          echo "::endgroup::"
+
       # Le test vit dans tools/boot-test.sh : une seule definition, utilisable
       # a l'identique en local et ici. OVMF_VARS_4M.ms.fd embarque les cles
       # Microsoft et applique reellement Secure Boot -- un shim mal signe

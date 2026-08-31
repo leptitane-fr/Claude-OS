@@ -381,8 +381,21 @@ info "${#PKGS[@]} paquets a installer -- suivre la progression : tail -f $LOGFIL
 
 # Le trousseau et l'applet reseau ont besoin de leurs recommandes pour
 # fonctionner ; le reste est installe sans, conformement a apt.conf.d.
-in_chroot apt-get install -y --no-install-recommends "${PKGS[@]}" >>"$LOGFILE" 2>&1 \
-    || die "installation des paquets echouee -- voir $LOGFILE"
+# Les miroirs Debian renvoient occasionnellement une erreur passagere, et
+# perdre une construction entiere pour cela n'a pas de sens. On reessaie,
+# en journalisant chaque tentative pour qu'un echec reel reste lisible.
+apt_ok=0
+for attempt in 1 2 3; do
+    if in_chroot apt-get install -y --no-install-recommends "${PKGS[@]}" >>"$LOGFILE" 2>&1; then
+        apt_ok=1; break
+    fi
+    warn "tentative $attempt echouee"
+    tail -5 "$LOGFILE" | sed 's/^/      /'
+    [ "$attempt" -lt 3 ] || break
+    in_chroot apt-get update -qq >>"$LOGFILE" 2>&1 || true
+    sleep $(( attempt * 10 ))
+done
+[ "$apt_ok" -eq 1 ] || die "installation des paquets echouee apres 3 tentatives -- voir $LOGFILE"
 in_chroot dpkg -l linux-image-amd64 shim-signed grub-efi-amd64-signed >/dev/null \
     || die "paquets d'amorcage absents -- Secure Boot serait impossible"
 [ -n "${EXTRA_CA_CERT:-}" ] && in_chroot update-ca-certificates >/dev/null 2>&1
