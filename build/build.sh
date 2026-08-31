@@ -656,6 +656,51 @@ rm -rf "$ESP_WORK"
 # ---------------------------------------------------------------------------
 # Finalisation
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Auto-controle du systeme construit
+#
+# debootstrap --variant=minbase produit un systeme tres reduit, et
+# --no-install-recommends n'y ajoute rien d'implicite. Un outil peut donc
+# manquer sans qu'aucune etape n'echoue : le defaut n'apparait qu'au premier
+# demarrage sur la machine cible, quand il est trop tard. On verifie ici la
+# presence effective de ce dont le systeme depend au demarrage.
+# ---------------------------------------------------------------------------
+step "Auto-controle du systeme construit"
+selftest_fail=0
+
+for b in fsck.ext4 resize2fs sgdisk partx udevadm chromium tlp; do
+    if in_chroot sh -c "command -v $b" >/dev/null 2>&1; then
+        ok "present : $b"
+    else
+        warn "ABSENT : $b"
+        selftest_fail=1
+    fi
+done
+
+# resize2fs merite une mention a part : sans lui, le premier demarrage
+# agrandit la partition mais pas le systeme de fichiers, et l'utilisateur
+# perd la quasi-totalite de sa cle sans le moindre message d'erreur.
+in_chroot sh -c "command -v resize2fs" >/dev/null 2>&1 \
+    || warn "sans resize2fs, la racine restera a sa taille d'image"
+
+[ -L "$MNT/etc/systemd/system/display-manager.service" ] \
+    && ok "session graphique : $(basename "$(readlink "$MNT/etc/systemd/system/display-manager.service")")" \
+    || { warn "aucun gestionnaire de session actif"; selftest_fail=1; }
+
+for svc in claude-os-dgpu-power claude-os-firstboot tlp NetworkManager; do
+    if find "$MNT/etc/systemd/system" -name "${svc}.service" -path '*.wants*' \
+         | grep -q .; then
+        ok "active : $svc"
+    else
+        warn "NON ACTIVE : $svc"
+        selftest_fail=1
+    fi
+done
+
+[ "$selftest_fail" -eq 0 ] \
+    && ok "auto-controle complet" \
+    || die "auto-controle en echec -- l'image ne fonctionnerait pas correctement"
+
 step "Finalisation"
 rm -f "$MNT/usr/sbin/policy-rc.d"
 in_chroot apt-get clean

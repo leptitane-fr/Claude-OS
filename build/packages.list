@@ -28,6 +28,13 @@ firmware-sof-signed           # audio Alder Lake : muet sans ce paquet
 # --- Base systeme -----------------------------------------------------------
 systemd
 systemd-timesyncd
+# e2fsprogs n'est PAS inclus par debootstrap --variant=minbase, et rien
+# ci-dessous ne l'entraine sans les recommandes. Sans lui : pas de fsck.ext4
+# au demarrage, et surtout pas de resize2fs -- le premier demarrage
+# agrandirait la partition sans pouvoir etendre le systeme de fichiers,
+# laissant 240 Go inutilisables sur la cle.
+e2fsprogs
+dosfstools                    # fsck.vfat pour la partition EFI
 systemd-zram-generator        # swap compresse en RAM, aucune ecriture flash
 dbus
 sudo
