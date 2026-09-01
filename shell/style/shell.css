@@ -150,3 +150,134 @@ window.dark .status-battery-level { color: @d-text-dim; }
 }
 
 window.dark .status-sep { background-color: @d-surface-sunk; }
+
+/* La pilule entière est un bouton : on retire tout le chrome que GTK
+   applique par défaut à menubutton > button, pour que la seule surface
+   visible reste celle dessinée par .status. */
+menubutton.status > button {
+  background: none;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Retour au survol : assez pour dire « ceci se clique », assez discret pour
+   ne pas transformer une zone d'information en bouton criard. */
+menubutton.status:hover   { background-color: @l-surface-alt; }
+/* :checked = panneau ouvert. GTK pose cet état sur le menubutton tant que
+   son popover est affiché ; on s'en sert pour montrer d'où sort le
+   panneau. */
+menubutton.status:active,
+menubutton.status:checked { background-color: @l-surface-sunk; }
+
+window.dark menubutton.status:hover   { background-color: @d-surface-alt; }
+window.dark menubutton.status:active,
+window.dark menubutton.status:checked { background-color: @d-surface-sunk; }
+
+/* -------------------------------------------------------------------------
+   Réglages rapides — panneau ouvert au clic sur la barre d'état
+
+   Rien de tout ceci n'est visible au repos. C'est la raison d'être du
+   panneau : la barre reste muette, le détail se demande.
+   ------------------------------------------------------------------------- */
+
+/* GTK dessine le fond du popover sur son nœud « contents ». C'est là que
+   doivent aller le rayon et l'ombre, pas sur le popover lui-même. */
+popover.qs-popover > contents {
+  background-color: @l-surface;
+  border: 1px solid @l-border;
+  border-radius: 20px;
+  padding: 12px;
+  box-shadow: 0 12px 36px @l-shadow,
+              0 2px   8px alpha(#000000, 0.12);
+}
+
+window.dark popover.qs-popover > contents {
+  background-color: @d-surface;
+  border-color: @d-border;
+  box-shadow: 0 12px 36px @d-shadow,
+              0 2px   8px alpha(#000000, 0.35);
+}
+
+/* Largeur fixe : un panneau qui change de taille selon le nom du réseau
+   connecté donne une impression d'instabilité. */
+.qs { min-width: 296px; }
+
+/* --- Bascules ----------------------------------------------------------- */
+
+.qs-tile {
+  /* « background: none » d'abord, et ce n'est pas cosmétique : Adwaita
+     peint les boutons avec un background-IMAGE, qui recouvre tout
+     background-color qu'on poserait dessous. Sans cette remise à zéro les
+     deux pastilles restent blanches quoi qu'on écrive ensuite — constaté à
+     l'écran, puis mesuré au pixel. */
+  background: none;
+  background-color: @l-surface-alt;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 16px;
+  box-shadow: none;
+  transition: background-color 120ms ease-out;
+}
+
+window.dark .qs-tile { background-color: @d-surface-alt; }
+
+.qs-tile:hover             { background-color: @l-surface-sunk; }
+window.dark .qs-tile:hover { background-color: @d-surface-sunk; }
+
+/* Activé : le seul endroit du panneau où l'accent apparaît. Une bascule se
+   lit d'un coup d'œil ou elle ne sert à rien.
+
+   Le sélecteur sombre est répété ici exprès : « window.dark .qs-tile » est
+   plus spécifique que « .qs-tile.on », et l'emporterait donc en thème
+   sombre, laissant la bascule allumée grise. */
+.qs-tile.on,
+window.dark .qs-tile.on             { background-color: @accent; }
+.qs-tile.on:hover,
+window.dark .qs-tile.on:hover       { background-color: @accent-hover; }
+
+.qs-tile.on .qs-tile-icon,
+.qs-tile.on .qs-tile-name,
+.qs-tile.on .qs-tile-state,
+window.dark .qs-tile.on .qs-tile-icon,
+window.dark .qs-tile.on .qs-tile-name,
+window.dark .qs-tile.on .qs-tile-state { color: #ffffff; }
+
+.qs-tile.on .qs-tile-state,
+window.dark .qs-tile.on .qs-tile-state { opacity: 0.82; }
+
+.qs-tile:disabled            { opacity: 0.42; }
+
+.qs-tile-icon  { color: @l-text; }
+.qs-tile-name  { font-size: 13px; font-weight: 500; color: @l-text; }
+.qs-tile-state { font-size: 11px; color: @l-text-dim; }
+
+window.dark .qs-tile-icon  { color: @d-text; }
+window.dark .qs-tile-name  { color: @d-text; }
+window.dark .qs-tile-state { color: @d-text-dim; }
+
+/* --- Carte batterie ------------------------------------------------------ */
+
+.qs-card {
+  background: none;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background-color: @l-surface-alt;
+}
+
+window.dark .qs-card { background-color: @d-surface-alt; }
+
+.qs-battery-icon   { color: @l-text; }
+.qs-battery-pct    { font-size: 20px; font-weight: 500; color: @l-text; }
+/* La consommation en watts vit ici : lisible quand on la cherche, absente
+   le reste du temps. */
+.qs-battery-detail { font-size: 12px; color: @l-text-dim; }
+
+window.dark .qs-battery-icon   { color: @d-text; }
+window.dark .qs-battery-pct    { color: @d-text; }
+window.dark .qs-battery-detail { color: @d-text-dim; }

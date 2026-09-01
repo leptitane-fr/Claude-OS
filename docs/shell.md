@@ -45,6 +45,9 @@ Règles suivies sans exception :
   est lue directement dans `sysfs`, sans le démon UPower — un processus de
   plus en mémoire pour une valeur qui tient dans deux fichiers texte ne se
   justifie pas.
+- **Les watts ne sont mesurés que panneau ouvert.** La seule minuterie
+  périodique du panneau démarre à son ouverture et s'arrête à sa
+  fermeture.
 - **Le réseau ne consulte rien.** Il réagit aux signaux D-Bus de
   NetworkManager, donc uniquement quand l'état change réellement.
 - **Aucun processus qui tourne pour rien.** Le lanceur ne réside pas en
@@ -60,6 +63,8 @@ shell/
   style/shell.css      règles communes aux composants
   src/dock.c           dock central                        (fait)
   src/status.c         barre d'état bas-droite             (fait)
+  src/panel.c          réglages rapides, ouverts au clic   (fait)
+  src/sysfs.c          lecture batterie, partagée          (fait)
   src/launcher.c       lanceur d'applications              (à venir)
   test-render.sh       banc d'essai visuel sans écran
 ```
@@ -84,6 +89,57 @@ hérités** (`web-browser`, `utilities-terminal`, `system-file-manager`) que
 la plupart des fichiers `.desktop` déclarent encore, et affiche un
 pictogramme générique à leur place. Constaté à l'écran, pas supposé.
 Papirus les conserve.
+
+## Réglages rapides : tout au clic, rien au repos
+
+La barre d'état ne montre que l'heure, l'état de la connexion et le niveau
+de batterie. Le reste — bascules Wi-Fi et Bluetooth, consommation
+instantanée — n'apparaît qu'au clic sur la barre, dans un panneau qui se
+referme aussitôt. Une information permanente qu'on ne consulte pas est du
+bruit, et une valeur rafraîchie en permanence est de l'énergie perdue.
+
+C'est aussi ce qui rend la mesure de consommation acceptable : **la
+minuterie des watts ne tourne que pendant que le panneau est ouvert.**
+Elle démarre sur le signal `show` du popover et s'arrête sur `closed`.
+
+### La consommation en watts
+
+Deux conventions coexistent dans `sysfs` selon le pilote ACPI :
+
+| Fichiers | Unité | Calcul |
+|---|---|---|
+| `power_now` | µW | ÷ 10⁶ |
+| `current_now` × `voltage_now` | µA × µV | ÷ 10¹² |
+
+Ce Vivobook expose la seconde. Mesure de référence relevée sur la machine :
+0,247 A × 12,363 V = **3,05 W** au repos, écran allumé. Le signe de
+`current_now` n'étant pas normalisé entre pilotes, on prend la valeur
+absolue et c'est `status` qui donne le sens.
+
+### Les bascules ne mentent pas
+
+Un clic ne bascule pas l'affichage : il écrit la propriété
+(`WirelessEnabled` chez NetworkManager, `Powered` sur l'adaptateur BlueZ)
+et l'affichage suit le **signal renvoyé par le service**. Si polkit refuse
+ou si un interrupteur matériel bloque la radio, la bascule reste
+visiblement dans son état réel.
+
+`WirelessHardwareEnabled` est lu en plus : quand il est faux, aucun
+logiciel ne peut rallumer la radio, et la bascule est grisée plutôt que
+simplement « désactivé ». Services absents : les deux bascules affichent
+« Indisponible » et la carte batterie « Aucune batterie détectée ».
+
+### Deux pièges rencontrés, tous deux mesurés
+
+**Adwaita peint les boutons avec un `background-image`**, qui recouvre tout
+`background-color` posé dessous. Sans `background: none` en préambule, les
+deux pastilles restaient blanches quoi qu'on écrive ensuite.
+
+**`g_variant_iter_loop` libère lui-même les valeurs qu'il a posées**, au
+début de l'itération suivante. Un `g_autoptr` sur l'une d'elles les
+libérerait une seconde fois — la recherche de l'adaptateur BlueZ utilise
+donc des pointeurs nus, et ne libère à la main qu'en cas de sortie
+anticipée.
 
 ## Zones réservées : le piège de l'empilement
 

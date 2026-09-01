@@ -26,6 +26,8 @@ executable('claude-os-dock',
 
 executable('claude-os-status',
   'src/status.c',
+  'src/panel.c',
+  'src/sysfs.c',
   dependencies : [gtk, layershell, giounix],
   install : true)
 

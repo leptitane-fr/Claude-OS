@@ -21,6 +21,11 @@
 #include <gtk/gtk.h>
 #include <gtk4-layer-shell.h>
 
+#include "panel.h"
+#include "sysfs.h"
+
+#include <stdlib.h>            /* atoi */
+
 #define BAT_LOW_PERCENT 20      /* seuil d'alerte visuelle                   */
 
 typedef struct {
@@ -31,52 +36,20 @@ typedef struct {
 } Status;
 
 /* -------------------------------------------------------------------------
- * Batterie — lecture directe de sysfs
- *
- * Pas de dependance a UPower : un demon de plus en memoire pour une valeur
- * qui tient dans deux fichiers texte ne se justifie pas ici.
+ * Batterie — la lecture de sysfs est partagee avec le panneau (sysfs.c).
  * ------------------------------------------------------------------------- */
-static char *
-sysfs_read (const char *dir, const char *file)
-{
-    g_autofree char *path = g_build_filename (dir, file, NULL);
-    char *content = NULL;
-    if (!g_file_get_contents (path, &content, NULL, NULL))
-        return NULL;
-    return g_strstrip (content);
-}
-
-/* Trouve la premiere batterie. Le nom varie selon les machines : BAT0 sur
- * beaucoup de portables, BAT1 sur ce Vivobook, BATC ailleurs. */
-static char *
-battery_dir (void)
-{
-    const char *base = "/sys/class/power_supply";
-    g_autoptr(GDir) dir = g_dir_open (base, 0, NULL);
-    if (dir == NULL)
-        return NULL;
-
-    const char *name;
-    while ((name = g_dir_read_name (dir)) != NULL) {
-        if (!g_str_has_prefix (name, "BAT"))
-            continue;
-        return g_build_filename (base, name, NULL);
-    }
-    return NULL;
-}
-
 static void
 battery_update (Status *st)
 {
-    g_autofree char *dir = battery_dir ();
+    g_autofree char *dir = shell_battery_dir ();
     if (dir == NULL) {
         gtk_widget_set_visible (st->bat_icon, FALSE);
         gtk_widget_set_visible (st->bat_level, FALSE);
         return;
     }
 
-    g_autofree char *cap_s    = sysfs_read (dir, "capacity");
-    g_autofree char *status_s = sysfs_read (dir, "status");
+    g_autofree char *cap_s    = shell_sysfs_read (dir, "capacity");
+    g_autofree char *status_s = shell_sysfs_read (dir, "status");
     if (cap_s == NULL)
         return;
 
@@ -220,15 +193,30 @@ icon (const char *name, int size)
     return img;
 }
 
+typedef struct {
+    gboolean dark;
+    gboolean apercu;    /* valeurs fixes dans le panneau                     */
+    gboolean ouvrir;    /* ouvre le panneau au demarrage                     */
+} Options;
+
+/* En mode apercu seulement : ouvre le panneau tout seul pour que le banc
+ * d'essai puisse le capturer. */
+static gboolean
+open_panel_once (gpointer button)
+{
+    gtk_menu_button_popup (GTK_MENU_BUTTON (button));
+    return G_SOURCE_REMOVE;
+}
+
 static void
 on_activate (GtkApplication *app, gpointer user_data)
 {
-    gboolean dark = GPOINTER_TO_INT (user_data);
+    Options *opt = user_data;
     Status *st = g_new0 (Status, 1);
 
     GtkWidget *window = gtk_application_window_new (app);
     gtk_widget_add_css_class (window, "shell");
-    if (dark)
+    if (opt->dark)
         gtk_widget_add_css_class (window, "dark");
 
     gtk_layer_init_for_window (GTK_WINDOW (window));
@@ -248,13 +236,14 @@ on_activate (GtkApplication *app, gpointer user_data)
      * Elle ne reserve rien pour elle-meme : seul le dock repousse les
      * fenetres, sinon on perdrait deux fois de la hauteur utile. */
     gtk_layer_set_exclusive_zone (GTK_WINDOW (window), -1);
+    /* ON_DEMAND, et pas NONE : le panneau de reglages doit pouvoir prendre
+     * le clavier quand il s'ouvre, ne serait-ce que pour se fermer sur
+     * Echap et pour rendre ses bascules atteignables au clavier. Hors
+     * ouverture du panneau, la barre ne reclame rien. */
     gtk_layer_set_keyboard_mode (GTK_WINDOW (window),
-                                 GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+                                 GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
 
     GtkWidget *bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class (bar, "status");
-    gtk_widget_set_halign (bar, GTK_ALIGN_END);
-    gtk_widget_set_valign (bar, GTK_ALIGN_END);
 
     st->net_icon  = icon ("network-offline-symbolic", 16);
     st->bat_icon  = icon ("battery-level-100-symbolic", 16);
@@ -273,8 +262,23 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_box_append (GTK_BOX (bar), sep);
     gtk_box_append (GTK_BOX (bar), st->clock);
 
-    gtk_window_set_child (GTK_WINDOW (window), bar);
+    /* Toute la pilule est un bouton : c'est elle qu'on vise, pas une
+     * poignee dediee. Le cadre par defaut de GtkMenuButton est retire, la
+     * surface visible reste celle dessinee par .status. */
+    GtkWidget *button = gtk_menu_button_new ();
+    gtk_menu_button_set_has_frame (GTK_MENU_BUTTON (button), FALSE);
+    gtk_menu_button_set_child (GTK_MENU_BUTTON (button), bar);
+    gtk_menu_button_set_direction (GTK_MENU_BUTTON (button), GTK_ARROW_UP);
+    gtk_menu_button_set_popover (GTK_MENU_BUTTON (button), panel_new (opt->apercu));
+    gtk_widget_add_css_class (button, "status");
+    gtk_widget_set_halign (button, GTK_ALIGN_END);
+    gtk_widget_set_valign (button, GTK_ALIGN_END);
+
+    gtk_window_set_child (GTK_WINDOW (window), button);
     gtk_window_present (GTK_WINDOW (window));
+
+    if (opt->ouvrir)
+        g_idle_add (open_panel_once, button);
 
     clock_update (st);
     battery_update (st);
@@ -285,16 +289,21 @@ on_activate (GtkApplication *app, gpointer user_data)
 int
 main (int argc, char **argv)
 {
-    gboolean dark = FALSE;
-    for (int i = 1; i < argc; i++)
-        if (g_strcmp0 (argv[i], "--dark") == 0)
-            dark = TRUE;
+    /* --ouvrir : ouvre le panneau au demarrage, avec les vraies sources.
+     * --apercu : idem, mais avec des valeurs fixes, pour juger la mise en
+     *            page quand aucun service n'est present. Une aide au banc
+     *            d'essai, qui ne prouve rien du branchement D-Bus. */
+    Options opt = { FALSE, FALSE, FALSE };
+    for (int i = 1; i < argc; i++) {
+        if (g_strcmp0 (argv[i], "--dark") == 0)   opt.dark   = TRUE;
+        if (g_strcmp0 (argv[i], "--ouvrir") == 0) opt.ouvrir = TRUE;
+        if (g_strcmp0 (argv[i], "--apercu") == 0) opt.apercu = opt.ouvrir = TRUE;
+    }
 
     GtkApplication *app = gtk_application_new ("os.claude.shell.status",
                                                G_APPLICATION_DEFAULT_FLAGS);
     g_signal_connect (app, "startup",  G_CALLBACK (load_styles), NULL);
-    g_signal_connect (app, "activate", G_CALLBACK (on_activate),
-                      GINT_TO_POINTER (dark));
+    g_signal_connect (app, "activate", G_CALLBACK (on_activate), &opt);
     int status = g_application_run (G_APPLICATION (app), 0, NULL);
     g_object_unref (app);
     return status;
