@@ -3,3 +3,5 @@ build.log
 *.img.xz
 build/config/local.conf
 boot-test.log
+shell/build/
+*.png

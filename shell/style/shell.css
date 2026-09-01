@@ -1,0 +1,87 @@
+/* =========================================================================
+   Claude-OS Shell — feuille commune
+
+   Aucune couleur littérale ici : uniquement les jetons de tokens.css.
+   La classe .dark sur la fenêtre bascule l'ensemble du thème.
+   ========================================================================= */
+
+/* Fond transparent : le compositeur voit à travers, le dock flotte. */
+window.shell {
+  background: transparent;
+}
+
+/* -------------------------------------------------------------------------
+   Dock
+   ------------------------------------------------------------------------- */
+
+.dock {
+  background-color: @l-surface;
+  border: 1px solid @l-border;
+  /* Rayon genereux : sur un dock de 68 px de haut, 20 px donnent la forme de
+     pilule adoucie de ChromeOS sans tomber dans l'ovale. */
+  border-radius: 20px;
+  padding: 8px 10px;
+  margin: 0 0 10px 0;
+  /* Ombre calculée une fois par le compositeur, jamais réévaluée : c'est ce
+     qui distingue une ombre gratuite d'un flou permanent. */
+  box-shadow: 0 4px 16px @l-shadow;
+}
+
+window.dark .dock {
+  background-color: @d-surface;
+  border-color: @d-border;
+  box-shadow: 0 4px 16px @d-shadow;
+}
+
+/* Une icône du dock. La transformation d'échelle est portée par le GPU et
+   ne coûte rien tant qu'elle ne joue pas. */
+.dock-item {
+  /* 48 px : assez grand pour viser confortablement, assez petit pour qu'une
+     dizaine d'icones tiennent sans dominer l'ecran. */
+  min-width: 48px;
+  min-height: 48px;
+  margin: 0 3px;
+  padding: 0;
+  border-radius: 12px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  transition: background-color 120ms ease-out,
+              transform        120ms ease-out;
+}
+
+.dock-item:hover {
+  background-color: @l-surface-alt;
+  /* Agrandissement discret : 8 % suffisent à donner la sensation de
+     réactivité. Au-delà, le dock semble sautiller. */
+  transform: scale(1.08) translateY(-2px);
+}
+
+window.dark .dock-item:hover { background-color: @d-surface-alt; }
+
+.dock-item:active {
+  transform: scale(0.96);
+  transition-duration: 80ms;
+}
+
+/* Point sous l'icône d'une application ouverte. */
+.dock-indicator {
+  min-width: 4px;
+  min-height: 4px;
+  border-radius: 999px;
+  background-color: @l-text-dim;
+  margin-top: 2px;
+}
+
+window.dark .dock-indicator { background-color: @d-text-dim; }
+
+.dock-indicator.active { background-color: @accent; }
+
+/* Séparateur entre applications épinglées et fenêtres ouvertes. */
+.dock-separator {
+  min-width: 1px;
+  margin: 8px 6px;
+  background-color: @l-surface-sunk;
+}
+
+window.dark .dock-separator { background-color: @d-surface-sunk; }
