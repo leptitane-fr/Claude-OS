@@ -6,7 +6,9 @@
 # l'espace, des ecritures, des mises a jour et de la surface d'attaque.
 
 # --- Noyau et amorcage ------------------------------------------------------
-linux-image-amd64
+# linux-image-amd64 n'est PAS ici : build.sh l'installe separement, depuis
+# trixie-backports ou depuis stable selon ENABLE_BACKPORTS_KERNEL. L'inclure
+# ici installerait les deux noyaux, soit 400 Mo pour rien.
 initramfs-tools
 grub-efi-amd64                # GRUB non signe : fournit grub-install
 grub-efi-amd64-signed         # image GRUB signee par Debian

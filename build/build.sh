@@ -360,7 +360,12 @@ cat > "$MNT/etc/apt/sources.list" <<APTEOF
 deb $MIRROR $SUITE $COMPONENTS
 deb $MIRROR ${SUITE}-updates $COMPONENTS
 deb http://security.debian.org/debian-security ${SUITE}-security $COMPONENTS
+deb $MIRROR ${SUITE}-backports $COMPONENTS
 APTEOF
+
+# Les backports sont marques NotAutomatic par Debian : rien n'en provient
+# sans un -t explicite. Les ajouter aux sources ne modifie donc pas le
+# systeme, cela rend seulement le depot disponible.
 
 # Empeche les demons de demarrer pendant l'installation dans le chroot.
 cat > "$MNT/usr/sbin/policy-rc.d" <<'PRCEOF'
@@ -396,6 +401,43 @@ for attempt in 1 2 3; do
     sleep $(( attempt * 10 ))
 done
 [ "$apt_ok" -eq 1 ] || die "installation des paquets echouee apres 3 tentatives -- voir $LOGFILE"
+
+# ---------------------------------------------------------------------------
+# Noyau
+#
+# Installe a part pour pouvoir choisir sa provenance sans embarquer les deux.
+# Le materiel recent en depend directement : la carte Wi-Fi MediaTek MT7902
+# du Vivobook n'est reconnue qu'a partir de Linux 7.1, qui l'a integree au
+# pilote mt7921e. Sur le noyau 6.12 de stable, elle reste non reclamee.
+# ---------------------------------------------------------------------------
+if [ "$ENABLE_BACKPORTS_KERNEL" = "yes" ]; then
+    step "Noyau depuis ${SUITE}-backports"
+    # Les firmwares suivent le noyau : celui du MT7902 n'existe que dans les
+    # versions recentes de linux-firmware.
+    if in_chroot apt-get install -y --no-install-recommends \
+            -t "${SUITE}-backports" \
+            linux-image-amd64 \
+            firmware-mediatek firmware-iwlwifi firmware-realtek firmware-atheros \
+            firmware-intel-graphics firmware-intel-misc firmware-intel-sound \
+            firmware-sof-signed >>"$LOGFILE" 2>&1; then
+        KVER="$(in_chroot dpkg-query -Wf '${Depends}' linux-image-amd64 2>/dev/null \
+                | grep -oE 'linux-image-[0-9][^ ,]*' | head -1)"
+        ok "noyau installe : ${KVER:-inconnu}"
+    else
+        warn "noyau de backports indisponible -- repli sur celui de stable"
+        in_chroot apt-get install -y --no-install-recommends linux-image-amd64 >>"$LOGFILE" 2>&1 \
+            || die "aucun noyau installable -- voir $LOGFILE"
+    fi
+else
+    step "Noyau depuis $SUITE (stable)"
+    in_chroot apt-get install -y --no-install-recommends linux-image-amd64 >>"$LOGFILE" 2>&1 \
+        || die "installation du noyau echouee -- voir $LOGFILE"
+    warn "le Wi-Fi MediaTek MT7902 ne fonctionnera pas sur ce noyau"
+fi
+
+# Le noyau doit etre signe, sinon Secure Boot refusera de le charger.
+in_chroot sh -c 'ls /boot/vmlinuz-* >/dev/null 2>&1' \
+    || die "aucun noyau dans /boot apres installation"
 in_chroot dpkg -l linux-image-amd64 shim-signed grub-efi-amd64-signed >/dev/null \
     || die "paquets d'amorcage absents -- Secure Boot serait impossible"
 [ -n "${EXTRA_CA_CERT:-}" ] && in_chroot update-ca-certificates >/dev/null 2>&1
@@ -758,6 +800,13 @@ done
 in_chroot sh -c "command -v resize2fs" >/dev/null 2>&1 \
     || warn "sans resize2fs, la racine restera a sa taille d'image"
 
+if [ -L "$MNT/etc/resolv.conf" ] && [ ! -e "$MNT/etc/resolv.conf" ]; then
+    warn "ABSENT : la cible de /etc/resolv.conf (lien mort : pas de DNS)"
+    selftest_fail=1
+else
+    ok "/etc/resolv.conf : laisse a NetworkManager"
+fi
+
 [ -L "$MNT/etc/systemd/system/display-manager.service" ] \
     && ok "session graphique : $(basename "$(readlink "$MNT/etc/systemd/system/display-manager.service")")" \
     || { warn "aucun gestionnaire de session actif"; selftest_fail=1; }
@@ -779,8 +828,13 @@ done
 step "Finalisation"
 rm -f "$MNT/usr/sbin/policy-rc.d"
 in_chroot apt-get clean
+# /etc/resolv.conf : le laisser a NetworkManager, qui l'ecrit lui-meme.
+#
+# Il pointait auparavant vers /run/systemd/resolve/stub-resolv.conf, alors
+# que systemd-resolved n'est pas installe : un lien mort, donc aucune
+# resolution DNS. La liaison reseau montait correctement et tout nom de
+# domaine restait introuvable -- panne d'autant plus deroutante.
 rm -f "$MNT/etc/resolv.conf"
-in_chroot ln -sf /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf 2>/dev/null || true
 # Identifiant machine regenere au premier demarrage.
 : > "$MNT/etc/machine-id"
 sync
