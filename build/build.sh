@@ -572,7 +572,7 @@ unset PW1 PW2
 ok "compte '$USERNAME' cree"
 
 step "Activation des services"
-in_chroot systemctl enable lightdm NetworkManager tlp thermald \
+in_chroot systemctl enable lightdm NetworkManager tlp thermald bluetooth \
     claude-os-dgpu-power.service claude-os-firstboot.service >/dev/null 2>&1 || true
 # TLP et power-profiles-daemon se marchent dessus ; TLP l'emporte.
 in_chroot systemctl mask power-profiles-daemon.service >/dev/null 2>&1 || true

@@ -108,6 +108,18 @@ gnome-keyring
 libsecret-1-0
 seahorse
 
+# --- Bluetooth ---------------------------------------------------------------
+# Pas un accessoire ici : la carte Wi-Fi MT7902 de ce Vivobook n'est pas
+# initialisable sous Linux, alors que la moitie Bluetooth de la MEME puce
+# fonctionne (elle passe par l'USB, pas par le PCIe). Le partage de connexion
+# Bluetooth depuis un telephone devient donc la solution de mobilite : pas de
+# dongle qui depasse, pas de port occupe.
+#
+# Le firmware est deja fourni par firmware-mediatek ; seule la couche
+# logicielle manquait.
+bluez
+blueman                       # applet GTK : appairage et partage en deux clics
+
 # --- Audio ------------------------------------------------------------------
 pipewire
 pipewire-pulse
