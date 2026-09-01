@@ -386,6 +386,18 @@ info "${#PKGS[@]} paquets a installer -- suivre la progression : tail -f $LOGFIL
 
 # Le trousseau et l'applet reseau ont besoin de leurs recommandes pour
 # fonctionner ; le reste est installe sans, conformement a apt.conf.d.
+# Verifier d'abord que tous les noms existent. apt --simulate ne telecharge
+# rien et repond en une seconde ; sans ce controle, un nom errone se
+# manifeste apres le debootstrap, et la reprise ci-dessous le reessaie trois
+# fois pour rien puisque l'erreur est deterministe.
+if ! in_chroot apt-get install -s --no-install-recommends "${PKGS[@]}" >>"$LOGFILE" 2>&1; then
+    warn "des paquets de build/packages.list sont introuvables :"
+    grep -oE 'Unable to locate package [^ ]+|Package .* has no installation candidate' "$LOGFILE" \
+        | sort -u | sed 's/^/      /'
+    die "corriger build/packages.list avant de relancer"
+fi
+ok "les ${#PKGS[@]} noms de paquets existent"
+
 # Les miroirs Debian renvoient occasionnellement une erreur passagere, et
 # perdre une construction entiere pour cela n'a pas de sens. On reessaie,
 # en journalisant chaque tentative pour qu'un echec reel reste lisible.
@@ -396,6 +408,11 @@ for attempt in 1 2 3; do
     fi
     warn "tentative $attempt echouee"
     tail -5 "$LOGFILE" | sed 's/^/      /'
+    # Un paquet introuvable ou un conflit de dependances ne se resoudra pas
+    # en reessayant : seuls les incidents reseau le meritent.
+    if tail -40 "$LOGFILE" | grep -qE 'Unable to locate package|has no installation candidate|Unmet dependencies'; then
+        die "erreur deterministe, inutile de reessayer -- voir $LOGFILE"
+    fi
     [ "$attempt" -lt 3 ] || break
     in_chroot apt-get update -qq >>"$LOGFILE" 2>&1 || true
     sleep $(( attempt * 10 ))

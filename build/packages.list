@@ -98,7 +98,8 @@ xdg-desktop-portal-gtk        # dialogues de fichiers pour Chromium/Electron
 # operation a l'utilisateur avec « permission refusee » -- y compris se
 # connecter a un reseau, ce qui rend le systeme difficilement utilisable.
 polkitd
-xfce-polkit
+mate-polkit                   # agent GTK, fonctionne sous Xfce
+                              # (xfce-polkit n'existe pas dans Trixie)
 
 # --- Trousseau : indispensable a Claude Desktop et Chromium -----------------
 # Electron stocke le jeton de session via libsecret. Sans fournisseur Secret
