@@ -39,9 +39,14 @@ Règles suivies sans exception :
   et durent moins de 200 ms.
 - **Aucun flou en direct.** `backdrop-filter` impose un recalcul à chaque
   image ; la translucidité se fait par alpha simple, composé une fois.
-- **Aucune interrogation périodique.** Heure, batterie, réseau et volume
-  se mettent à jour sur événement — D-Bus, `inotify`, minuterie alignée sur
-  la minute pour l'horloge.
+- **Une seule minuterie pour toute la barre d'état.** Alignée sur la
+  seconde 0 de chaque minute, elle met à jour l'heure *et* la batterie :
+  un réveil par minute, pas un par seconde ni un par élément. La batterie
+  est lue directement dans `sysfs`, sans le démon UPower — un processus de
+  plus en mémoire pour une valeur qui tient dans deux fichiers texte ne se
+  justifie pas.
+- **Le réseau ne consulte rien.** Il réagit aux signaux D-Bus de
+  NetworkManager, donc uniquement quand l'état change réellement.
 - **Aucun processus qui tourne pour rien.** Le lanceur ne réside pas en
   mémoire : il est lancé à la demande et se termine à la fermeture.
 
@@ -53,11 +58,44 @@ Une interface immobile doit consommer exactement zéro.
 shell/
   style/tokens.css     couleurs, rayons, espacements — source unique
   style/shell.css      règles communes aux composants
-  src/dock.c           dock central
-  src/status.c         barre d'état bas-droite
-  src/launcher.c       lanceur d'applications
-  data/                fichiers de session, icônes
+  src/dock.c           dock central                        (fait)
+  src/status.c         barre d'état bas-droite             (fait)
+  src/launcher.c       lanceur d'applications              (à venir)
+  test-render.sh       banc d'essai visuel sans écran
 ```
+
+## Configuration
+
+`~/.config/claude-os/shell.conf`, absent par défaut — le shell fonctionne
+sans qu'aucun fichier n'ait été écrit.
+
+```ini
+[dock]
+pinned=chromium;claude-desktop;thunar;xfce4-terminal
+
+[appearance]
+font=Inter
+icon_theme=Papirus
+theme=light          ; ou dark
+```
+
+Le thème d'icônes n'est pas un détail : **Adwaita a abandonné les noms
+hérités** (`web-browser`, `utilities-terminal`, `system-file-manager`) que
+la plupart des fichiers `.desktop` déclarent encore, et affiche un
+pictogramme générique à leur place. Constaté à l'écran, pas supposé.
+Papirus les conserve.
+
+## Zones réservées : le piège de l'empilement
+
+Le dock réserve 86 px, ce qui empêche les fenêtres maximisées de passer
+dessous. La barre d'état, elle, déclare `exclusive_zone = -1` : elle
+**ignore** les zones réservées par les autres surfaces.
+
+Avec la valeur 0, elle se posait au-dessus des 86 px du dock et flottait
+plus haut que lui — visible immédiatement sur une capture. Avec -1 elle
+s'ancre au vrai bord de l'écran et partage la ligne de base du dock. Elle
+ne réserve rien pour elle-même, sinon la hauteur utile serait amputée deux
+fois.
 
 Les composants sont des exécutables **séparés**. Un défaut dans le lanceur
 ne doit pas emporter le dock, et chacun peut être relancé isolément.

@@ -91,3 +91,62 @@ window.dark .dock-indicator { background-color: @d-text-dim; }
 }
 
 window.dark .dock-separator { background-color: @d-surface-sunk; }
+
+/* -------------------------------------------------------------------------
+   Barre d'état — bas à droite
+
+   Même langage visuel que le dock : la cohérence des surfaces est ce qui
+   fait qu'une interface paraît conçue plutôt qu'assemblée.
+   ------------------------------------------------------------------------- */
+
+.status {
+  background-color: @l-surface;
+  border: 1px solid @l-border;
+  border-radius: 18px;
+  padding: 6px 14px;
+  margin: 0 12px 12px 0;
+  box-shadow: 0 8px 28px @l-shadow,
+              0 2px  6px alpha(#000000, 0.10);
+}
+
+window.dark .status {
+  background-color: @d-surface;
+  border-color: @d-border;
+  box-shadow: 0 8px 28px @d-shadow,
+              0 2px  6px alpha(#000000, 0.30);
+}
+
+.status-item {
+  color: @l-text;
+  margin: 0 5px;
+}
+
+window.dark .status-item { color: @d-text; }
+
+/* L'heure porte le regard : elle est le seul élément qu'on lit vraiment,
+   les autres se consultent d'un coup d'œil. */
+.status-clock {
+  font-weight: 500;
+  font-size: 13px;
+  margin-left: 8px;
+}
+
+/* Le pourcentage de batterie, plus discret que l'heure. */
+.status-battery-level {
+  font-size: 12px;
+  color: @l-text-dim;
+  margin-left: 2px;
+}
+
+window.dark .status-battery-level { color: @d-text-dim; }
+
+/* Batterie faible : le seul endroit où une couleur d'alerte se justifie. */
+.status-battery-level.low { color: @danger; }
+
+.status-sep {
+  min-width: 1px;
+  margin: 6px 6px;
+  background-color: @l-surface-sunk;
+}
+
+window.dark .status-sep { background-color: @d-surface-sunk; }

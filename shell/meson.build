@@ -24,6 +24,11 @@ executable('claude-os-dock',
   dependencies : [gtk, layershell, giounix],
   install : true)
 
+executable('claude-os-status',
+  'src/status.c',
+  dependencies : [gtk, layershell, giounix],
+  install : true)
+
 install_subdir('style',
   install_dir : data_dir,
   strip_directory : false)
