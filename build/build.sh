@@ -576,6 +576,14 @@ in_chroot systemctl enable lightdm NetworkManager tlp thermald \
     claude-os-dgpu-power.service claude-os-firstboot.service >/dev/null 2>&1 || true
 # TLP et power-profiles-daemon se marchent dessus ; TLP l'emporte.
 in_chroot systemctl mask power-profiles-daemon.service >/dev/null 2>&1 || true
+
+# nm-online retarde le demarrage jusqu'a ce qu'une connexion soit etablie.
+# Sur un portable qui se connecte APRES l'ouverture de session -- Wi-Fi,
+# partage de connexion -- il attend son delai complet a chaque demarrage,
+# pour rien : plusieurs dizaines de secondes d'ecran noir. Aucun service de
+# Claude-OS n'a besoin de network-online.target.
+in_chroot systemctl disable NetworkManager-wait-online.service >/dev/null 2>&1 || true
+in_chroot systemctl mask NetworkManager-wait-online.service >/dev/null 2>&1 || true
 in_chroot systemctl mask systemd-rfkill.service systemd-rfkill.socket >/dev/null 2>&1 || true
 ok "services actives"
 
@@ -736,6 +744,14 @@ mkdir -p "$MNT/boot/efi/EFI/debian"
 cp "$MNT/boot/efi/EFI/BOOT/grub.cfg" "$MNT/boot/efi/EFI/debian/grub.cfg"
 ok "present : EFI/debian/grub.cfg (prefixe embarque dans le GRUB signe)"
 
+# grub.cfg commence par « if [ -s $prefix/grubenv ] ... load_env ». Avec le
+# prefixe /EFI/debian, GRUB cherche donc grubenv sur l'ESP, ou il n'existe
+# pas : il affiche brievement « impossible de lire le bloc d'environnement »
+# avant le menu. Sans consequence, mais inquietant a la lecture.
+in_chroot grub-editenv /boot/efi/EFI/debian/grubenv create >>"$LOGFILE" 2>&1 \
+    && ok "present : EFI/debian/grubenv (supprime l'avertissement au demarrage)" \
+    || warn "grubenv non cree : un avertissement fugitif restera au demarrage"
+
 # Verification que le prefixe attendu par le binaire est bien celui qu'on
 # vient de servir : si Debian le changeait, ce controle le signalerait.
 GRUB_PREFIX="$(strings -a "$MNT/boot/efi/EFI/BOOT/grubx64.efi" 2>/dev/null \
@@ -824,6 +840,13 @@ done
 # perd la quasi-totalite de sa cle sans le moindre message d'erreur.
 in_chroot sh -c "command -v resize2fs" >/dev/null 2>&1 \
     || warn "sans resize2fs, la racine restera a sa taille d'image"
+
+if find "$MNT/etc/systemd/system" -name 'NetworkManager-wait-online.service' -path '*.wants*' | grep -q .; then
+    warn "NetworkManager-wait-online est actif : il retardera chaque demarrage"
+    selftest_fail=1
+else
+    ok "NetworkManager-wait-online neutralise (demarrage non retarde)"
+fi
 
 if [ -L "$MNT/etc/resolv.conf" ] && [ ! -e "$MNT/etc/resolv.conf" ]; then
     warn "ABSENT : la cible de /etc/resolv.conf (lien mort : pas de DNS)"
