@@ -1,0 +1,59 @@
+/* =========================================================================
+   Claude-OS Shell — jetons de design
+   =========================================================================
+   Source unique de vérité : dock, barre d'état et lanceur ne définissent
+   AUCUNE couleur en propre, ils ne consomment que ces variables.
+
+   Inspiration ChromeOS : surfaces claires et mates, contrastes doux,
+   accent bleu réservé aux éléments actifs. Aucun dégradé décoratif, aucune
+   texture — la hiérarchie se fait par l'élévation et l'espacement.
+
+   Contrainte d'énergie : aucune de ces valeurs n'implique de calcul continu.
+   Pas de flou en direct (backdrop-filter réveille le GPU à chaque image) ;
+   la translucidité se fait par alpha simple, calculé une fois par le
+   compositeur.
+   ========================================================================= */
+
+@define-color accent            #4285f4;  /* bleu ChromeOS, éléments actifs   */
+@define-color accent-hover      #5a95f5;
+@define-color accent-press      #3574d4;
+
+/* --- Thème clair ------------------------------------------------------- */
+@define-color l-surface         #ffffff;  /* panneaux, dock                  */
+@define-color l-surface-alt     #f1f3f4;  /* survol, champs                  */
+@define-color l-surface-sunk    #e8eaed;  /* enfoncé, séparateurs            */
+@define-color l-text            #202124;  /* texte principal                 */
+@define-color l-text-dim        #5f6368;  /* libellés secondaires            */
+@define-color l-border          alpha(#000000, 0.08);
+@define-color l-shadow          alpha(#000000, 0.16);
+
+/* --- Thème sombre ------------------------------------------------------ */
+/* Gris neutres et non bleutés : moins fatigants que le bleu-nuit à l'usage,
+   et plus proches du rendu ChromeOS sombre.                                */
+@define-color d-surface         #202124;
+@define-color d-surface-alt     #292a2d;
+@define-color d-surface-sunk    #35363a;
+@define-color d-text            #e8eaed;
+@define-color d-text-dim        #9aa0a6;
+@define-color d-border          alpha(#ffffff, 0.10);
+@define-color d-shadow          alpha(#000000, 0.50);
+
+/* --- Signaux d'état ---------------------------------------------------- */
+@define-color ok                #34a853;
+@define-color warn              #fbbc05;
+@define-color danger            #ea4335;
+
+/* =========================================================================
+   Géométrie
+
+   Une échelle unique de 4 px. Toute marge, tout rayon en est un multiple :
+   c'est ce qui produit la sensation d'ordre, bien plus que le choix des
+   couleurs.
+   ========================================================================= */
+
+/* Rayons     : 8 / 12 / 16 / 999  (999 = pilule)
+   Espacements: 4 / 8 / 12 / 16 / 24
+   Dock       : hauteur 64, icônes 44, écart 8, marge basse 8
+   Barre état : hauteur 36
+   Durées     : 120 ms survol, 180 ms ouverture — jamais au-delà de 200 ms,
+                au-delà l'interface paraît molle.                           */
