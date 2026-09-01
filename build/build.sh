@@ -553,7 +553,10 @@ echo "RESUME=none" > "$MNT/etc/initramfs-tools/conf.d/resume"
 grep -q '^MODULES=most' "$MNT/etc/initramfs-tools/initramfs.conf" \
     || warn "MODULES n'est pas a 'most' -- risque de non-amorcage sur une autre machine"
 
-in_chroot useradd -m -s /bin/bash -G sudo,audio,video,netdev,plugdev \
+# systemd-journal : sans ce groupe, journalctl -u <service> repond
+# « No journal files were opened due to insufficient permissions », ce qui
+# rend le diagnostic des services de Claude-OS impossible sans sudo.
+in_chroot useradd -m -s /bin/bash -G sudo,audio,video,netdev,plugdev,systemd-journal \
     -c "$USER_FULLNAME" "$USERNAME"
 echo "$USERNAME:$PW1" | in_chroot chpasswd
 in_chroot passwd -l root >/dev/null   # pas de connexion root directe ; sudo suffit
