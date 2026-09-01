@@ -165,3 +165,54 @@ En cas de rechute, on démarre manuellement depuis l'invite `grub>` :
 search --no-floppy --file --set=root /boot/grub/grub.cfg
 configfile ($root)/boot/grub/grub.cfg
 ```
+
+
+## Résultats mesurés sur le Vivobook K3605ZV
+
+Relevés sur la machine réelle, pas en machine virtuelle.
+
+### GPU discret — objectif atteint
+
+```
+/sys/bus/pci/devices/0000:01:00.0/power_state  → D3cold
+power/control                                  → auto
+d3cold_allowed                                 → 1
+modules chargés (nouveau, nvidia)              → aucun
+```
+
+Le pont PCIe parent expose `power_resources_D0` et `power_resources_D3hot` :
+les *power resources* ACPI sont donc présentes, et la stratégie `pr3` de
+`claude-os-dgpu-power` s'applique. La RTX 4060 est hors tension.
+
+**`pcie_port_pm=force` s'est révélé superflu.** Le D3cold est atteint sans
+lui, vérifié en le retirant au démarrage. Il était ajouté par précaution
+pour les plateformes dépourvues de `_PR3` — un cas que ce matériel ne
+présente pas. Comme il s'applique à *tous* les ports PCIe et peut gêner
+d'autres périphériques, `DGPU_FORCE_PORT_PM` vaut désormais `no`.
+
+### Consommation
+
+`3,05 W` au repos sur batterie (0,247 A × 12,363 V), écran allumé, session
+Xfce ouverte. Sur une batterie de 70 Wh, cela situe l'autonomie au repos
+autour d'une vingtaine d'heures.
+
+### Wi-Fi MediaTek MT7902 — non résolu
+
+`14c3:7902`. Le support est arrivé dans le noyau Linux 7.1, qui l'a intégré
+au pilote `mt7921e` ; d'où le noyau de `trixie-backports`. Le pilote
+réclame bien la carte, mais son initialisation échoue :
+
+```
+mt7921e 0000:2d:00.0: driver own failed
+mt7921e 0000:2d:00.0: probe with driver mt7921e failed with error -5
+```
+
+Écartés par l'expérience : `pcie_port_pm=force` (retiré, sans effet sur ce
+point) et l'arrêt de TLP (sans effet — attention, `systemctl stop tlp` ne
+défait pas les réglages ASPM déjà appliqués, seul un redémarrage le fait).
+
+Reste à tester `pcie_aspm=off` au démarrage, et un arrêt complet plutôt
+qu'un redémarrage — la carte gardant sinon l'état laissé par Windows.
+
+**Contournement en attendant :** partage de connexion USB depuis un
+téléphone, qui fonctionne immédiatement, ou un adaptateur Wi-Fi USB.
