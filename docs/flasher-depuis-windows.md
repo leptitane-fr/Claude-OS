@@ -54,27 +54,44 @@ balenaEtcher lit le `.xz` directement et évite entièrement cette étape.
 > efface le mauvais disque. Vérifie la lettre et la taille avant de valider.
 > Débranche tout autre périphérique USB de stockage pendant l'opération.
 
-### balenaEtcher — le plus simple
+### Décompresser d'abord, écrire ensuite (recommandé)
 
-[balena.io/etcher](https://etcher.balena.io/) — gratuit, lit le `.xz`
-directement, et **relit la clé après écriture pour vérifier**. C'est cette
-vérification qui en fait le meilleur choix : une clé USB qui écrit mal en
-silence est une panne pénible à diagnostiquer.
+> **Constaté sur cette machine :** confier le `.xz` directement à
+> balenaEtcher a échoué de façon répétée, sur
+> `Something went wrong… The writer process ended unexpectedly`.
+> Ce n'est pas l'écriture USB qui lâche, mais le décompresseur `.xz`
+> intégré à Etcher. Décompresser séparément règle le problème.
 
-1. *Flash from file* → `claude-os.img.xz`
-2. *Select target* → la clé PNY de 256 Go (vérifie la taille)
-3. *Flash!*
+1. Extraire `claude-os.img` du `.xz` avec [7-Zip](https://www.7-zip.org/).
+   L'opération est longue, et le dernier pourcent peut sembler figé plusieurs
+   minutes : c'est l'écriture de la fin du fichier, laisse-la finir.
+2. Vérifier le résultat contre les empreintes publiées dans la release :
+
+```powershell
+(Get-Item claude-os.img).Length                 # = claude-os.img.taille
+Get-FileHash claude-os.img -Algorithm SHA256    # = claude-os.img.sha256
+```
+
+3. Écrire `claude-os.img` avec **balenaEtcher**
+   ([balena.io/etcher](https://etcher.balena.io/)) : *Flash from file* →
+   l'image, *Select target* → la clé PNY (vérifie la taille), *Flash!*
+   Etcher relit la clé après écriture, ce qui reste sa vraie valeur.
+
+**Surveille la fin de l'opération.** Un « Flash Complete » vert après la
+phase *Validating* est la seule preuve que l'écriture a abouti ; tout autre
+message signifie que la clé est dans un état partiel, même si la table de
+partition et la partition EFI paraissent correctes ensuite.
 
 ### Raspberry Pi Imager — alternative
 
 [raspberrypi.com/software](https://www.raspberrypi.com/software/) — gère
 aussi le `.img.xz` nativement. Choisir *Use custom image*.
 
-### Rufus — si tu y tiens
+### Rufus — alternative
 
-Rufus ne décompresse pas toujours le `.xz` : extraire d'abord
-`claude-os.img` avec [7-Zip](https://www.7-zip.org/), puis choisir le mode
-**« Image DD »** (pas « ISO »). Rufus ne vérifie pas l'écriture.
+Sur l'image déjà décompressée, choisir le mode **« Image DD »** (pas
+« ISO »). Rufus ne relit pas la clé après écriture : à réserver au cas où
+Etcher pose problème.
 
 ## 4. Ce que Windows va afficher après l'écriture
 
