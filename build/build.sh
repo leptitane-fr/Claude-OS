@@ -488,9 +488,14 @@ BLACKLIST_MODS=""
 CMDLINE_DGPU=""
 if [ "$DGPU_STRATEGY" != "none" ]; then
     BLACKLIST_MODS="nouveau,nvidia,nvidia_drm,nvidia_modeset,nvidiafb"
-    # Autorise la gestion d'energie du pont PCIe portant le dGPU, condition
-    # necessaire a la descente en D3cold.
-    CMDLINE_DGPU="pcie_port_pm=force"
+    # pcie_port_pm=force s'applique a TOUS les ports PCIe et casse
+    # l'initialisation de certaines cartes Wi-Fi. Il n'est necessaire que
+    # lorsque le pont du dGPU n'expose pas de power resources ACPI ; quand
+    # _PR3 est present, claude-os-dgpu-power obtient le D3cold sans lui.
+    if [ "${DGPU_FORCE_PORT_PM:-no}" = "yes" ]; then
+        CMDLINE_DGPU="pcie_port_pm=force"
+        warn "pcie_port_pm=force actif : peut empecher certaines cartes Wi-Fi de s'initialiser"
+    fi
 fi
 if [ "$BLACKLIST_VMD" = "yes" ]; then
     BLACKLIST_MODS="${BLACKLIST_MODS:+$BLACKLIST_MODS,}vmd"
