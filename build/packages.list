@@ -24,6 +24,13 @@ firmware-intel-misc
 firmware-intel-sound
 firmware-iwlwifi              # Wi-Fi Intel AX
 firmware-sof-signed           # audio Alder Lake : muet sans ce paquet
+# Les Vivobook embarquent selon les series une carte Intel, MediaTek ou
+# Realtek. Ne garder que l'Intel etait une economie mal placee : une carte
+# non reconnue rend le systeme inutilisable, alors que ces paquets pesent
+# quelques dizaines de Mo -- et qui se compressent tres bien.
+firmware-mediatek
+firmware-realtek
+firmware-atheros
 
 # --- Base systeme -----------------------------------------------------------
 systemd
@@ -85,6 +92,11 @@ lightdm-gtk-greeter
 xdg-utils
 xdg-desktop-portal
 xdg-desktop-portal-gtk        # dialogues de fichiers pour Chromium/Electron
+# Agent d'authentification polkit. Sans lui, NetworkManager refuse toute
+# operation a l'utilisateur avec « permission refusee » -- y compris se
+# connecter a un reseau, ce qui rend le systeme difficilement utilisable.
+polkitd
+xfce-polkit
 
 # --- Trousseau : indispensable a Claude Desktop et Chromium -----------------
 # Electron stocke le jeton de session via libsecret. Sans fournisseur Secret
