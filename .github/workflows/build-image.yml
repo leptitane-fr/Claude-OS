@@ -72,13 +72,28 @@ jobs:
           # Sans KVM l'emulation est environ vingt fois plus lente.
           if [ -w /dev/kvm ]; then LIMITE=300; else LIMITE=1800; fi
           echo "duree maximale accordee : ${LIMITE}s"
-          sudo ./tools/boot-test.sh /mnt/build/claude-os.img "$LIMITE"
+          # Le test demarre reellement le systeme, donc il ECRIT dans l'image
+          # et QEMU est tue sans arret propre : le systeme de fichiers reste
+          # marque « non demonte proprement ». Publier cela imposerait une
+          # rejouabilite du journal au premier demarrage de l'utilisateur.
+          # On teste donc une copie, et on publie l'original intact.
+          cp --sparse=always /mnt/build/claude-os.img /mnt/build/test.img
+          sudo ./tools/boot-test.sh /mnt/build/test.img "$LIMITE"
+          rm -f /mnt/build/test.img
 
       - name: Compresser
         run: |
           cd /mnt/build
           # Sans relever la limite memoire, xz retombe a un seul fil
           # (« Reduced the number of threads ») et met 25 minutes.
+          # Empreinte de l'image DECOMPRESSEE, calculee avant compression.
+          # Sans elle, on ne peut verifier que le telechargement, pas
+          # l'extraction -- or c'est l'extraction qui produit le fichier
+          # reellement ecrit sur la cle, et donc l'etape qui compte.
+          echo "taille de l'image : $(stat -c%s claude-os.img) octets"
+          sha256sum claude-os.img > claude-os.img.sha256
+          stat -c%s claude-os.img > claude-os.img.taille
+
           xz -9 -T0 --memlimit-compress=75% --verbose claude-os.img
           sha256sum claude-os.img.xz > claude-os.img.xz.sha256
           ls -lh claude-os.img.xz
@@ -108,6 +123,8 @@ jobs:
           gh release create "$TAG" \
             /mnt/build/claude-os.img.xz \
             /mnt/build/claude-os.img.xz.sha256 \
+            /mnt/build/claude-os.img.sha256 \
+            /mnt/build/claude-os.img.taille \
             --title "Claude-OS $TAG" \
             --notes "Image a ecrire sur la cle USB. Voir docs/flasher-depuis-windows.md.
 

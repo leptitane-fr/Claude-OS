@@ -13,7 +13,13 @@ Depuis l'onglet **Releases** du dépôt :
 Une fois écrite, elle occupe 11 Gio sur la clé, puis la partition racine
 s'étend au premier démarrage jusqu'à environ 170 Go.
 
-## 2. Vérifier l'empreinte
+## 2. Vérifier l'empreinte — les deux fois
+
+Deux vérifications, pas une. La première contrôle le téléchargement, la
+seconde contrôle **l'extraction** — et c'est l'extraction qui produit le
+fichier réellement écrit sur la clé.
+
+### Après téléchargement
 
 Dans PowerShell, depuis le dossier de téléchargement :
 
@@ -24,6 +30,23 @@ Get-Content claude-os.img.xz.sha256
 
 Les deux valeurs doivent être identiques. Si elles diffèrent, le
 téléchargement est corrompu — recommence, n'écris pas l'image.
+
+### Après extraction
+
+Si tu extrais l'image avec 7-Zip pour utiliser Rufus, contrôle le résultat :
+
+```powershell
+(Get-Item claude-os.img).Length          # comparer à claude-os.img.taille
+Get-FileHash claude-os.img -Algorithm SHA256   # comparer à claude-os.img.sha256
+```
+
+**Une extraction incomplète ne se voit pas autrement.** Le fichier tronqué
+s'écrit sans erreur, la table de partition et la partition EFI passent
+puisqu'elles occupent le tout début du support, et la panne n'apparaît qu'au
+démarrage : GRUB se lance normalement puis annonce
+`No known filesystem detected` sur la partition racine.
+
+balenaEtcher lit le `.xz` directement et évite entièrement cette étape.
 
 ## 3. Écrire sur la clé
 
