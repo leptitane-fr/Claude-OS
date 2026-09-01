@@ -1,12 +1,15 @@
 [Unit]
 Description=Coupe l'alimentation du GPU NVIDIA discret
 Documentation=file:///usr/local/sbin/claude-os-dgpu-power
-# Apres l'enumeration PCI et le peuplement udev, sinon le peripherique
-# n'est pas encore visible dans sysfs.
-After=systemd-udev-settle.service
-Wants=systemd-udev-settle.service
-DefaultDependencies=no
-Before=basic.target
+
+# PAS de systemd-udev-settle : ce service est deprecie par systemd, et
+# l'attendre coutait 74 secondes de demarrage mesurees sur le Vivobook.
+#
+# Il etait inutile : les peripheriques PCI sont enumeres par le noyau avant
+# meme que l'espace utilisateur ne demarre, donc /sys/bus/pci/devices est
+# deja peuple quand systemd lance le premier service.
+After=sysinit.target
+Before=display-manager.service
 
 [Service]
 Type=oneshot
@@ -16,4 +19,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=basic.target
+WantedBy=multi-user.target

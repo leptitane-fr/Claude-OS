@@ -841,6 +841,21 @@ done
 in_chroot sh -c "command -v resize2fs" >/dev/null 2>&1 \
     || warn "sans resize2fs, la racine restera a sa taille d'image"
 
+# systemd-udev-settle est deprecie et bloque le demarrage jusqu'a son
+# delai d'expiration. Aucune unite de Claude-OS ne doit le reclamer.
+# On cible les directives reelles, pas les commentaires : l'unite du dGPU
+# explique justement en commentaire pourquoi cette dependance a ete retiree,
+# et un motif trop large ferait echouer le build sur sa propre documentation.
+if grep -rlE '^[[:space:]]*(After|Wants|Requires|BindsTo|Requisite)=.*udev-settle' \
+     "$MNT/etc/systemd/system" 2>/dev/null | grep -q .; then
+    warn "une unite reclame systemd-udev-settle : elle retardera le demarrage"
+    grep -rlE '^[[:space:]]*(After|Wants|Requires|BindsTo|Requisite)=.*udev-settle' \
+        "$MNT/etc/systemd/system" | sed 's/^/      /'
+    selftest_fail=1
+else
+    ok "aucune unite ne reclame systemd-udev-settle"
+fi
+
 if find "$MNT/etc/systemd/system" -name 'NetworkManager-wait-online.service' -path '*.wants*' | grep -q .; then
     warn "NetworkManager-wait-online est actif : il retardera chaque demarrage"
     selftest_fail=1
