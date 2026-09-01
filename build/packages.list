@@ -135,7 +135,20 @@ powertop
 acpi
 lm-sensors
 
+# --- Shell graphique Claude-OS ----------------------------------------------
+# Compositeur Wayland et bibliotheques du shell sur-mesure. labwc pese ~15 Mo
+# en memoire, contre ~120 Mo pour la session Xfce complete.
+labwc
+gtk4-layer-shell              # ancrage du dock hors du flux des fenetres
+
+# Papirus plutot qu'Adwaita : verifie a l'ecran, Adwaita a abandonne les noms
+# d'icones herites (web-browser, utilities-terminal...) que la plupart des
+# .desktop declarent encore, et affiche un pictogramme generique a leur place.
+# Papirus les conserve, et son style plat et arrondi est proche de ChromeOS.
+papirus-icon-theme
+
 # --- Polices : le systeme sert a afficher du web ---------------------------
+fonts-inter                   # police de l'interface, proche de la Google Sans
 fonts-dejavu
 fonts-liberation2             # substituts metriques Arial/Times/Courier
 fonts-noto-core

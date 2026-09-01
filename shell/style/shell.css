@@ -17,32 +17,38 @@ window.shell {
 .dock {
   background-color: @l-surface;
   border: 1px solid @l-border;
-  /* Rayon genereux : sur un dock de 68 px de haut, 20 px donnent la forme de
+  /* Rayon généreux : sur un dock de 72 px de haut, 22 px donnent la forme de
      pilule adoucie de ChromeOS sans tomber dans l'ovale. */
-  border-radius: 20px;
-  padding: 8px 10px;
-  margin: 0 0 10px 0;
-  /* Ombre calculée une fois par le compositeur, jamais réévaluée : c'est ce
-     qui distingue une ombre gratuite d'un flou permanent. */
-  box-shadow: 0 4px 16px @l-shadow;
+  border-radius: 22px;
+  padding: 8px 12px;
+  margin: 0 0 12px 0;
+  /* Ombre à deux couches : une large et diffuse pour l'élévation, une courte
+     et dense pour asseoir le contact. C'est ce doublement qui donne la
+     profondeur de ChromeOS, là où une ombre unique paraît plate.
+     Calculée une fois par le compositeur, jamais réévaluée — rien à voir
+     avec un flou permanent. */
+  box-shadow: 0 8px 28px @l-shadow,
+              0 2px  6px alpha(#000000, 0.10);
 }
 
 window.dark .dock {
   background-color: @d-surface;
   border-color: @d-border;
-  box-shadow: 0 4px 16px @d-shadow;
+  box-shadow: 0 8px 28px @d-shadow,
+              0 2px  6px alpha(#000000, 0.30);
 }
 
 /* Une icône du dock. La transformation d'échelle est portée par le GPU et
    ne coûte rien tant qu'elle ne joue pas. */
 .dock-item {
-  /* 48 px : assez grand pour viser confortablement, assez petit pour qu'une
-     dizaine d'icones tiennent sans dominer l'ecran. */
-  min-width: 48px;
-  min-height: 48px;
-  margin: 0 3px;
+  /* 52 px : assez grand pour donner de la présence au dock sur un écran de
+     1920 px, assez petit pour qu'une dizaine d'icônes tiennent sans le faire
+     déborder. */
+  min-width: 52px;
+  min-height: 52px;
+  margin: 0 2px;
   padding: 0;
-  border-radius: 12px;
+  border-radius: 14px;
   background: none;
   border: none;
   box-shadow: none;

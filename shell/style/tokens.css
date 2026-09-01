@@ -24,7 +24,7 @@
 @define-color l-surface-sunk    #e8eaed;  /* enfoncé, séparateurs            */
 @define-color l-text            #202124;  /* texte principal                 */
 @define-color l-text-dim        #5f6368;  /* libellés secondaires            */
-@define-color l-border          alpha(#000000, 0.08);
+@define-color l-border          alpha(#000000, 0.14);
 @define-color l-shadow          alpha(#000000, 0.16);
 
 /* --- Thème sombre ------------------------------------------------------ */
