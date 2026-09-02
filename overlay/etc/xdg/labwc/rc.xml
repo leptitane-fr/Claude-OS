@@ -22,6 +22,12 @@
   </theme>
 
   <keyboard>
+    <!-- Raccourcis intégrés de labwc (Alt-Tab, Alt-F4, déplacements...).
+         Sans cette ligne, définir le moindre raccourci ci-dessous les
+         supprimerait tous : labwc ne charge ses valeurs par défaut que si on
+         le lui demande explicitement (src/config/rcxml.c, « default.keyboard »). -->
+    <default />
+
     <!-- Masquer / afficher le dock et la barre d'état.
 
          Deux liaisons pour la même action, et ce n'est pas de l'excès de
@@ -40,17 +46,25 @@
       <action name="Execute" command="/usr/local/bin/claude-os-shell-basculer"/>
     </keybind>
 
+    <!-- Filets de sécurité. Tant que le shell n'a pas de lanceur, ce sont
+         les seuls moyens d'ouvrir quoi que ce soit si le dock refuse de
+         démarrer : un terminal et un navigateur, joignables au clavier
+         quoi qu'il arrive. -->
     <keybind key="W-Return">
       <action name="Execute" command="xfce4-terminal"/>
     </keybind>
-    <keybind key="A-F4">
-      <action name="Close"/>
+    <keybind key="W-b">
+      <action name="Execute" command="chromium"/>
     </keybind>
-    <keybind key="W-Up">
-      <action name="ToggleMaximize"/>
-    </keybind>
+
     <keybind key="W-f">
       <action name="ToggleFullscreen"/>
+    </keybind>
+
+    <!-- Quitter la session. Volontairement peu accessible au doigt, mais il
+         doit exister : une session sans sortie au clavier est un piège. -->
+    <keybind key="W-S-q">
+      <action name="Exit"/>
     </keybind>
   </keyboard>
 

@@ -64,6 +64,7 @@ shell/
   src/dock.c           dock central                        (fait)
   src/status.c         barre d'état bas-droite             (fait)
   src/panel.c          réglages rapides, ouverts au clic   (fait)
+  src/config.c         shell.conf + styles, partagés       (fait)
   src/visibility.c     bascule dock + barre au clavier     (fait)
   src/sysfs.c          lecture batterie, partagée          (fait)
   src/launcher.c       lanceur d'applications              (à venir)
@@ -84,6 +85,10 @@ font=Inter
 icon_theme=Papirus
 theme=light          ; ou dark
 ```
+
+Le dock **et** la barre d'état lisent ce fichier, par le même code
+(`config.c`). Quand seul le dock le lisait, un `theme=dark` donnait un dock
+sombre et une barre claire côte à côte.
 
 Le thème d'icônes n'est pas un détail : **Adwaita a abandonné les noms
 hérités** (`web-browser`, `utilities-terminal`, `system-file-manager`) que

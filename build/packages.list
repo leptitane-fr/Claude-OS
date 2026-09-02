@@ -141,6 +141,12 @@ lm-sensors
 labwc
 gtk4-layer-shell              # ancrage du dock hors du flux des fenetres
 
+# Filet pour les applications qui ne savent pas parler Wayland. Chromium et
+# Claude Desktop savent le faire nativement, mais un utilitaire ponctuel qui
+# ne demarrerait pas du tout serait un piege. Xwayland ne tourne que si une
+# application X11 le reclame : au repos il ne coute rien.
+xwayland
+
 # gapplication : le raccourci clavier de labwc appelle par lui l'action
 # « basculer » que le dock et la barre publient sur le bus de session. Sans
 # ce paquet, la touche de masquage ne ferait rien.

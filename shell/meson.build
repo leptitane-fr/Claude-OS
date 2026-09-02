@@ -16,7 +16,7 @@ giounix    = dependency('gio-unix-2.0')   # GDesktopAppInfo
 # Sources communes aux deux composants. La bascule de visibilite doit se
 # comporter exactement pareil dans le dock et dans la barre, sinon les deux
 # se desynchronisent a l'ecran.
-commun = ['src/visibility.c', 'src/sysfs.c']
+commun = ['src/config.c', 'src/visibility.c', 'src/sysfs.c']
 
 # Repertoire des feuilles de style, resolu a la compilation.
 data_dir = get_option('prefix') / get_option('datadir') / 'claude-os-shell'

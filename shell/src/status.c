@@ -21,6 +21,7 @@
 #include <gtk/gtk.h>
 #include <gtk4-layer-shell.h>
 
+#include "config.h"
 #include "visibility.h"
 #include "panel.h"
 #include "sysfs.h"
@@ -168,23 +169,8 @@ network_setup (Status *st)
 }
 
 /* -------------------------------------------------------------------------
- * Styles et fenetre
+ * Fenetre
  * ------------------------------------------------------------------------- */
-static void
-load_styles (void)
-{
-    const char *files[] = { "style/tokens.css", "style/shell.css" };
-    for (guint i = 0; i < G_N_ELEMENTS (files); i++) {
-        GtkCssProvider *p = gtk_css_provider_new ();
-        g_autofree char *path = g_build_filename (SHELL_DATA_DIR, files[i], NULL);
-        gtk_css_provider_load_from_path (p, path);
-        gtk_style_context_add_provider_for_display (
-            gdk_display_get_default (), GTK_STYLE_PROVIDER (p),
-            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-        g_object_unref (p);
-    }
-}
-
 static GtkWidget *
 icon (const char *name, int size)
 {
@@ -225,7 +211,7 @@ static const GActionEntry actions[] = {
 };
 
 typedef struct {
-    gboolean dark;
+    ShellConfig *cfg;   /* police, theme d'icones, clair ou sombre           */
     gboolean apercu;    /* valeurs fixes dans le panneau                     */
     gboolean ouvrir;    /* ouvre le panneau au demarrage                     */
 } Options;
@@ -245,9 +231,14 @@ on_activate (GtkApplication *app, gpointer user_data)
     Options *opt = user_data;
     Status *st = g_new0 (Status, 1);
 
+    /* Meme configuration que le dock, et appliquee au meme moment : sans
+     * cela, « theme=dark » dans shell.conf donnait un dock sombre et une
+     * barre claire cote a cote. */
+    shell_config_apply (opt->cfg);
+
     GtkWidget *window = gtk_application_window_new (app);
     gtk_widget_add_css_class (window, "shell");
-    if (opt->dark)
+    if (opt->cfg->dark)
         gtk_widget_add_css_class (window, "dark");
 
     gtk_layer_init_for_window (GTK_WINDOW (window));
@@ -329,16 +320,20 @@ main (int argc, char **argv)
      * --apercu : idem, mais avec des valeurs fixes, pour juger la mise en
      *            page quand aucun service n'est present. Une aide au banc
      *            d'essai, qui ne prouve rien du branchement D-Bus. */
-    Options opt = { FALSE, FALSE, FALSE };
+    Options opt = { shell_config_load (), FALSE, FALSE };
+
+    /* Les options de ligne de commande priment sur le fichier : pratique
+     * pour essayer un theme sans toucher a sa configuration. */
     for (int i = 1; i < argc; i++) {
-        if (g_strcmp0 (argv[i], "--dark") == 0)   opt.dark   = TRUE;
+        if (g_strcmp0 (argv[i], "--dark") == 0)   opt.cfg->dark = TRUE;
+        if (g_strcmp0 (argv[i], "--light") == 0)  opt.cfg->dark = FALSE;
         if (g_strcmp0 (argv[i], "--ouvrir") == 0) opt.ouvrir = TRUE;
         if (g_strcmp0 (argv[i], "--apercu") == 0) opt.apercu = opt.ouvrir = TRUE;
     }
 
     GtkApplication *app = gtk_application_new ("os.claude.shell.status",
                                                G_APPLICATION_DEFAULT_FLAGS);
-    g_signal_connect (app, "startup",  G_CALLBACK (load_styles), NULL);
+    g_signal_connect (app, "startup",  G_CALLBACK (shell_styles_load), NULL);
     g_signal_connect (app, "activate", G_CALLBACK (on_activate), &opt);
     int status = g_application_run (G_APPLICATION (app), 0, NULL);
     g_object_unref (app);

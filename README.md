@@ -116,7 +116,7 @@ les autres périphériques.
 | `overlay/` | la configuration appliquée au système cible |
 | `tools/hw-probe.sh` | sonde matérielle en lecture seule |
 | `.github/workflows/` | construction et test Secure Boot automatisés |
-| `docs/` | flashage depuis Windows, utilisation, vérifications |
+| `docs/` | flashage depuis Windows, utilisation, essai du shell, vérifications |
 
 ```bash
 sudo ./build/build.sh --image claude-os.img   # image à flasher

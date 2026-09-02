@@ -7,6 +7,17 @@
 # Le lanceur Debian /usr/bin/chromium source les fichiers de /etc/chromium.d/
 # et concatene CHROMIUM_FLAGS.
 
+# Wayland en direct quand une session Wayland est presente, X11 sinon.
+#
+# Sans ce reglage, Chromium tente X11 en toutes circonstances : sous le shell
+# Claude-OS il ne trouverait aucun serveur X et refuserait de demarrer. Le
+# « hint=auto » plutot que « =wayland » est deliberé — la meme image doit
+# continuer a fonctionner sous une session X11 tant que Xfce est la.
+#
+# En prime, la session Wayland evite le detour par Xwayland : une couche de
+# copie d'images en moins, donc quelques dixiemes de watt de gagnes.
+CHROMIUM_FLAGS="$CHROMIUM_FLAGS --ozone-platform-hint=auto"
+
 # Decodage video materiel par le GPU Intel integre. Sans cela, chaque video
 # est decodee par le CPU : plusieurs watts d'ecart, et un ventilateur qui se
 # declenche pour une simple visioconference.

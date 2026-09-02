@@ -15,84 +15,10 @@
 /* GDesktopAppInfo vit dans gio-unix, pas dans gio tout court. */
 #include <gio/gdesktopappinfo.h>
 
+#include "config.h"
 #include "visibility.h"
 
 #define DOCK_ICON_SIZE 38          /* pictogramme dans un bouton de 52 px    */
-
-/* -------------------------------------------------------------------------
- * Configuration
- *
- * ~/.config/claude-os/shell.conf, au format cle-valeur de GLib. Absent, les
- * valeurs par defaut ci-dessous s'appliquent : le shell doit fonctionner
- * sans qu'aucun fichier n'ait ete ecrit.
- * ------------------------------------------------------------------------- */
-
-typedef struct {
-    char    **pinned;      /* identifiants .desktop, dans l'ordre d'affichage */
-    char     *font;        /* famille de police de l'interface                */
-    char     *icon_theme;  /* theme d'icones                                  */
-    gboolean  dark;        /* theme sombre                                    */
-} ShellConfig;
-
-/* Applications epinglees par defaut : celles pour lesquelles ce systeme
- * existe, plus de quoi ouvrir un dossier et un terminal. */
-static const char *default_pinned[] = {
-    "chromium", "claude-desktop", "thunar", "xfce4-terminal", NULL
-};
-
-static char *
-config_path (void)
-{
-    return g_build_filename (g_get_user_config_dir (),
-                             "claude-os", "shell.conf", NULL);
-}
-
-static ShellConfig *
-config_load (void)
-{
-    ShellConfig *cfg = g_new0 (ShellConfig, 1);
-    g_autoptr(GKeyFile) kf = g_key_file_new ();
-    g_autofree char *path = config_path ();
-
-    /* Valeurs par defaut, ecrasees ensuite si le fichier en fournit. */
-    cfg->pinned = g_strdupv ((char **) default_pinned);
-    cfg->font   = g_strdup ("Inter");
-    /* Papirus plutot qu'Adwaita : Adwaita a abandonne les noms d'icones
-     * herites (web-browser, utilities-terminal...) que la plupart des
-     * fichiers .desktop declarent encore, et affiche donc un pictogramme
-     * generique pour la moitie des applications. Papirus les conserve, et
-     * son style plat et arrondi est plus proche de ChromeOS. */
-    cfg->icon_theme = g_strdup ("Papirus");
-    cfg->dark   = FALSE;
-
-    if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, NULL))
-        return cfg;   /* pas de fichier : les defauts suffisent */
-
-    g_auto(GStrv) pinned = g_key_file_get_string_list (kf, "dock", "pinned",
-                                                       NULL, NULL);
-    if (pinned != NULL && pinned[0] != NULL) {
-        g_strfreev (cfg->pinned);
-        cfg->pinned = g_steal_pointer (&pinned);
-    }
-
-    g_autofree char *font = g_key_file_get_string (kf, "appearance", "font", NULL);
-    if (font != NULL && *font != '\0') {
-        g_free (cfg->font);
-        cfg->font = g_steal_pointer (&font);
-    }
-
-    g_autofree char *icons = g_key_file_get_string (kf, "appearance", "icon_theme", NULL);
-    if (icons != NULL && *icons != '\0') {
-        g_free (cfg->icon_theme);
-        cfg->icon_theme = g_steal_pointer (&icons);
-    }
-
-    g_autofree char *theme = g_key_file_get_string (kf, "appearance", "theme", NULL);
-    if (g_strcmp0 (theme, "dark") == 0)
-        cfg->dark = TRUE;
-
-    return cfg;
-}
 
 /* -------------------------------------------------------------------------
  * Lancement d'une application
@@ -184,27 +110,6 @@ build_dock_item (const char *app_id, gboolean running)
 }
 
 /* -------------------------------------------------------------------------
- * Feuilles de style
- * ------------------------------------------------------------------------- */
-static void
-load_styles (void)
-{
-    const char *files[] = { "style/tokens.css", "style/shell.css" };
-
-    for (guint i = 0; i < G_N_ELEMENTS (files); i++) {
-        GtkCssProvider *provider = gtk_css_provider_new ();
-        g_autofree char *path = g_build_filename (SHELL_DATA_DIR, files[i], NULL);
-
-        gtk_css_provider_load_from_path (provider, path);
-        gtk_style_context_add_provider_for_display (
-            gdk_display_get_default (),
-            GTK_STYLE_PROVIDER (provider),
-            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-        g_object_unref (provider);
-    }
-}
-
-/* -------------------------------------------------------------------------
  * Bascule manuelle de la visibilite
  *
  * La bascule est exposee comme action GTK : chaque composant la publie sur
@@ -242,29 +147,12 @@ on_activate (GtkApplication *app, gpointer user_data)
 {
     ShellConfig *cfg = user_data;
 
-    /* Le theme d'icones doit etre pose AVANT de construire les boutons :
-     * gtk_icon_theme_has_icon interroge le theme actif. */
-    if (cfg->icon_theme != NULL && *cfg->icon_theme != '\0')
-        g_object_set (gtk_settings_get_default (),
-                      "gtk-icon-theme-name", cfg->icon_theme, NULL);
+    shell_config_apply (cfg);
 
     GtkWidget *window = gtk_application_window_new (app);
     gtk_widget_add_css_class (window, "shell");
     if (cfg->dark)
         gtk_widget_add_css_class (window, "dark");
-
-    /* Police de l'interface : appliquee par une regle CSS injectee, ce qui
-     * evite de dependre des reglages GTK globaux du systeme. */
-    if (cfg->font != NULL && *cfg->font != '\0') {
-        g_autofree char *rule = g_strdup_printf ("window.shell { font-family: \"%s\"; }",
-                                                 cfg->font);
-        GtkCssProvider *fp = gtk_css_provider_new ();
-        gtk_css_provider_load_from_string (fp, rule);
-        gtk_style_context_add_provider_for_display (
-            gdk_display_get_default (), GTK_STYLE_PROVIDER (fp),
-            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
-        g_object_unref (fp);
-    }
 
     /* --- Ancrage layer-shell ---------------------------------------------
      * Sans cela, le dock serait une fenetre ordinaire : elle passerait
@@ -307,7 +195,7 @@ on_activate (GtkApplication *app, gpointer user_data)
 int
 main (int argc, char **argv)
 {
-    ShellConfig *cfg = config_load ();
+    ShellConfig *cfg = shell_config_load ();
 
     /* Les options de ligne de commande priment sur le fichier : pratique
      * pour essayer un theme sans toucher a sa configuration. */
@@ -318,7 +206,7 @@ main (int argc, char **argv)
 
     GtkApplication *app = gtk_application_new ("os.claude.shell.dock",
                                                G_APPLICATION_DEFAULT_FLAGS);
-    g_signal_connect (app, "startup",  G_CALLBACK (load_styles), NULL);
+    g_signal_connect (app, "startup",  G_CALLBACK (shell_styles_load), NULL);
     g_signal_connect (app, "activate", G_CALLBACK (on_activate), cfg);
 
     /* Les arguments sont deja traites ci-dessus ; on n'en passe aucun a GTK

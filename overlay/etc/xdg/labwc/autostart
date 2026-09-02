@@ -5,5 +5,8 @@
 # doit pas emporter le dock, et chacun peut être relancé isolément sans
 # fermer la session.
 
-/usr/bin/claude-os-dock   &
-/usr/bin/claude-os-status &
+# Noms nus plutôt que chemins absolus : le même fichier sert pour l'image
+# construite (binaires dans /usr/bin) et pour un essai compilé à la main sur
+# une machine déjà installée (/usr/local/bin, qui vient en premier dans PATH).
+claude-os-dock   &
+claude-os-status &
