@@ -88,7 +88,21 @@ theme=light          ; ou dark
 ```
 
 Le dock **et** la barre d'état lisent ce fichier, par le même code
-(`config.c`). Quand seul le dock le lisait, un `theme=dark` donnait un dock
+(`config.c`), et le **relisent à chaud** : chaque composant surveille
+`shell.conf` et se réapplique dès qu'il change. C'est ce qui permet à un
+réglage d'agir sur un shell déjà lancé sans protocole à inventer — la
+configuration reste la seule source de vérité.
+
+Deux détails qui ne s'improvisent pas. La surveillance déclare
+`G_FILE_MONITOR_WATCH_MOVES` : un enregistrement atomique remplace le fichier
+par un autre, et sans cet indicateur la surveillance suivrait l'ancien inode
+sans plus jamais rien voir. Et les événements sont regroupés sur 120 ms, un
+seul enregistrement en produisant trois — création du temporaire,
+déplacement, attributs.
+
+L'écriture relit le fichier avant de le modifier clé par clé : commentaires
+et réglages inconnus de cette version survivent. Réécrire de zéro les
+perdrait au premier enregistrement. Quand seul le dock le lisait, un `theme=dark` donnait un dock
 sombre et une barre claire côte à côte.
 
 Le thème d'icônes n'est pas un détail : **Adwaita a abandonné les noms

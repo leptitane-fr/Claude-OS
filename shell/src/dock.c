@@ -277,10 +277,104 @@ on_hover_leave (GtkEventControllerMotion *c, gpointer data)
 }
 
 /* -------------------------------------------------------------------------
+ * Reorganisation par glisser-deposer
+ *
+ * Seules les applications EPINGLEES se deplacent : les autres entrees sont
+ * deduites des fenetres ouvertes, leur position n'a rien a ranger.
+ *
+ * L'ordre est ecrit dans shell.conf des le depot. Une reorganisation qu'il
+ * faudrait penser a enregistrer serait une reorganisation perdue au
+ * prochain demarrage.
+ * ------------------------------------------------------------------------- */
+static void dock_rebuild (void);
+
+static int
+pinned_index (const char *app_id)
+{
+    for (guint i = 0; D.cfg->pinned[i] != NULL; i++)
+        if (g_strcmp0 (D.cfg->pinned[i], app_id) == 0)
+            return (int) i;
+    return -1;
+}
+
+static void
+pinned_move (int from, int to)
+{
+    guint n = g_strv_length (D.cfg->pinned);
+    if (from < 0 || to < 0 || from == to || (guint) from >= n || (guint) to >= n)
+        return;
+
+    char *moved = D.cfg->pinned[from];
+
+    if (from < to)
+        for (int i = from; i < to; i++)
+            D.cfg->pinned[i] = D.cfg->pinned[i + 1];
+    else
+        for (int i = from; i > to; i--)
+            D.cfg->pinned[i] = D.cfg->pinned[i - 1];
+
+    D.cfg->pinned[to] = moved;
+
+    g_autoptr(GError) error = NULL;
+    if (!shell_config_save (D.cfg, &error))
+        g_warning ("ordre du dock non enregistre : %s", error->message);
+
+    /* On reconstruit sans attendre la relecture du fichier : l'utilisateur
+     * vient de lacher l'icone, elle doit etre a sa place tout de suite. */
+    dock_rebuild ();
+}
+
+static GdkContentProvider *
+on_drag_prepare (GtkDragSource *src, double x, double y, gpointer data)
+{
+    (void) src; (void) x; (void) y;
+    return gdk_content_provider_new_typed (G_TYPE_STRING, (const char *) data);
+}
+
+static void
+on_drag_begin (GtkDragSource *src, GdkDrag *drag, gpointer data)
+{
+    (void) drag;
+
+    /* L'icone suit le curseur pendant le deplacement : sans elle, on
+     * deplacerait un objet invisible. */
+    GtkWidget *button = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (src));
+    GtkWidget *image  = gtk_button_get_child (GTK_BUTTON (button));
+    if (GTK_IS_IMAGE (image)) {
+        GdkPaintable *p = gtk_image_get_paintable (GTK_IMAGE (image));
+        if (p != NULL)
+            gtk_drag_source_set_icon (src, p, DOCK_ICON_SIZE / 2, DOCK_ICON_SIZE / 2);
+    }
+
+    /* Une liste de fenetres restee ouverte pendant le deplacement flotterait
+     * au-dessus du dock sans plus correspondre a rien. */
+    Hover *h = g_object_get_data (G_OBJECT (button), "hover");
+    if (h != NULL && h->popover != NULL)
+        gtk_popover_popdown (GTK_POPOVER (h->popover));
+
+    (void) data;
+}
+
+static gboolean
+on_drop (GtkDropTarget *target, const GValue *value, double x, double y,
+         gpointer data)
+{
+    (void) target; (void) x; (void) y;
+
+    if (!G_VALUE_HOLDS_STRING (value))
+        return FALSE;
+
+    pinned_move (pinned_index (g_value_get_string (value)),
+                 pinned_index ((const char *) data));
+    return TRUE;
+}
+
+/* -------------------------------------------------------------------------
  * Construction d'une icone du dock
  * ------------------------------------------------------------------------- */
 static GtkWidget *
-build_dock_item (const char *app_id, gboolean running, gboolean active)
+build_dock_item (const char *app_id, gboolean running, gboolean active,
+                 gboolean pinned)
 {
     g_autoptr(GDesktopAppInfo) info = app_info_for (app_id);
 
@@ -332,6 +426,23 @@ build_dock_item (const char *app_id, gboolean running, gboolean active)
 
     gtk_box_append (GTK_BOX (box), button);
     gtk_box_append (GTK_BOX (box), dot);
+
+    if (pinned) {
+        /* La chaine remise aux rappels doit survivre a la reconstruction du
+         * dock : elle est dupliquee et liberee avec le bouton. */
+        char *id = g_strdup (app_id);
+        g_object_set_data_full (G_OBJECT (button), "app-id", id, g_free);
+
+        GtkDragSource *src = gtk_drag_source_new ();
+        gtk_drag_source_set_actions (src, GDK_ACTION_MOVE);
+        g_signal_connect (src, "prepare", G_CALLBACK (on_drag_prepare), id);
+        g_signal_connect (src, "drag-begin", G_CALLBACK (on_drag_begin), id);
+        gtk_widget_add_controller (button, GTK_EVENT_CONTROLLER (src));
+
+        GtkDropTarget *dst = gtk_drop_target_new (G_TYPE_STRING, GDK_ACTION_MOVE);
+        g_signal_connect (dst, "drop", G_CALLBACK (on_drop), id);
+        gtk_widget_add_controller (button, GTK_EVENT_CONTROLLER (dst));
+    }
 
     /* Le survol ne liste que ce qui est ouvert : inutile de brancher quoi
      * que ce soit sur une application au repos. L'infobulle du nom reste,
@@ -421,7 +532,7 @@ dock_rebuild (void)
         gboolean running, active;
         app_state (D.cfg->pinned[i], &running, &active);
         gtk_box_append (GTK_BOX (D.box),
-                        build_dock_item (D.cfg->pinned[i], running, active));
+                        build_dock_item (D.cfg->pinned[i], running, active, TRUE));
     }
 
     /* Applications ouvertes mais non epinglees : elles apparaissent apres un
@@ -449,8 +560,29 @@ dock_rebuild (void)
         gboolean running, active;
         app_state (w->app_id, &running, &active);
         gtk_box_append (GTK_BOX (D.box),
-                        build_dock_item (w->app_id, running, active));
+                        build_dock_item (w->app_id, running, active, FALSE));
     }
+}
+
+/* Rejoue tout ce qui depend de la configuration. Le dock est reconstruit de
+ * toute facon : c'est le plus simple, et il ne compte qu'une dizaine
+ * d'icones. */
+static void
+on_config_reloaded (ShellConfig *cfg, gpointer window)
+{
+    shell_config_free (D.cfg);
+    D.cfg = cfg;
+
+    shell_config_apply (cfg);
+
+    if (cfg->dark)
+        gtk_widget_add_css_class (GTK_WIDGET (window), "dark");
+    else
+        gtk_widget_remove_css_class (GTK_WIDGET (window), "dark");
+
+    gtk_layer_set_exclusive_zone (GTK_WINDOW (window),
+                                  cfg->reserve_space ? 86 : 0);
+    dock_rebuild ();
 }
 
 static void
@@ -568,6 +700,7 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     shell_visibility_init (on_visibilite, window);
     shell_toplevels_init (on_windows_changed, NULL);
+    shell_config_watch (on_config_reloaded, window);
 }
 
 int

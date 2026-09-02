@@ -29,5 +29,31 @@ void shell_styles_load (void);
 /* Applique le theme d'icones et la police.
  *
  * A appeler AVANT de construire le moindre bouton : le repli d'icone du dock
- * interroge le theme actif, un theme pose apres coup arriverait trop tard. */
+ * interroge le theme actif, un theme pose apres coup arriverait trop tard.
+ *
+ * Reappelable : la regle de police est portee par un fournisseur CSS unique,
+ * mis a jour plutot qu'empile. Sans cela chaque relecture ajouterait une
+ * regle de plus, et l'ancienne police continuerait de peser dans la
+ * cascade. */
 void shell_config_apply (const ShellConfig *cfg);
+
+/* Ecrit la configuration dans ~/.config/claude-os/shell.conf.
+ *
+ * Le fichier existant est relu puis modifie cle par cle : commentaires et
+ * reglages inconnus de cette version sont preserves. Reecrire le fichier de
+ * zero les perdrait a la premiere sauvegarde. */
+gboolean shell_config_save (const ShellConfig *cfg, GError **error);
+
+/* Libere une configuration. */
+void shell_config_free (ShellConfig *cfg);
+
+/* Appelee quand shell.conf change sur le disque, avec la configuration
+ * relue. Elle appartient a l'appelant, qui doit la liberer. */
+typedef void (*ShellConfigChangedFunc) (ShellConfig *cfg, gpointer user_data);
+
+/* Surveille shell.conf et previent a chaque modification.
+ *
+ * C'est ce qui permet au panneau de reglages d'agir sur un dock deja lance :
+ * il ecrit le fichier, chaque composant le relit. Aucun protocole a
+ * inventer, et la configuration reste la seule source de verite. */
+void shell_config_watch (ShellConfigChangedFunc cb, gpointer user_data);

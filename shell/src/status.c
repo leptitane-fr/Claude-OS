@@ -226,6 +226,19 @@ open_panel_once (gpointer button)
 }
 
 static void
+on_config_reloaded (ShellConfig *cfg, gpointer window)
+{
+    shell_config_apply (cfg);
+
+    if (cfg->dark)
+        gtk_widget_add_css_class (GTK_WIDGET (window), "dark");
+    else
+        gtk_widget_remove_css_class (GTK_WIDGET (window), "dark");
+
+    shell_config_free (cfg);
+}
+
+static void
 on_activate (GtkApplication *app, gpointer user_data)
 {
     Options *opt = user_data;
@@ -303,6 +316,7 @@ on_activate (GtkApplication *app, gpointer user_data)
                                      G_N_ELEMENTS (actions), NULL);
     g_application_hold (G_APPLICATION (app));
     shell_visibility_init (on_visibilite, window);
+    shell_config_watch (on_config_reloaded, window);
 
     if (opt->ouvrir)
         g_idle_add (open_panel_once, button);
