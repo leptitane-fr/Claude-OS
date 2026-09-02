@@ -317,3 +317,83 @@ window.reglages { background-color: @surface-alt; }
   border-color: @accent;
   color: @on-accent;
 }
+
+/* -------------------------------------------------------------------------
+   Pages détaillées des réglages rapides (Wi-Fi, Bluetooth)
+
+   Même surface que la page principale : ce sont des pages du même panneau,
+   pas des fenêtres différentes.
+   ------------------------------------------------------------------------- */
+
+.qs-entete { margin-bottom: 2px; }
+
+.qs-titre-page { font-size: 15px; font-weight: 600; color: @text; }
+
+.qs-retour {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  color: @text;
+}
+
+.qs-retour:hover { background-color: @surface-alt; }
+
+/* Le chevron est collé à la pastille : les deux forment un objet, mais deux
+   zones cliquables. */
+.qs-chevron {
+  background: none;
+  background-color: @surface-alt;
+  border: none;
+  box-shadow: none;
+  min-width: 26px;
+  padding: 0 2px;
+  margin-left: 2px;
+  border-radius: 16px;
+  color: @text-dim;
+  transition: background-color 120ms ease-out;
+}
+
+.qs-chevron:hover { background-color: @surface-sunk; color: @text; }
+
+.qs-vide { font-size: 13px; color: @text-dim; }
+
+/* --- Une ligne de réseau ou d'appareil ----------------------------------- */
+
+.reseau-ligne {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 12px;
+  padding: 9px 10px;
+  min-height: 0;
+  font-size: 13px;
+  color: @text;
+  transition: background-color 120ms ease-out;
+}
+
+.reseau-ligne:hover  { background-color: @surface-alt; }
+.reseau-ligne.actif  { background-color: @surface-sunk; }
+
+.reseau-etat    { font-size: 11px; color: @text-dim; }
+.reseau-cadenas { color: @text-dim; }
+
+.reseau-mdp     { font-size: 13px; border-radius: 10px; }
+
+.reseau-valider {
+  background: none;
+  background-color: @accent;
+  color: @on-accent;
+  border: none;
+  box-shadow: none;
+  border-radius: 10px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.reseau-valider:hover { background-color: @accent-hover; }

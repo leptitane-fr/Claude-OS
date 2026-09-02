@@ -144,6 +144,45 @@ Ce Vivobook expose la seconde. Mesure de référence relevée sur la machine :
 `current_now` n'étant pas normalisé entre pilotes, on prend la valeur
 absolue et c'est `status` qui donne le sens.
 
+### Choisir un réseau, connecter un appareil
+
+Chaque bascule porte un **chevron** : le corps allume et éteint, le chevron
+ouvre la liste. Les pages détaillées vivent dans le **même popover**, dans un
+`GtkStack` — ouvrir une fenêtre séparée pour choisir un réseau ferait perdre
+le fil.
+
+La page Wi-Fi liste les réseaux visibles, dédoublonnés par SSID en gardant la
+borne la plus forte. Un clic active le profil enregistré (`ActivateConnection`
+avec `"/"` comme connexion : NetworkManager choisit lui-même le profil qui
+convient au couple carte + borne) ; pour un réseau protégé, un champ de mot
+de passe se déplie en même temps, prêt si le profil n'existait pas.
+
+Rien ne tourne quand une page est fermée : le balayage Wi-Fi part à
+l'ouverture, la découverte Bluetooth s'arrête à la fermeture — c'est le poste
+de consommation le plus lourd de ces pages.
+
+Le code est écrit contre les **fichiers d'introspection** de NetworkManager
+1.52, récupérés chez freedesktop : noms de méthodes, signatures et propriétés
+en sont copiés plutôt que cités de mémoire.
+
+### Aucun appel D-Bus bloquant, jamais
+
+C'est la leçon la plus chère de ce composant. `g_dbus_proxy_new_for_bus_sync`
+**n'accepte aucun délai** et attend les vingt-cinq secondes réglementaires
+quand le service tarde à répondre. Mesuré au banc d'essai contre un faux
+NetworkManager muet : la barre d'état ne s'affichait pas du tout pendant ce
+temps, alors même que sa fenêtre avait déjà été présentée.
+
+Trois appels de ce type se trouvaient sur le chemin de démarrage — l'icône
+réseau de la barre, la bascule Wi-Fi, la bascule Bluetooth — plus une
+recherche d'adaptateur BlueZ sans borne. Tous sont désormais asynchrones ou
+bornés à quelques secondes, et la lecture des réseaux l'est de bout en bout :
+service → périphériques → carte → bornes, en comptant les réponses en attente
+à chaque étage.
+
+Les propriétés se lisent par `GetAll` et non une par une : vingt bornes
+visibles font la différence entre vingt allers-retours et cent.
+
 ### Les bascules ne mentent pas
 
 Un clic ne bascule pas l'affichage : il écrit la propriété

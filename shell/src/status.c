@@ -141,23 +141,24 @@ on_nm_properties (GDBusProxy *proxy, GVariant *changed,
     (void) proxy; (void) invalidated;
 }
 
+/* Construction ASYNCHRONE. La variante synchrone n'accepte aucun delai et
+ * attend les 25 secondes reglementaires si le service tarde : la barre
+ * d'etat restait alors invisible tout ce temps, alors meme que sa fenetre
+ * avait deja ete presentee. Mesure au banc d'essai contre un faux service.
+ *
+ * En attendant la reponse, la barre affiche « hors ligne » : un composant
+ * d'etat qui n'affiche rien est plus deroutant qu'un composant qui annonce
+ * une absence. */
 static void
-network_setup (Status *st)
+on_nm_proxy (GObject *src, GAsyncResult *res, gpointer data)
 {
+    Status *st = data;
     g_autoptr(GError) error = NULL;
-    GDBusProxy *proxy = g_dbus_proxy_new_for_bus_sync (
-        G_BUS_TYPE_SYSTEM, G_DBUS_PROXY_FLAGS_NONE, NULL,
-        "org.freedesktop.NetworkManager",
-        "/org/freedesktop/NetworkManager",
-        "org.freedesktop.NetworkManager",
-        NULL, &error);
+    (void) src;
 
+    GDBusProxy *proxy = g_dbus_proxy_new_for_bus_finish (res, &error);
     if (proxy == NULL) {
-        /* NetworkManager absent : on affiche « hors ligne » plutot que rien.
-         * Un composant d'etat qui disparait est plus deroutant qu'un
-         * composant qui annonce une absence. */
         g_message ("NetworkManager injoignable : %s", error->message);
-        network_apply_state (st, 0);
         return;
     }
 
@@ -166,6 +167,19 @@ network_setup (Status *st)
 
     g_signal_connect (proxy, "g-properties-changed",
                       G_CALLBACK (on_nm_properties), st);
+}
+
+static void
+network_setup (Status *st)
+{
+    network_apply_state (st, 0);
+
+    g_dbus_proxy_new_for_bus (
+        G_BUS_TYPE_SYSTEM, G_DBUS_PROXY_FLAGS_NONE, NULL,
+        "org.freedesktop.NetworkManager",
+        "/org/freedesktop/NetworkManager",
+        "org.freedesktop.NetworkManager",
+        NULL, on_nm_proxy, st);
 }
 
 /* -------------------------------------------------------------------------
