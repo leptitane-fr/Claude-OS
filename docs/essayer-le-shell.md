@@ -141,7 +141,7 @@ et donc le raccourci de masquage — n'aurait personne à qui parler.
 | `Super` (ou `Super+Espace`) | masque et affiche dock + barre |
 | `Super+Entrée` | terminal |
 | `Super+B` | Chromium |
-| `Super+F` | plein écran — dock et barre doivent disparaître |
+| Survol d'une icône d'application ouverte | liste de ses fenêtres, cliquables |
 | `Super+Maj+Q` | quitter la session |
 
 `Super+Entrée` et `Super+B` sont des filets de sécurité : tant que le shell
@@ -184,26 +184,42 @@ sudo apt-get autoremove --purge build-essential meson ninja-build \
     libgtk-4-dev libgtk4-layer-shell-dev
 ```
 
+## Mettre à jour après un correctif
+
+Retélécharger le ZIP, puis, depuis le nouveau dossier :
+
+```sh
+cd ~/Claude-OS-*/shell
+meson setup build --prefix=/usr/local
+ninja -C build && sudo meson install -C build
+cp ../overlay/etc/xdg/labwc/rc.xml ~/.config/labwc/
+```
+
+Dans la session d'essai, `Super+Maj+Q` puis relancer `dbus-run-session labwc`
+suffit à reprendre les nouveaux binaires.
+
 ## Ce qui n'existe pas encore
 
-- **Aucun lanceur d'applications** : seules les icônes épinglées et les deux
-  raccourcis de secours ouvrent quelque chose.
+- **Aucun lanceur d'applications** : seules les icônes épinglées, les
+  applications déjà ouvertes et les deux raccourcis de secours ouvrent
+  quelque chose.
+- **Aucun réorganisation du dock par glisser-déposer.**
 - **Aucun choix de fond d'écran** : le fond est celui que labwc dessine.
 - **Aucune notification, aucun réglage de volume ni de luminosité.**
-- **Le dock n'affiche pas les fenêtres ouvertes** : le point sous chaque
-  icône est présent mais toujours éteint.
 
-## Points à vérifier, qui n'ont pas pu l'être ici
+## Ce que l'essai sur la machine a tranché
 
-Le conteneur de développement a labwc 0.7.1 ; la machine a la 0.8.3.
+1. **La touche Windows seule fonctionne.** Le doute venait de ce que labwc,
+   en local, ne réagit qu'à un `Super_L` arrivant comme touche ordinaire et
+   pas comme modificateur seul ; sur un vrai clavier, les deux arrivent et la
+   liaison se déclenche.
+2. **Le plein écran ne masque rien, et c'est devenu le comportement voulu.**
+   La fenêtre occupe bien tout l'écran — une surface layer-shell ne réserve
+   rien face à une fenêtre plein écran — et le dock reste par-dessus. On
+   garde l'heure et la batterie sous les yeux pendant une vidéo, et la touche
+   Windows dégage l'écran quand on le veut vraiment.
 
-1. **Le plein écran.** labwc 0.8.3 doit masquer lui-même dock et barre. La
-   0.7.1 ne le fait pas, l'essai en local ne prouve donc rien. Si le dock
-   reste visible par-dessus une vidéo plein écran, le suivi des fenêtres
-   devra revenir dans `visibility.c`.
-2. **La touche Windows seule.** Elle se déclenche quand la touche arrive
-   comme touche ordinaire, mais pas comme modificateur seul — mesuré avec un
-   clavier virtuel, un vrai clavier n'a pas pu être reproduit. Si elle se
-   déclenche en trop pendant d'autres raccourcis `Super`, supprimer la
-   liaison `Super_L` dans `~/.config/labwc/rc.xml` suffit ; `Super+Espace`
-   reste.
+   J'avais annoncé l'inverse, en lisant dans le code de labwc 0.8.3 une
+   désactivation de la couche haute sous une fenêtre plein écran. Sur la
+   machine, cela ne se produit pas : lire le code d'un compositeur dit ce
+   qu'il contient, pas ce qu'il fait dans une situation donnée.

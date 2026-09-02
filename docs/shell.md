@@ -149,33 +149,23 @@ anticipée.
 
 ## Masquage : ce que fait le compositeur, ce que fait le shell
 
-Le partage est net, et il a été tranché par la lecture du code de labwc
-plutôt qu'à l'estime.
+Le partage est net, et il a été tranché par l'essai sur la machine.
 
-**Le plein écran appartient au compositeur.** labwc 0.8.3 — la version de
-Debian trixie — désactive lui-même toute la couche `TOP` du layer-shell dès
-qu'une fenêtre plein écran n'a aucune fenêtre au-dessus d'elle
-(`src/desktop.c`, `desktop_update_top_layer_visibility`). Le dock et la
-barre disparaissent donc sans une ligne de notre part, et selon une règle
-meilleure que celle qu'on aurait écrite : elle raisonne sur l'empilement
-réel, pas seulement sur le focus.
+**Le plein écran ne masque rien, et c'est le comportement voulu.** La fenêtre
+occupe tout l'écran — une surface layer-shell ne réserve rien face à une
+fenêtre plein écran, seules les fenêtres maximisées s'arrêtent au-dessus du
+dock, mesuré à 1920×1200 alors que le dock en réserve 86 — et le dock reste
+affiché par-dessus.
 
-Une première version suivait les fenêtres par
-`wlr-foreign-toplevel-management-v1` pour en déduire le plein écran. Elle
-fonctionnait — les événements arrivaient, les états étaient suivis — mais
-elle dupliquait dans le shell une politique qui appartient au compositeur,
-au prix d'un protocole embarqué dans le dépôt. Elle a été retirée.
+Choix pris après essai sur la machine : on garde l'heure et la batterie sous
+les yeux pendant une vidéo ou une visio, et la touche Windows dégage l'écran
+quand on le veut vraiment.
 
-Ce n'est pas une supposition : labwc **0.7.1** (celui du conteneur de
-développement) ne transmet jamais l'état `fullscreen` sur ce protocole —
-seul `activated` circule, mesuré en journalisant le tableau d'états brut.
-labwc **0.8.3** appelle bien `wlr_foreign_toplevel_handle_v1_set_fullscreen`
-(`src/foreign-toplevel/wlr-foreign.c`). C'est cette différence de version
-qui a mené à lire le code plutôt qu'à conclure de l'essai.
-
-**À vérifier au premier démarrage** : passer Chromium en plein écran doit
-faire disparaître dock et barre. Sinon, le suivi des fenêtres devra revenir
-dans `visibility.c`.
+J'avais annoncé l'inverse, en lisant dans le code de labwc 0.8.3 une
+désactivation de la couche `TOP` sous une fenêtre plein écran
+(`desktop_update_top_layer_visibility`). Sur la machine, cela ne se produit
+pas. Lire le code d'un compositeur dit ce qu'il contient, pas ce qu'il fait
+dans une situation donnée.
 
 **La bascule manuelle appartient au shell.** Le compositeur n'a aucun moyen
 de masquer une surface layer-shell à la demande. Chaque composant publie
@@ -198,15 +188,15 @@ disparaîtrait pour de bon au lieu de se cacher.
 
 ### La touche Windows : deux liaisons, et pourquoi
 
-Mesuré ici, clavier virtuel à l'appui : labwc déclenche `<keybind
-key="Super_L">` quand la touche arrive comme **touche ordinaire**, mais pas
-quand elle arrive comme **modificateur seul**. Le comportement d'un clavier
-réel — où l'appui produit les deux à la fois — n'a pas pu être reproduit
-sans matériel.
+`rc.xml` fournit `Super_L` et `Super+Espace`. La première **fonctionne sur la
+machine**, vérifié à l'usage.
 
-`rc.xml` fournit donc les deux liaisons, `Super_L` et `Super+Espace`. Si la
-touche Windows seule se déclenche en trop pendant d'autres raccourcis Super,
-supprimer la première ligne suffit.
+Le doute venait d'une mesure locale, clavier virtuel à l'appui : labwc ne
+déclenche `<keybind key="Super_L">` que si la touche arrive comme **touche
+ordinaire**, pas comme **modificateur seul**. Sur un vrai clavier l'appui
+produit les deux, et la liaison se déclenche — ce qu'aucun clavier virtuel ne
+pouvait montrer. `Super+Espace` reste comme repli si la touche seule venait à
+gêner d'autres raccourcis `Super`.
 
 L'apparition est instantanée, sans animation : déplacer une surface
 layer-shell demanderait un réveil par image pour quelques dixièmes de

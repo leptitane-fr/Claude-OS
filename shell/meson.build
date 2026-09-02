@@ -12,6 +12,24 @@ project('claude-os-shell', 'c',
 gtk        = dependency('gtk4')
 layershell = dependency('gtk4-layer-shell-0')
 giounix    = dependency('gio-unix-2.0')   # GDesktopAppInfo
+wlclient   = dependency('wayland-client')
+
+# wlr-foreign-toplevel-management-v1 : le protocole qui dit quelles fenetres
+# sont ouvertes. Il n'est empaquete nulle part dans Debian trixie -- aucun
+# paquet wlr-protocols -- le XML est donc verse dans le depot et le code
+# client genere ici. Une dependance de moins a la construction de l'image.
+wlscanner = find_program('wayland-scanner')
+ftl_xml   = 'protocols/wlr-foreign-toplevel-management-unstable-v1.xml'
+
+ftl_header = custom_target('ftl-header',
+  input   : ftl_xml,
+  output  : 'wlr-foreign-toplevel-management-unstable-v1-client-protocol.h',
+  command : [wlscanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+ftl_code = custom_target('ftl-code',
+  input   : ftl_xml,
+  output  : 'wlr-foreign-toplevel-management-unstable-v1-protocol.c',
+  command : [wlscanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 
 # Sources communes aux deux composants. La bascule de visibilite doit se
 # comporter exactement pareil dans le dock et dans la barre, sinon les deux
@@ -25,8 +43,8 @@ add_project_arguments(
   language : 'c')
 
 executable('claude-os-dock',
-  'src/dock.c', commun,
-  dependencies : [gtk, layershell, giounix],
+  'src/dock.c', 'src/toplevels.c', ftl_header, ftl_code, commun,
+  dependencies : [gtk, layershell, giounix, wlclient],
   install : true)
 
 executable('claude-os-status',

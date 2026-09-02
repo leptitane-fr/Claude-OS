@@ -16,9 +16,19 @@
 #include <gio/gdesktopappinfo.h>
 
 #include "config.h"
+#include "toplevels.h"
 #include "visibility.h"
 
-#define DOCK_ICON_SIZE 38          /* pictogramme dans un bouton de 52 px    */
+#define DOCK_ICON_SIZE  38         /* pictogramme dans un bouton de 52 px    */
+#define HOVER_OPEN_MS  400         /* survol avant d'ouvrir la liste         */
+#define HOVER_CLOSE_MS 250         /* sursis avant de la refermer            */
+
+/* Etat du dock. Un seul par processus : il n'y a qu'un dock. */
+static struct {
+    ShellConfig *cfg;
+    GtkWidget   *box;          /* conteneur des icones                      */
+    char        *signature;    /* etat des fenetres deja affiche            */
+} D;
 
 /* -------------------------------------------------------------------------
  * Lancement d'une application
@@ -30,11 +40,42 @@ app_info_for (const char *app_id)
     return g_desktop_app_info_new (desktop_id);
 }
 
+/* Premiere fenetre de cette application, ou NULL. Les fenetres reduites
+ * viennent en dernier : ramener une fenetre visible est presque toujours ce
+ * qu'on veut, et shell_toplevel_activate sait de toute facon retablir une
+ * fenetre reduite si c'est la seule. */
+static const ShellWindow *
+first_window_of (const char *app_id)
+{
+    const GPtrArray *wins = shell_toplevels_get ();
+    const ShellWindow *fallback = NULL;
+
+    for (guint i = 0; wins != NULL && i < wins->len; i++) {
+        ShellWindow *w = g_ptr_array_index (wins, i);
+        if (!shell_app_id_matches (app_id, w->app_id))
+            continue;
+        if (!w->minimized)
+            return w;
+        if (fallback == NULL)
+            fallback = w;
+    }
+    return fallback;
+}
+
 static void
 on_item_clicked (GtkButton *button, gpointer user_data)
 {
     const char *app_id = user_data;
     g_autoptr(GError) error = NULL;
+
+    /* Application deja ouverte : on la ramene au premier plan plutot que
+     * d'en lancer une seconde instance. C'est le comportement attendu d'un
+     * dock ; pour une fenetre supplementaire, la liste au survol est la. */
+    const ShellWindow *win = first_window_of (app_id);
+    if (win != NULL) {
+        shell_toplevel_activate (win);
+        return;
+    }
 
     /* g_app_info_launch gere le .desktop, les variables d'environnement et
      * le rattachement au bon cgroup. Bien preferable a un fork/exec brut. */
@@ -50,11 +91,196 @@ on_item_clicked (GtkButton *button, gpointer user_data)
     (void) button;
 }
 
+/* GClosureNotify plutot qu'un transtypage de g_free : les deux signatures
+ * different, et le transtypage fait a juste titre rouspeter le compilateur. */
+static void
+free_app_id (gpointer data, GClosure *closure)
+{
+    (void) closure;
+    g_free (data);
+}
+
+/* -------------------------------------------------------------------------
+ * Liste des fenetres au survol
+ *
+ * Une fenetre par ligne, cliquable pour la ramener au premier plan.
+ *
+ * Le panneau ne prend PAS le clavier : gtk_popover_set_autohide(FALSE).
+ * Avec l'accrochage automatique, GTK poserait une saisie exclusive, et
+ * survoler le dock volerait le focus a la fenetre dans laquelle on est en
+ * train d'ecrire. Le prix a payer est qu'il faut gerer soi-meme la
+ * fermeture, ce que font les deux minuteries ci-dessous.
+ * ------------------------------------------------------------------------- */
+typedef struct {
+    char      *app_id;
+    GtkWidget *popover;
+    guint      open_timer;
+    guint      close_timer;
+} Hover;
+
+static void
+hover_free (gpointer data)
+{
+    Hover *h = data;
+    if (h->open_timer  != 0) g_source_remove (h->open_timer);
+    if (h->close_timer != 0) g_source_remove (h->close_timer);
+    g_free (h->app_id);
+    g_free (h);
+}
+
+/* Un popover attache par gtk_widget_set_parent doit etre detache a la main
+ * avant que son parent ne disparaisse, sinon GTK signale un widget detruit
+ * avec des enfants encore attaches. Le signal « destroy » est le bon moment :
+ * il precede la liberation des donnees attachees a l'objet. */
+static void
+on_item_destroy (GtkWidget *button, gpointer data)
+{
+    Hover *h = data;
+    (void) button;
+    if (h->popover != NULL) {
+        gtk_widget_unparent (h->popover);
+        h->popover = NULL;
+    }
+}
+
+static void on_hover_enter (GtkEventControllerMotion *c, double x, double y, gpointer data);
+static void on_hover_leave (GtkEventControllerMotion *c, gpointer data);
+
+/* Le survol se surveille sur le CONTENU du panneau, pas sur le GtkPopover
+ * lui-meme : celui-ci est un conteneur de surface et ne recoit pas les
+ * croisements de pointeur. Un controleur pose dessus ne se declenche jamais,
+ * la fermeture differee l'emporte, et le panneau disparait pendant qu'on se
+ * dirige vers lui -- constate a l'ecran, pointeur virtuel a l'appui. */
+static void
+watch_hover (GtkWidget *w, gpointer h)
+{
+    GtkEventControllerMotion *m =
+        GTK_EVENT_CONTROLLER_MOTION (gtk_event_controller_motion_new ());
+    g_signal_connect (m, "enter", G_CALLBACK (on_hover_enter), h);
+    g_signal_connect (m, "leave", G_CALLBACK (on_hover_leave), h);
+    gtk_widget_add_controller (w, GTK_EVENT_CONTROLLER (m));
+}
+
+static void
+on_window_row_clicked (GtkButton *button, gpointer user_data)
+{
+    (void) button;
+    shell_toplevel_activate (user_data);
+}
+
+/* Remplit le panneau avec les fenetres de cette application.
+ * Renvoie le nombre de lignes : zero signifie qu'il n'y a rien a montrer. */
+static guint
+hover_fill (Hover *h)
+{
+    GtkWidget *list = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_add_css_class (list, "dock-windows");
+
+    const GPtrArray *wins = shell_toplevels_get ();
+    guint count = 0;
+
+    for (guint i = 0; wins != NULL && i < wins->len; i++) {
+        ShellWindow *w = g_ptr_array_index (wins, i);
+        if (!shell_app_id_matches (h->app_id, w->app_id))
+            continue;
+
+        /* Un titre vide arrive le temps que l'application le publie. Mieux
+         * vaut une ligne sans nom qu'une fenetre absente de la liste. */
+        const char *text = (w->title != NULL && *w->title != '\0')
+                         ? w->title : "(sans titre)";
+
+        GtkWidget *label = gtk_label_new (text);
+        gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+        gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
+        gtk_label_set_max_width_chars (GTK_LABEL (label), 34);
+
+        GtkWidget *row = gtk_button_new ();
+        gtk_button_set_child (GTK_BUTTON (row), label);
+        gtk_widget_add_css_class (row, "dock-window-row");
+        if (w->activated)
+            gtk_widget_add_css_class (row, "active");
+        g_signal_connect (row, "clicked",
+                          G_CALLBACK (on_window_row_clicked), w);
+
+        gtk_box_append (GTK_BOX (list), row);
+        count++;
+    }
+
+    watch_hover (list, h);
+    gtk_popover_set_child (GTK_POPOVER (h->popover), list);
+    return count;
+}
+
+static gboolean
+hover_open (gpointer data)
+{
+    Hover *h = data;
+    h->open_timer = 0;
+
+    if (hover_fill (h) > 0)
+        gtk_popover_popup (GTK_POPOVER (h->popover));
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean
+hover_close (gpointer data)
+{
+    Hover *h = data;
+    h->close_timer = 0;
+    gtk_popover_popdown (GTK_POPOVER (h->popover));
+    return G_SOURCE_REMOVE;
+}
+
+static void
+hover_cancel_close (Hover *h)
+{
+    if (h->close_timer != 0) {
+        g_source_remove (h->close_timer);
+        h->close_timer = 0;
+    }
+}
+
+static void
+on_hover_enter (GtkEventControllerMotion *c, double x, double y, gpointer data)
+{
+    Hover *h = data;
+    (void) c; (void) x; (void) y;
+
+    hover_cancel_close (h);
+
+    /* Deja ouvert : ne rien relancer. Sans ce garde-fou, entrer dans le
+     * panneau reprogrammait l'ouverture, qui en reconstruisait le contenu
+     * toutes les 400 ms ; le pointeur perdait la ligne qu'il survolait a
+     * chaque reconstruction, et le clic tombait dans le vide -- constate en
+     * journalisant les croisements, pointeur virtuel a l'appui. */
+    if (gtk_widget_get_visible (h->popover))
+        return;
+
+    if (h->open_timer == 0)
+        h->open_timer = g_timeout_add (HOVER_OPEN_MS, hover_open, h);
+}
+
+static void
+on_hover_leave (GtkEventControllerMotion *c, gpointer data)
+{
+    Hover *h = data;
+    (void) c;
+
+    if (h->open_timer != 0) {
+        g_source_remove (h->open_timer);
+        h->open_timer = 0;
+    }
+    /* Sursis plutot que fermeture immediate : sans lui, le trajet de la
+     * souris entre l'icone et le panneau le ferait disparaitre. */
+    if (h->close_timer == 0)
+        h->close_timer = g_timeout_add (HOVER_CLOSE_MS, hover_close, h);
+}
+
 /* -------------------------------------------------------------------------
  * Construction d'une icone du dock
  * ------------------------------------------------------------------------- */
 static GtkWidget *
-build_dock_item (const char *app_id, gboolean running)
+build_dock_item (const char *app_id, gboolean running, gboolean active)
 {
     g_autoptr(GDesktopAppInfo) info = app_info_for (app_id);
 
@@ -86,27 +312,159 @@ build_dock_item (const char *app_id, gboolean running)
     gtk_image_set_pixel_size (GTK_IMAGE (image), DOCK_ICON_SIZE);
     gtk_button_set_child (GTK_BUTTON (button), image);
     gtk_widget_add_css_class (button, "dock-item");
-    gtk_widget_set_tooltip_text (button, label);
+    if (running)
+        gtk_widget_add_css_class (button, "running");
 
-    /* La chaine appartient au tableau de configuration, qui vit aussi
-     * longtemps que l'application : la passer telle quelle est sur. */
-    g_signal_connect (button, "clicked",
-                      G_CALLBACK (on_item_clicked), (gpointer) app_id);
+    /* L'identifiant est duplique : les entrees non epinglees viennent de la
+     * liste des fenetres, qui change sous nos pieds a chaque evenement. */
+    g_signal_connect_data (button, "clicked", G_CALLBACK (on_item_clicked),
+                           g_strdup (app_id), free_app_id, 0);
 
     /* Point d'etat sous l'icone : present pour toutes les entrees afin que
      * la hauteur du dock ne change pas selon les applications ouvertes --
      * un dock qui grandit et retrecit est desagreable a l'usage. */
     GtkWidget *dot = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class (dot, "dock-indicator");
-    if (running)
+    if (active)
         gtk_widget_add_css_class (dot, "active");
-    else
-        gtk_widget_set_opacity (dot, 0.0);
+    gtk_widget_set_opacity (dot, running ? 1.0 : 0.0);
     gtk_widget_set_halign (dot, GTK_ALIGN_CENTER);
 
     gtk_box_append (GTK_BOX (box), button);
     gtk_box_append (GTK_BOX (box), dot);
+
+    /* Le survol ne liste que ce qui est ouvert : inutile de brancher quoi
+     * que ce soit sur une application au repos. L'infobulle du nom reste,
+     * elle, toujours utile. */
+    if (!running) {
+        gtk_widget_set_tooltip_text (button, label);
+        return box;
+    }
+
+    Hover *h = g_new0 (Hover, 1);
+    h->app_id  = g_strdup (app_id);
+    h->popover = gtk_popover_new ();
+    gtk_popover_set_autohide (GTK_POPOVER (h->popover), FALSE);
+    gtk_popover_set_has_arrow (GTK_POPOVER (h->popover), FALSE);
+    gtk_popover_set_position (GTK_POPOVER (h->popover), GTK_POS_TOP);
+    gtk_widget_add_css_class (h->popover, "dock-windows-popover");
+    gtk_widget_set_parent (h->popover, button);
+    g_object_set_data_full (G_OBJECT (button), "hover", h, hover_free);
+    g_signal_connect (button, "destroy", G_CALLBACK (on_item_destroy), h);
+
+    watch_hover (button, h);
     return box;
+}
+
+/* -------------------------------------------------------------------------
+ * Reconstruction du dock
+ *
+ * Le compositeur signale le moindre changement d'etat, y compris un simple
+ * changement de titre -- un onglet change dans Chromium en emet un. Tout
+ * reconstruire a chaque fois ferait clignoter le dock et refermerait la
+ * liste ouverte sous le curseur.
+ *
+ * On compare donc une signature : quelles applications sont ouvertes, et
+ * laquelle est active. C'est tout ce que le dock affiche ; les titres, eux,
+ * ne sont lus qu'a l'ouverture de la liste.
+ * ------------------------------------------------------------------------- */
+static char *
+windows_signature (void)
+{
+    GString *sig = g_string_new (NULL);
+    const GPtrArray *wins = shell_toplevels_get ();
+
+    for (guint i = 0; wins != NULL && i < wins->len; i++) {
+        ShellWindow *w = g_ptr_array_index (wins, i);
+        g_string_append_printf (sig, "%s%c|",
+                                w->app_id ? w->app_id : "",
+                                w->activated ? '*' : '-');
+    }
+    return g_string_free (sig, FALSE);
+}
+
+/* Cette application a-t-elle une fenetre, et l'une d'elles est-elle active ? */
+static void
+app_state (const char *app_id, gboolean *running, gboolean *active)
+{
+    const GPtrArray *wins = shell_toplevels_get ();
+    *running = FALSE;
+    *active  = FALSE;
+
+    for (guint i = 0; wins != NULL && i < wins->len; i++) {
+        ShellWindow *w = g_ptr_array_index (wins, i);
+        if (!shell_app_id_matches (app_id, w->app_id))
+            continue;
+        *running = TRUE;
+        if (w->activated)
+            *active = TRUE;
+    }
+}
+
+static gboolean
+is_pinned (const char *app_id)
+{
+    for (guint i = 0; D.cfg->pinned[i] != NULL; i++)
+        if (shell_app_id_matches (D.cfg->pinned[i], app_id))
+            return TRUE;
+    return FALSE;
+}
+
+static void
+dock_rebuild (void)
+{
+    GtkWidget *child;
+    while ((child = gtk_widget_get_first_child (D.box)) != NULL)
+        gtk_box_remove (GTK_BOX (D.box), child);
+
+    for (guint i = 0; D.cfg->pinned[i] != NULL; i++) {
+        gboolean running, active;
+        app_state (D.cfg->pinned[i], &running, &active);
+        gtk_box_append (GTK_BOX (D.box),
+                        build_dock_item (D.cfg->pinned[i], running, active));
+    }
+
+    /* Applications ouvertes mais non epinglees : elles apparaissent apres un
+     * separateur, sinon une fenetre ouverte depuis un terminal serait
+     * invisible dans le dock et impossible a retrouver. */
+    g_autoptr(GHashTable) vues = g_hash_table_new (g_str_hash, g_str_equal);
+    const GPtrArray *wins = shell_toplevels_get ();
+    gboolean separateur = FALSE;
+
+    for (guint i = 0; wins != NULL && i < wins->len; i++) {
+        ShellWindow *w = g_ptr_array_index (wins, i);
+        if (w->app_id == NULL || *w->app_id == '\0')
+            continue;
+        if (is_pinned (w->app_id) || g_hash_table_contains (vues, w->app_id))
+            continue;
+        g_hash_table_add (vues, w->app_id);
+
+        if (!separateur) {
+            GtkWidget *sep = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+            gtk_widget_add_css_class (sep, "dock-separator");
+            gtk_box_append (GTK_BOX (D.box), sep);
+            separateur = TRUE;
+        }
+
+        gboolean running, active;
+        app_state (w->app_id, &running, &active);
+        gtk_box_append (GTK_BOX (D.box),
+                        build_dock_item (w->app_id, running, active));
+    }
+}
+
+static void
+on_windows_changed (gpointer user_data)
+{
+    (void) user_data;
+
+    g_autofree char *sig = windows_signature ();
+    if (g_strcmp0 (sig, D.signature) == 0)
+        return;
+
+    g_free (D.signature);
+    D.signature = g_steal_pointer (&sig);
+    dock_rebuild ();
 }
 
 /* -------------------------------------------------------------------------
@@ -176,8 +534,9 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_widget_set_halign (dock, GTK_ALIGN_CENTER);
     gtk_widget_set_valign (dock, GTK_ALIGN_END);
 
-    for (guint i = 0; cfg->pinned[i] != NULL; i++)
-        gtk_box_append (GTK_BOX (dock), build_dock_item (cfg->pinned[i], FALSE));
+    D.cfg = cfg;
+    D.box = dock;
+    dock_rebuild ();
 
     gtk_window_set_child (GTK_WINDOW (window), dock);
     gtk_window_present (GTK_WINDOW (window));
@@ -190,6 +549,7 @@ on_activate (GtkApplication *app, gpointer user_data)
     g_application_hold (G_APPLICATION (app));
 
     shell_visibility_init (on_visibilite, window);
+    shell_toplevels_init (on_windows_changed, NULL);
 }
 
 int

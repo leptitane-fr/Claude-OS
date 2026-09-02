@@ -281,3 +281,54 @@ window.dark .qs-card { background-color: @d-surface-alt; }
 window.dark .qs-battery-icon   { color: @d-text; }
 window.dark .qs-battery-pct    { color: @d-text; }
 window.dark .qs-battery-detail { color: @d-text-dim; }
+
+/* Application ouverte : l'icône se détache très légèrement du fond. Le point
+   sous l'icône porte déjà l'information, ceci ne fait que la renforcer — un
+   dock où l'on cherche lequel des points est allumé a raté son but. */
+.dock-item.running            { background-color: @l-surface-alt; }
+window.dark .dock-item.running { background-color: @d-surface-alt; }
+
+/* -------------------------------------------------------------------------
+   Liste des fenêtres d'une application, au survol de son icône
+   ------------------------------------------------------------------------- */
+
+popover.dock-windows-popover > contents {
+  background-color: @l-surface;
+  border: 1px solid @l-border;
+  border-radius: 16px;
+  padding: 6px;
+  box-shadow: 0 12px 36px @l-shadow,
+              0 2px   8px alpha(#000000, 0.12);
+}
+
+window.dark popover.dock-windows-popover > contents {
+  background-color: @d-surface;
+  border-color: @d-border;
+  box-shadow: 0 12px 36px @d-shadow,
+              0 2px   8px alpha(#000000, 0.35);
+}
+
+.dock-window-row {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 10px;
+  padding: 6px 10px;
+  min-height: 0;
+  font-size: 13px;
+  color: @l-text;
+  transition: background-color 120ms ease-out;
+}
+
+window.dark .dock-window-row { color: @d-text; }
+
+/* Le niveau « sunk » plutôt que « alt » : sur le fond du panneau, l'écart de
+   « alt » est de trois points de gris et ne se voit pas. Mesuré au pixel,
+   pas jugé à l'œil. */
+.dock-window-row:hover             { background-color: @l-surface-sunk; }
+window.dark .dock-window-row:hover { background-color: @d-surface-sunk; }
+
+/* La fenêtre au premier plan, pour se repérer quand il y en a plusieurs. */
+.dock-window-row.active,
+window.dark .dock-window-row.active { background-color: @accent; color: #ffffff; }

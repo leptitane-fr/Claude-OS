@@ -3,23 +3,23 @@
  *
  * Ce module ne fait qu'une chose : la bascule manuelle au clavier.
  *
- * LE PLEIN ECRAN N'EST PAS TRAITE ICI, ET C'EST DELIBERE
+ * LE PLEIN ECRAN NE MASQUE RIEN, ET C'EST VOULU
  *
- * labwc 0.8.3 -- la version de Debian trixie -- desactive lui-meme toute la
- * couche TOP du layer-shell des qu'une fenetre plein ecran n'a aucune
- * fenetre au-dessus d'elle (src/desktop.c, desktop_update_top_layer_
- * visibility). Le dock et la barre disparaissent donc sans une ligne de
- * notre part, et selon une regle meilleure que celle qu'on aurait ecrite :
- * elle raisonne sur l'empilement reel, pas seulement sur le focus.
+ * Le dock et la barre restent affiches PAR-DESSUS une fenetre plein ecran,
+ * qui de son cote occupe bien tout l'ecran : une surface layer-shell ne
+ * reserve rien face a une fenetre plein ecran, seules les fenetres
+ * maximisees s'arretent au-dessus du dock.
  *
- * Une premiere version de ce fichier suivait les fenetres par
- * wlr-foreign-toplevel-management-v1 pour deduire le plein ecran. Elle
- * fonctionnait, mais dupliquait une politique qui appartient au
- * compositeur, avec un protocole de plus a embarquer. Elle a ete retiree.
+ * C'est le choix de l'utilisateur, pris apres essai sur la machine, et il
+ * est plus pratique que le masquage automatique : on garde l'heure, la
+ * batterie et le dock sous les yeux pendant une video ou une visio, et la
+ * touche Windows suffit a degager l'ecran quand on le veut vraiment.
  *
- * A verifier au premier demarrage sur la machine : passer Chromium en plein
- * ecran doit faire disparaitre dock et barre. Si ce n'est pas le cas, c'est
- * ici que le suivi des fenetres devra revenir.
+ * Note pour plus tard : j'avais annonce l'inverse, en lisant dans le code de
+ * labwc 0.8.3 un desactivation de la couche TOP sous une fenetre plein ecran
+ * (desktop_update_top_layer_visibility). Sur la machine, cela ne se produit
+ * pas. Lire le code d'un compositeur dit ce qu'il contient, pas ce qu'il
+ * fait dans une situation donnee.
  * ========================================================================= */
 #pragma once
 
