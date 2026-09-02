@@ -21,6 +21,7 @@
 #include <gtk/gtk.h>
 #include <gtk4-layer-shell.h>
 
+#include "visibility.h"
 #include "panel.h"
 #include "sysfs.h"
 
@@ -193,6 +194,36 @@ icon (const char *name, int size)
     return img;
 }
 
+/* -------------------------------------------------------------------------
+ * Bascule manuelle de la visibilite
+ *
+ * La bascule est exposee comme action GTK : chaque composant la publie sur
+ * le bus de session sous son identifiant d'application, et le raccourci
+ * clavier du compositeur l'appelle par « gapplication action ». Aucun
+ * demon, aucune socket a nous, aucune chasse au numero de processus.
+ * ------------------------------------------------------------------------- */
+static void
+on_visibilite (gboolean visible, gpointer window)
+{
+    /* Demasquer et masquer la surface, plutot que l'animer : deplacer une
+     * surface layer-shell demanderait un reveil par image, pour un
+     * mouvement de quelques dixiemes de seconde. Sur une machine dont
+     * l'autonomie est la raison d'etre, l'apparition instantanee est le bon
+     * compromis. */
+    gtk_widget_set_visible (GTK_WIDGET (window), visible);
+}
+
+static void
+on_action_basculer (GSimpleAction *action, GVariant *param, gpointer data)
+{
+    (void) action; (void) param; (void) data;
+    shell_visibility_toggle ();
+}
+
+static const GActionEntry actions[] = {
+    { "basculer", on_action_basculer, NULL, NULL, NULL, { 0 } },
+};
+
 typedef struct {
     gboolean dark;
     gboolean apercu;    /* valeurs fixes dans le panneau                     */
@@ -276,6 +307,11 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     gtk_window_set_child (GTK_WINDOW (window), button);
     gtk_window_present (GTK_WINDOW (window));
+
+    g_action_map_add_action_entries (G_ACTION_MAP (app), actions,
+                                     G_N_ELEMENTS (actions), NULL);
+    g_application_hold (G_APPLICATION (app));
+    shell_visibility_init (on_visibilite, window);
 
     if (opt->ouvrir)
         g_idle_add (open_panel_once, button);

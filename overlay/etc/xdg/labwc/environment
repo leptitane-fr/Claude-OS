@@ -1,0 +1,10 @@
+# Environnement de la session labwc.
+#
+# La disposition du clavier vient de KEYMAP dans la configuration de
+# construction : @KEYMAP@ est remplacé par build.sh. labwc lit ce fichier
+# avant de créer le clavier XKB, il n'y a pas d'autre moment pour le dire.
+XKB_DEFAULT_LAYOUT=@KEYMAP@
+
+# GTK doit parler Wayland directement. Sans cela il peut retomber sur X11
+# via Xwayland, ce qui ajoute un serveur entier en mémoire pour rien.
+GDK_BACKEND=wayland

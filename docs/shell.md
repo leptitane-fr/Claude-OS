@@ -64,6 +64,7 @@ shell/
   src/dock.c           dock central                        (fait)
   src/status.c         barre d'état bas-droite             (fait)
   src/panel.c          réglages rapides, ouverts au clic   (fait)
+  src/visibility.c     bascule dock + barre au clavier     (fait)
   src/sysfs.c          lecture batterie, partagée          (fait)
   src/launcher.c       lanceur d'applications              (à venir)
   test-render.sh       banc d'essai visuel sans écran
@@ -140,6 +141,71 @@ début de l'itération suivante. Un `g_autoptr` sur l'une d'elles les
 libérerait une seconde fois — la recherche de l'adaptateur BlueZ utilise
 donc des pointeurs nus, et ne libère à la main qu'en cas de sortie
 anticipée.
+
+## Masquage : ce que fait le compositeur, ce que fait le shell
+
+Le partage est net, et il a été tranché par la lecture du code de labwc
+plutôt qu'à l'estime.
+
+**Le plein écran appartient au compositeur.** labwc 0.8.3 — la version de
+Debian trixie — désactive lui-même toute la couche `TOP` du layer-shell dès
+qu'une fenêtre plein écran n'a aucune fenêtre au-dessus d'elle
+(`src/desktop.c`, `desktop_update_top_layer_visibility`). Le dock et la
+barre disparaissent donc sans une ligne de notre part, et selon une règle
+meilleure que celle qu'on aurait écrite : elle raisonne sur l'empilement
+réel, pas seulement sur le focus.
+
+Une première version suivait les fenêtres par
+`wlr-foreign-toplevel-management-v1` pour en déduire le plein écran. Elle
+fonctionnait — les événements arrivaient, les états étaient suivis — mais
+elle dupliquait dans le shell une politique qui appartient au compositeur,
+au prix d'un protocole embarqué dans le dépôt. Elle a été retirée.
+
+Ce n'est pas une supposition : labwc **0.7.1** (celui du conteneur de
+développement) ne transmet jamais l'état `fullscreen` sur ce protocole —
+seul `activated` circule, mesuré en journalisant le tableau d'états brut.
+labwc **0.8.3** appelle bien `wlr_foreign_toplevel_handle_v1_set_fullscreen`
+(`src/foreign-toplevel/wlr-foreign.c`). C'est cette différence de version
+qui a mené à lire le code plutôt qu'à conclure de l'essai.
+
+**À vérifier au premier démarrage** : passer Chromium en plein écran doit
+faire disparaître dock et barre. Sinon, le suivi des fenêtres devra revenir
+dans `visibility.c`.
+
+**La bascule manuelle appartient au shell.** Le compositeur n'a aucun moyen
+de masquer une surface layer-shell à la demande. Chaque composant publie
+donc une action `basculer` sur le bus de session sous son identifiant
+d'application, et `/usr/local/bin/claude-os-shell-basculer` les appelle
+toutes les deux :
+
+```sh
+gapplication action os.claude.shell.dock   basculer
+gapplication action os.claude.shell.status basculer
+```
+
+Pas de démon d'orchestration, pas de socket à nous, pas de chasse au numéro
+de processus. Les deux appels sont indépendants : si un composant n'est pas
+lancé, l'autre bascule quand même.
+
+`g_application_hold()` est indispensable côté composant — sans lui, masquer
+la seule fenêtre ferait sortir GApplication de sa boucle et le dock
+disparaîtrait pour de bon au lieu de se cacher.
+
+### La touche Windows : deux liaisons, et pourquoi
+
+Mesuré ici, clavier virtuel à l'appui : labwc déclenche `<keybind
+key="Super_L">` quand la touche arrive comme **touche ordinaire**, mais pas
+quand elle arrive comme **modificateur seul**. Le comportement d'un clavier
+réel — où l'appui produit les deux à la fois — n'a pas pu être reproduit
+sans matériel.
+
+`rc.xml` fournit donc les deux liaisons, `Super_L` et `Super+Espace`. Si la
+touche Windows seule se déclenche en trop pendant d'autres raccourcis Super,
+supprimer la première ligne suffit.
+
+L'apparition est instantanée, sans animation : déplacer une surface
+layer-shell demanderait un réveil par image pour quelques dixièmes de
+seconde de mouvement.
 
 ## Zones réservées : le piège de l'empilement
 

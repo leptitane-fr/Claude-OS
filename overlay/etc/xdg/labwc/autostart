@@ -1,0 +1,9 @@
+#!/bin/sh
+# Composants du shell Claude-OS, lancés par labwc au démarrage de la session.
+#
+# Deux processus séparés et non un seul : un défaut dans la barre d'état ne
+# doit pas emporter le dock, et chacun peut être relancé isolément sans
+# fermer la session.
+
+/usr/bin/claude-os-dock   &
+/usr/bin/claude-os-status &

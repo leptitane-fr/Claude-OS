@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<!--
+  Claude-OS — configuration de labwc
+
+  Volontairement minimale : ce compositeur ne sert qu'à porter le shell
+  sur-mesure. Tout ce qui relève de l'apparence est dans le shell, pas ici.
+-->
+<labwc_config>
+
+  <core>
+    <!-- Le dock et la barre dessinent déjà tout ce qu'il faut ; les
+         décorations de labwc feraient double emploi visuellement. Les
+         fenêtres gardent leurs propres décorations côté client. -->
+    <decoration>client</decoration>
+    <gap>0</gap>
+  </core>
+
+  <theme>
+    <!-- Pas d'ombre portée du compositeur : les surfaces du shell portent
+         déjà la leur, en CSS, calculée une seule fois. -->
+    <dropShadows>no</dropShadows>
+  </theme>
+
+  <keyboard>
+    <!-- Masquer / afficher le dock et la barre d'état.
+
+         Deux liaisons pour la même action, et ce n'est pas de l'excès de
+         zèle. Mesuré ici : labwc déclenche bien « Super_L » quand la touche
+         arrive comme touche ordinaire, mais pas quand elle arrive comme
+         modificateur seul. Le comportement du clavier réel n'a pas pu être
+         reproduit sans matériel, donc Super+Espace est fourni comme
+         solution de repli garantie.
+
+         Si la touche Windows seule se déclenche en trop pendant d'autres
+         raccourcis Super, supprimer la première liaison suffit. -->
+    <keybind key="Super_L">
+      <action name="Execute" command="/usr/local/bin/claude-os-shell-basculer"/>
+    </keybind>
+    <keybind key="W-space">
+      <action name="Execute" command="/usr/local/bin/claude-os-shell-basculer"/>
+    </keybind>
+
+    <keybind key="W-Return">
+      <action name="Execute" command="xfce4-terminal"/>
+    </keybind>
+    <keybind key="A-F4">
+      <action name="Close"/>
+    </keybind>
+    <keybind key="W-Up">
+      <action name="ToggleMaximize"/>
+    </keybind>
+    <keybind key="W-f">
+      <action name="ToggleFullscreen"/>
+    </keybind>
+  </keyboard>
+
+</labwc_config>

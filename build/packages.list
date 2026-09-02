@@ -141,6 +141,11 @@ lm-sensors
 labwc
 gtk4-layer-shell              # ancrage du dock hors du flux des fenetres
 
+# gapplication : le raccourci clavier de labwc appelle par lui l'action
+# « basculer » que le dock et la barre publient sur le bus de session. Sans
+# ce paquet, la touche de masquage ne ferait rien.
+libglib2.0-bin
+
 # Papirus plutot qu'Adwaita : verifie a l'ecran, Adwaita a abandonne les noms
 # d'icones herites (web-browser, utilities-terminal...) que la plupart des
 # .desktop declarent encore, et affiche un pictogramme generique a leur place.

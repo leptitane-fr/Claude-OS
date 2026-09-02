@@ -513,6 +513,7 @@ grep -rlZ '@[A-Z_]*@' "$MNT/etc" "$MNT/usr/local" 2>/dev/null | while IFS= read 
         -e "s|@USB_AUTOSUSPEND@|$USB_AUTOSUSPEND|g" \
         -e "s|@DGPU_BDF@|$DGPU_BDF|g" \
         -e "s|@CMDLINE_DGPU@|$CMDLINE_DGPU|g" \
+        -e "s|@KEYMAP@|$KEYMAP|g" \
         "$f"
 done
 
