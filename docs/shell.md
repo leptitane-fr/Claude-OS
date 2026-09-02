@@ -208,9 +208,41 @@ Un service factice monté sur un bus système privé, avec des cas choisis pour
 | Clic sur un réseau connu | `ActivateConnection("/", carte, borne)` |
 | Clic sur un réseau protégé | champ déplié, puis `AddAndActivateConnection` avec `wpa-psk` |
 
-**Le Bluetooth n'a pas eu droit au même traitement** : aucun faux BlueZ n'a
-été écrit. Sa mise en page et sa navigation sont vérifiées, ses appels ne le
-sont pas.
+Un faux BlueZ a suivi, avec un adaptateur et trois appareils : un téléphone
+annonçant le profil NAP, un casque connecté, une enceinte non appairée dont
+l'appairage est refusé. Vérifié de la même façon :
+
+| Cas | Résultat |
+|---|---|
+| Téléphone annonçant NAP | `AddAndActivateConnection` avec `bluetooth`/`panu` |
+| Adresse `AA:BB:…` | convertie en six octets pour `bdaddr` |
+| Casque connecté, sans NAP | `Device1.Disconnect` |
+| Enceinte non appairée | `Device1.Pair`, refus affiché à l'écran |
+
+### Le partage de connexion n'est pas « se connecter »
+
+`org.bluez.Device1.Connect` active les profils par défaut de l'appareil —
+audio, entrée — et **n'apporte aucun réseau**. C'était le défaut : cliquer un
+téléphone dans la liste ne faisait rien d'utile, et ne disait rien.
+
+Le partage passe par **NetworkManager**, qui monte la liaison PAN puis y fait
+tourner DHCP. Le shell se borne à lui décrire le profil voulu : type
+`bluetooth`, `bdaddr` en six octets, `type=panu` — nous sommes le client, le
+téléphone est le point d'accès. Le périphérique passé est `"/"` : NM choisit
+lui-même celui qui convient.
+
+L'action proposée dépend donc de ce que l'appareil **annonce** : le profil
+NAP (`00001116-…`) est cherché dans ses `UUIDs`. Sans lui, aucun partage
+n'est possible et la ligne propose simplement de connecter.
+
+### Un clic dit toujours ce qu'il a fait
+
+Chaque ligne annonce l'action à venir — « Partager la connexion »,
+« Appairer », « Déconnecter » — et non le seul état, qui ne disait ni qu'il
+fallait cliquer ni ce qui arriverait. Le résultat s'affiche sous la liste,
+succès comme échec, avec le message de BlueZ débarrassé de son préfixe
+d'erreur illisible. Un clic sans effet visible ni explication est le pire des
+deux mondes.
 
 ### Les bascules ne mentent pas
 
