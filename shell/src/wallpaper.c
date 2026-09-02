@@ -58,11 +58,7 @@ on_config_reloaded (ShellConfig *cfg, gpointer data)
 {
     Wallpaper *w = data;
 
-    if (cfg->dark)
-        gtk_widget_add_css_class (w->window, "dark");
-    else
-        gtk_widget_remove_css_class (w->window, "dark");
-
+    shell_styles_load (cfg->theme);
     wallpaper_apply (w, cfg);
     shell_config_free (cfg);
 }
@@ -76,8 +72,6 @@ on_activate (GtkApplication *app, gpointer user_data)
     w->window = gtk_application_window_new (app);
     gtk_widget_add_css_class (w->window, "shell");
     gtk_widget_add_css_class (w->window, "fond");
-    if (cfg->dark)
-        gtk_widget_add_css_class (w->window, "dark");
 
     gtk_layer_init_for_window (GTK_WINDOW (w->window));
     /* BACKGROUND : sous toutes les fenetres, y compris les autres surfaces
@@ -114,7 +108,7 @@ main (int argc, char **argv)
     ShellConfig *cfg = shell_config_load ();
     GtkApplication *app = gtk_application_new ("os.claude.shell.fond",
                                                G_APPLICATION_DEFAULT_FLAGS);
-    g_signal_connect (app, "startup",  G_CALLBACK (shell_styles_load), NULL);
+    g_signal_connect (app, "startup",  G_CALLBACK (shell_styles_startup), cfg);
     g_signal_connect (app, "activate", G_CALLBACK (on_activate), cfg);
 
     int status = g_application_run (G_APPLICATION (app), 0, NULL);

@@ -39,7 +39,7 @@ modifier (Modif apply, gpointer data)
     shell_config_free (cfg);
 }
 
-static void set_dark      (ShellConfig *c, gpointer d) { c->dark = GPOINTER_TO_INT (d); }
+static void set_theme     (ShellConfig *c, gpointer d) { g_free (c->theme);      c->theme      = g_strdup (d); }
 static void set_reserve   (ShellConfig *c, gpointer d) { c->reserve_space = GPOINTER_TO_INT (d); }
 static void set_fill      (ShellConfig *c, gpointer d) { c->wallpaper_fill = GPOINTER_TO_INT (d); }
 static void set_font      (ShellConfig *c, gpointer d) { g_free (c->font);       c->font       = g_strdup (d); }
@@ -123,10 +123,23 @@ selectionner (GtkDropDown *dd, const char *valeur)
     }
 }
 static void
-on_theme (GtkToggleButton *b, gpointer data)
+on_theme (GObject *dd, GParamSpec *ps, gpointer data)
 {
-    if (gtk_toggle_button_get_active (b))
-        modifier (set_dark, data);
+    (void) ps; (void) data;
+
+    guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
+    if (i == GTK_INVALID_LIST_POSITION)
+        return;
+
+    const ShellTheme *t = &shell_themes ()[i];
+    modifier (set_theme, (gpointer) t->id);
+
+    /* Le panneau se repeint lui-meme sans attendre : il est la fenetre que
+     * l'utilisateur regarde en choisissant, ce serait etrange qu'elle soit
+     * la derniere a changer. */
+    shell_styles_load (t->id);
+    g_object_set (gtk_settings_get_default (),
+                  "gtk-application-prefer-dark-theme", t->sombre, NULL);
 }
 
 /* Une liste de familles plutot qu'un GtkFontDialogButton, pour trois
@@ -137,6 +150,8 @@ on_theme (GtkToggleButton *b, gpointer data)
  * GTK affichait « None » tant qu'on ne lui donnait pas une taille, en
  * signalant au passage un g_list_model_get_n_items sur un modele pas encore
  * pret -- deux symptomes pour une commodite dont on n'a pas l'usage. */
+#define AUTO_POLICE "Automatique (selon le thème)"
+
 static int
 comparer_noms (gconstpointer a, gconstpointer b)
 {
@@ -157,6 +172,9 @@ familles_polices (GtkWidget *widget)
     g_free (familles);
 
     g_ptr_array_sort (noms, comparer_noms);
+    /* En tete, le choix « laisser le theme decider » : c'est le defaut, et
+     * c'est ce qui donne sa police propre a chaque theme. */
+    g_ptr_array_insert (noms, 0, (gpointer) AUTO_POLICE);
     g_ptr_array_add (noms, NULL);
 
     return gtk_string_list_new ((const char * const *) noms->pdata);
@@ -168,8 +186,12 @@ on_police (GObject *dd, GParamSpec *ps, gpointer data)
     (void) ps; (void) data;
 
     GtkStringObject *sel = gtk_drop_down_get_selected_item (GTK_DROP_DOWN (dd));
-    if (sel != NULL)
-        modifier (set_font, (gpointer) gtk_string_object_get_string (sel));
+    if (sel == NULL)
+        return;
+
+    const char *choix = gtk_string_object_get_string (sel);
+    modifier (set_font,
+              (gpointer) (g_strcmp0 (choix, AUTO_POLICE) == 0 ? "" : choix));
 }
 
 /* Themes d'icones installes : un repertoire avec un index.theme.
@@ -294,8 +316,7 @@ commutateur (gboolean actif, Modif apply)
 static void
 on_activate (GtkApplication *app, gpointer user_data)
 {
-    (void) user_data;
-    g_autoptr(ShellConfig) cfg = shell_config_load ();
+    ShellConfig *cfg = user_data;
 
     shell_config_apply (cfg);
 
@@ -309,8 +330,6 @@ on_activate (GtkApplication *app, gpointer user_data)
     GtkWidget *window = gtk_application_window_new (app);
     gtk_widget_add_css_class (window, "shell");
     gtk_widget_add_css_class (window, "reglages");
-    if (cfg->dark)
-        gtk_widget_add_css_class (window, "dark");
     gtk_window_set_title (GTK_WINDOW (window), "Réglages");
     gtk_window_set_default_size (GTK_WINDOW (window), 520, 600);
 
@@ -320,19 +339,22 @@ on_activate (GtkApplication *app, gpointer user_data)
     /* --- Apparence --- */
     GtkWidget *apparence = carte ("Apparence");
 
-    GtkWidget *clair  = gtk_toggle_button_new_with_label ("Clair");
-    GtkWidget *sombre = gtk_toggle_button_new_with_label ("Sombre");
-    gtk_toggle_button_set_group (GTK_TOGGLE_BUTTON (sombre), GTK_TOGGLE_BUTTON (clair));
-    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (cfg->dark ? sombre : clair), TRUE);
-    g_signal_connect (clair,  "toggled", G_CALLBACK (on_theme), GINT_TO_POINTER (FALSE));
-    g_signal_connect (sombre, "toggled", G_CALLBACK (on_theme), GINT_TO_POINTER (TRUE));
-
-    GtkWidget *paire = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_add_css_class (paire, "linked");
-    gtk_widget_add_css_class (paire, "reglages-paire");
-    gtk_box_append (GTK_BOX (paire), clair);
-    gtk_box_append (GTK_BOX (paire), sombre);
-    ligne (apparence, "Thème", NULL, paire);
+    /* La liste suit l'ordre de la table des themes : l'indice choisi y
+     * renvoie directement, sans table de correspondance a maintenir. */
+    GtkStringList *noms = gtk_string_list_new (NULL);
+    guint choisi = 0;
+    for (guint i = 0; shell_themes ()[i].id != NULL; i++) {
+        gtk_string_list_append (noms, shell_themes ()[i].nom);
+        if (g_strcmp0 (shell_themes ()[i].id, cfg->theme) == 0)
+            choisi = i;
+    }
+    GtkWidget *theme = gtk_drop_down_new (G_LIST_MODEL (noms), NULL);
+    gtk_drop_down_set_selected (GTK_DROP_DOWN (theme), choisi);
+    g_signal_connect (theme, "notify::selected", G_CALLBACK (on_theme), NULL);
+    ligne (apparence, "Thème",
+           "Les thèmes Claude reprennent les couleurs de la charte "
+           "d'Anthropic. Hommage, pas habillage officiel.",
+           theme);
 
     GtkStringList *polices = familles_polices (window);
     GtkWidget *police = gtk_drop_down_new (G_LIST_MODEL (polices), NULL);
@@ -341,9 +363,13 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_drop_down_set_expression (GTK_DROP_DOWN (police),
         gtk_property_expression_new (GTK_TYPE_STRING_OBJECT, NULL, "string"));
     gtk_drop_down_set_enable_search (GTK_DROP_DOWN (police), TRUE);
-    selectionner (GTK_DROP_DOWN (police), cfg->font);
+    selectionner (GTK_DROP_DOWN (police),
+                  (cfg->font != NULL && *cfg->font != '\0') ? cfg->font : AUTO_POLICE);
     g_signal_connect (police, "notify::selected", G_CALLBACK (on_police), NULL);
-    ligne (apparence, "Police de l'interface", NULL, police);
+    ligne (apparence, "Police de l'interface",
+           "Les thèmes Claude utilisent Lato : les fontes d'Anthropic sont "
+           "propriétaires et ne peuvent pas être embarquées.",
+           police);
 
     GtkWidget *icones = gtk_drop_down_new (G_LIST_MODEL (themes_icones ()), NULL);
     selectionner (GTK_DROP_DOWN (icones), cfg->icon_theme);
@@ -406,10 +432,11 @@ main (int argc, char **argv)
 {
     (void) argc; (void) argv;
 
+    ShellConfig *cfg = shell_config_load ();
     GtkApplication *app = gtk_application_new ("os.claude.shell.reglages",
                                                G_APPLICATION_DEFAULT_FLAGS);
-    g_signal_connect (app, "startup",  G_CALLBACK (shell_styles_load), NULL);
-    g_signal_connect (app, "activate", G_CALLBACK (on_activate), NULL);
+    g_signal_connect (app, "startup",  G_CALLBACK (shell_styles_startup), cfg);
+    g_signal_connect (app, "activate", G_CALLBACK (on_activate), cfg);
 
     int status = g_application_run (G_APPLICATION (app), 0, NULL);
     g_object_unref (app);

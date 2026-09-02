@@ -11,6 +11,37 @@ static const char *default_pinned[] = {
     "claude-os-reglages", NULL
 };
 
+/* -------------------------------------------------------------------------
+ * Themes
+ * ------------------------------------------------------------------------- */
+static const ShellTheme themes[] = {
+    { "clair",         "Clair",         FALSE },
+    { "sombre",        "Sombre",        TRUE  },
+    { "claude-clair",  "Claude clair",  FALSE },
+    { "claude-sombre", "Claude sombre", TRUE  },
+    { NULL, NULL, FALSE },
+};
+
+const ShellTheme *
+shell_themes (void)
+{
+    return themes;
+}
+
+static const ShellTheme *
+theme_par_id (const char *id)
+{
+    /* « light » et « dark » restent acceptes : ce sont les noms qu'utilisaient
+     * les configurations ecrites avant l'arrivee des themes nommes. */
+    if (g_strcmp0 (id, "light") == 0) id = "clair";
+    if (g_strcmp0 (id, "dark")  == 0) id = "sombre";
+
+    for (guint i = 0; themes[i].id != NULL; i++)
+        if (g_strcmp0 (themes[i].id, id) == 0)
+            return &themes[i];
+    return NULL;
+}
+
 static char *
 config_path (void)
 {
@@ -27,13 +58,17 @@ shell_config_load (void)
 
     /* Valeurs par defaut, ecrasees ensuite si le fichier en fournit. */
     cfg->pinned = g_strdupv ((char **) default_pinned);
-    cfg->font   = g_strdup ("Inter");
+    /* Vide : c'est le theme qui fixe la police. Un nom ici prendrait le pas
+     * sur les quatre themes a la fois, ce que personne ne demande par
+     * defaut. */
+    cfg->font   = g_strdup ("");
     /* Papirus plutot qu'Adwaita : Adwaita a abandonne les noms d'icones
      * herites (web-browser, utilities-terminal...) que la plupart des
      * fichiers .desktop declarent encore, et affiche donc un pictogramme
      * generique pour la moitie des applications. Papirus les conserve, et
      * son style plat et arrondi est plus proche de ChromeOS. */
     cfg->icon_theme = g_strdup ("Papirus");
+    cfg->theme  = g_strdup ("clair");
     cfg->dark   = FALSE;
     /* Par defaut le dock ne repousse rien : afficher ou masquer le dock ne
      * doit pas redimensionner la fenetre en dessous, il doit passer par
@@ -53,7 +88,7 @@ shell_config_load (void)
     }
 
     g_autofree char *font = g_key_file_get_string (kf, "appearance", "font", NULL);
-    if (font != NULL && *font != '\0') {
+    if (font != NULL) {
         g_free (cfg->font);
         cfg->font = g_steal_pointer (&font);
     }
@@ -65,8 +100,17 @@ shell_config_load (void)
     }
 
     g_autofree char *theme = g_key_file_get_string (kf, "appearance", "theme", NULL);
-    if (g_strcmp0 (theme, "dark") == 0)
-        cfg->dark = TRUE;
+    const ShellTheme *t = theme_par_id (theme);
+    if (t != NULL) {
+        g_free (cfg->theme);
+        cfg->theme = g_strdup (t->id);
+        cfg->dark  = t->sombre;
+    } else if (theme != NULL && *theme != '\0') {
+        /* Un thème inconnu -- faute de frappe, ou fichier écrit par une
+         * version ultérieure. On garde le défaut plutôt que de refuser de
+         * démarrer, et on le dit. */
+        g_message ("thème « %s » inconnu, « %s » utilisé", theme, cfg->theme);
+    }
 
     g_autoptr(GError) e = NULL;
     gboolean reserve = g_key_file_get_boolean (kf, "dock", "reserve_space", &e);
@@ -95,6 +139,7 @@ shell_config_free (ShellConfig *cfg)
     g_strfreev (cfg->pinned);
     g_free (cfg->font);
     g_free (cfg->icon_theme);
+    g_free (cfg->theme);
     g_free (cfg->wallpaper);
     g_free (cfg);
 }
@@ -122,7 +167,7 @@ shell_config_save (const ShellConfig *cfg, GError **error)
     g_key_file_set_boolean (kf, "dock", "reserve_space", cfg->reserve_space);
     g_key_file_set_string  (kf, "appearance", "font", cfg->font);
     g_key_file_set_string  (kf, "appearance", "icon_theme", cfg->icon_theme);
-    g_key_file_set_string  (kf, "appearance", "theme", cfg->dark ? "dark" : "light");
+    g_key_file_set_string  (kf, "appearance", "theme", cfg->theme);
     g_key_file_set_string  (kf, "wallpaper", "image", cfg->wallpaper);
     g_key_file_set_boolean (kf, "wallpaper", "fill", cfg->wallpaper_fill);
 
@@ -188,21 +233,52 @@ shell_config_watch (ShellConfigChangedFunc cb, gpointer user_data)
 }
 
 void
-shell_styles_load (void)
+shell_styles_load (const char *theme)
 {
-    const char *files[] = { "style/tokens.css", "style/shell.css" };
+    /* Deux fournisseurs, gardes entre les appels. Celui du theme est
+     * RECHARGE a chaque changement ; celui des regles n'est charge qu'une
+     * fois. En creer de nouveaux a chaque appel empilerait les anciennes
+     * couleurs dans la cascade.
+     *
+     * Recharger le seul fichier de jetons suffit : GTK re-resout les
+     * couleurs nommees des regles quand le fournisseur qui les definit
+     * change. Verifie dans les deux sens plutot que suppose -- le dock suit
+     * bien le theme sans que shell.css soit relu. */
+    static GtkCssProvider *theme_provider = NULL;
+    static GtkCssProvider *rules_provider = NULL;
 
-    for (guint i = 0; i < G_N_ELEMENTS (files); i++) {
-        GtkCssProvider *provider = gtk_css_provider_new ();
-        g_autofree char *path = g_build_filename (SHELL_DATA_DIR, files[i], NULL);
+    if (theme_par_id (theme) == NULL)
+        theme = "clair";
 
-        gtk_css_provider_load_from_path (provider, path);
+    if (theme_provider == NULL) {
+        theme_provider = gtk_css_provider_new ();
         gtk_style_context_add_provider_for_display (
-            gdk_display_get_default (),
-            GTK_STYLE_PROVIDER (provider),
+            gdk_display_get_default (), GTK_STYLE_PROVIDER (theme_provider),
             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-        g_object_unref (provider);
     }
+
+    g_autofree char *nom  = g_strdup_printf ("theme-%s.css", theme);
+    g_autofree char *path = g_build_filename (SHELL_DATA_DIR, "style", nom, NULL);
+    gtk_css_provider_load_from_path (theme_provider, path);
+
+    if (rules_provider != NULL)
+        return;
+
+    /* Les regles apres le theme, a priorite egale : a egalite, le dernier
+     * fournisseur ajoute l'emporte. */
+    rules_provider = gtk_css_provider_new ();
+    g_autofree char *rules = g_build_filename (SHELL_DATA_DIR, "style", "shell.css", NULL);
+    gtk_css_provider_load_from_path (rules_provider, rules);
+    gtk_style_context_add_provider_for_display (
+        gdk_display_get_default (), GTK_STYLE_PROVIDER (rules_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
+void
+shell_styles_startup (GtkApplication *app, gpointer cfg)
+{
+    (void) app;
+    shell_styles_load (((const ShellConfig *) cfg)->theme);
 }
 
 void
@@ -221,9 +297,6 @@ shell_config_apply (const ShellConfig *cfg)
      * cascade. */
     static GtkCssProvider *font_provider = NULL;
 
-    if (cfg->font == NULL || *cfg->font == '\0')
-        return;
-
     if (font_provider == NULL) {
         font_provider = gtk_css_provider_new ();
         gtk_style_context_add_provider_for_display (
@@ -231,7 +304,12 @@ shell_config_apply (const ShellConfig *cfg)
             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
     }
 
-    g_autofree char *rule = g_strdup_printf ("window.shell { font-family: \"%s\"; }",
-                                             cfg->font);
+    /* Police vide = « celle du theme » : on VIDE la regle au lieu de ne rien
+     * faire, sinon revenir a l'automatique laisserait l'ancienne famille
+     * dans la cascade. */
+    g_autofree char *rule =
+        (cfg->font != NULL && *cfg->font != '\0')
+        ? g_strdup_printf ("window.shell { font-family: \"%s\"; }", cfg->font)
+        : g_strdup ("");
     gtk_css_provider_load_from_string (font_provider, rule);
 }

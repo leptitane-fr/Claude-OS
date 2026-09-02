@@ -108,9 +108,9 @@ pinned=chromium;thunar;xfce4-terminal;claude-os-reglages
 reserve_space=false
 
 [appearance]
-font=Inter
+font=
 icon_theme=Papirus
-theme=dark
+theme=claude-sombre
 FIN
 ```
 
@@ -147,6 +147,7 @@ et donc le raccourci de masquage — n'aurait personne à qui parler.
 | Survol d'une icône d'application ouverte | liste de ses fenêtres, cliquables |
 | Glisser une icône épinglée | réorganise le dock, ordre enregistré |
 | Icône « Réglages » du dock | thème, police, icônes, fond d'écran |
+| Quatre thèmes | Clair, Sombre, Claude clair, Claude sombre |
 | `Super+Maj+Q` | quitter la session |
 
 `Super+Entrée` et `Super+B` sont des filets de sécurité : tant que le shell
@@ -210,6 +211,14 @@ rien ne permettrait de l'ouvrir :
 ```sh
 sed -i 's/^pinned=.*/pinned=chromium;thunar;xfce4-terminal;claude-os-reglages/' \
     ~/.config/claude-os/shell.conf
+```
+
+Les thèmes Claude ont besoin de Lato, et une police vide laisse le thème
+décider de la sienne :
+
+```sh
+sudo apt-get install --no-install-recommends fonts-lato
+sed -i 's/^font=.*/font=/' ~/.config/claude-os/shell.conf
 ```
 
 Dans la session d'essai, `Super+Maj+Q` puis relancer `dbus-run-session labwc`

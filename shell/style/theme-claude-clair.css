@@ -1,0 +1,58 @@
+/* =========================================================================
+   Claude-OS — thème « Claude clair »
+
+   Les couleurs viennent de la feuille de style de marque d'Anthropic
+   (anthropic.com, ant-brand.shared.css), relevées plutôt que citées de
+   mémoire. Les noms d'origine sont conservés en commentaire.
+
+      ivory-light   #faf9f5      clay          #d97757
+      ivory-medium  #f0eee6      accent        #c6613f
+      ivory-dark    #e8e6dc      kraft         #d4a27f
+      oat           #e3dacc      olive         #788c5d
+      slate-dark    #141413      cloud-dark    #87867f
+      slate-light   #5e5d59      cloud-medium  #b0aea5
+
+   Ce thème est un hommage, pas un habillage officiel : les fontes
+   « Anthropic Sans » et « Anthropic Serif » du site sont propriétaires et
+   ne peuvent pas être embarquées. Lato leur sert de substitut libre — un
+   sans humaniste, plus chaud qu'Inter, qui tient le petit corps.
+   ========================================================================= */
+
+@define-color accent            #d97757;  /* clay                            */
+@define-color accent-hover      #e08a6e;
+/* Texte posé sur l'accent : blanc dans les quatre thèmes, mais nommé pour
+   qu'un thème futur puisse en décider autrement. */
+@define-color on-accent         #ffffff;
+
+@define-color accent-press      #c6613f;  /* accent                          */
+
+@define-color surface           #faf9f5;  /* ivory-light                     */
+@define-color surface-alt       #f0eee6;  /* ivory-medium                    */
+@define-color surface-sunk      #e3dacc;  /* oat                             */
+
+@define-color text              #141413;  /* slate-dark                      */
+@define-color text-dim          #5e5d59;  /* slate-light                     */
+
+/* Les ombres tirent sur le brun plutôt que sur le noir : une ombre neutre
+   sur un fond crème le fait paraître sale. */
+@define-color border            alpha(#141413, 0.12);
+@define-color shadow            alpha(#3d3d3a, 0.16);
+@define-color shadow-close      alpha(#3d3d3a, 0.10);
+
+@define-color ok                #788c5d;  /* olive                           */
+@define-color warn              #d4a27f;  /* kraft                           */
+/* La palette de marque n'a pas de rouge : une alerte doit rester lisible
+   comme telle, celui-ci est construit dans la même famille chaude. */
+@define-color danger            #b3402f;
+
+window.shell { font-family: "Lato", "Inter", sans-serif; }
+
+/* Halos empruntés aux teintes secondaires de la marque : clay en haut,
+   cactus en bas, très dilués sur l'ivoire. */
+.fond-degrade {
+  background-color: #f0eee6;
+  background-image:
+    radial-gradient(ellipse 90% 70% at 22% 8%,  alpha(#d97757, 0.20), transparent 62%),
+    radial-gradient(ellipse 80% 60% at 85% 92%, alpha(#bcd1ca, 0.28), transparent 58%),
+    linear-gradient(165deg, #faf9f5 0%, #f0eee6 55%, #e8e6dc 100%);
+}

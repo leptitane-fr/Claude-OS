@@ -15,8 +15,8 @@ window.shell {
    ------------------------------------------------------------------------- */
 
 .dock {
-  background-color: @l-surface;
-  border: 1px solid @l-border;
+  background-color: @surface;
+  border: 1px solid @border;
   /* Rayon généreux : sur un dock de 72 px de haut, 22 px donnent la forme de
      pilule adoucie de ChromeOS sans tomber dans l'ovale. */
   border-radius: 22px;
@@ -27,15 +27,8 @@ window.shell {
      profondeur de ChromeOS, là où une ombre unique paraît plate.
      Calculée une fois par le compositeur, jamais réévaluée — rien à voir
      avec un flou permanent. */
-  box-shadow: 0 8px 28px @l-shadow,
-              0 2px  6px alpha(#000000, 0.10);
-}
-
-window.dark .dock {
-  background-color: @d-surface;
-  border-color: @d-border;
-  box-shadow: 0 8px 28px @d-shadow,
-              0 2px  6px alpha(#000000, 0.30);
+  box-shadow: 0 8px 28px @shadow,
+              0 2px  6px @shadow-close;
 }
 
 /* Une icône du dock. La transformation d'échelle est portée par le GPU et
@@ -57,13 +50,11 @@ window.dark .dock {
 }
 
 .dock-item:hover {
-  background-color: @l-surface-alt;
+  background-color: @surface-alt;
   /* Agrandissement discret : 8 % suffisent à donner la sensation de
      réactivité. Au-delà, le dock semble sautiller. */
   transform: scale(1.08) translateY(-2px);
 }
-
-window.dark .dock-item:hover { background-color: @d-surface-alt; }
 
 .dock-item:active {
   transform: scale(0.96);
@@ -75,11 +66,9 @@ window.dark .dock-item:hover { background-color: @d-surface-alt; }
   min-width: 4px;
   min-height: 4px;
   border-radius: 999px;
-  background-color: @l-text-dim;
+  background-color: @text-dim;
   margin-top: 2px;
 }
-
-window.dark .dock-indicator { background-color: @d-text-dim; }
 
 .dock-indicator.active { background-color: @accent; }
 
@@ -87,10 +76,8 @@ window.dark .dock-indicator { background-color: @d-text-dim; }
 .dock-separator {
   min-width: 1px;
   margin: 8px 6px;
-  background-color: @l-surface-sunk;
+  background-color: @surface-sunk;
 }
-
-window.dark .dock-separator { background-color: @d-surface-sunk; }
 
 /* -------------------------------------------------------------------------
    Barre d'état — bas à droite
@@ -100,28 +87,19 @@ window.dark .dock-separator { background-color: @d-surface-sunk; }
    ------------------------------------------------------------------------- */
 
 .status {
-  background-color: @l-surface;
-  border: 1px solid @l-border;
+  background-color: @surface;
+  border: 1px solid @border;
   border-radius: 18px;
   padding: 6px 14px;
   margin: 0 12px 12px 0;
-  box-shadow: 0 8px 28px @l-shadow,
-              0 2px  6px alpha(#000000, 0.10);
-}
-
-window.dark .status {
-  background-color: @d-surface;
-  border-color: @d-border;
-  box-shadow: 0 8px 28px @d-shadow,
-              0 2px  6px alpha(#000000, 0.30);
+  box-shadow: 0 8px 28px @shadow,
+              0 2px  6px @shadow-close;
 }
 
 .status-item {
-  color: @l-text;
+  color: @text;
   margin: 0 5px;
 }
-
-window.dark .status-item { color: @d-text; }
 
 /* L'heure porte le regard : elle est le seul élément qu'on lit vraiment,
    les autres se consultent d'un coup d'œil. */
@@ -134,11 +112,9 @@ window.dark .status-item { color: @d-text; }
 /* Le pourcentage de batterie, plus discret que l'heure. */
 .status-battery-level {
   font-size: 12px;
-  color: @l-text-dim;
+  color: @text-dim;
   margin-left: 2px;
 }
-
-window.dark .status-battery-level { color: @d-text-dim; }
 
 /* Batterie faible : le seul endroit où une couleur d'alerte se justifie. */
 .status-battery-level.low { color: @danger; }
@@ -146,10 +122,8 @@ window.dark .status-battery-level { color: @d-text-dim; }
 .status-sep {
   min-width: 1px;
   margin: 6px 6px;
-  background-color: @l-surface-sunk;
+  background-color: @surface-sunk;
 }
-
-window.dark .status-sep { background-color: @d-surface-sunk; }
 
 /* La pilule entière est un bouton : on retire tout le chrome que GTK
    applique par défaut à menubutton > button, pour que la seule surface
@@ -167,16 +141,12 @@ menubutton.status > button {
 
 /* Retour au survol : assez pour dire « ceci se clique », assez discret pour
    ne pas transformer une zone d'information en bouton criard. */
-menubutton.status:hover   { background-color: @l-surface-alt; }
+menubutton.status:hover   { background-color: @surface-alt; }
 /* :checked = panneau ouvert. GTK pose cet état sur le menubutton tant que
    son popover est affiché ; on s'en sert pour montrer d'où sort le
    panneau. */
 menubutton.status:active,
-menubutton.status:checked { background-color: @l-surface-sunk; }
-
-window.dark menubutton.status:hover   { background-color: @d-surface-alt; }
-window.dark menubutton.status:active,
-window.dark menubutton.status:checked { background-color: @d-surface-sunk; }
+menubutton.status:checked { background-color: @surface-sunk; }
 
 /* -------------------------------------------------------------------------
    Réglages rapides — panneau ouvert au clic sur la barre d'état
@@ -188,19 +158,12 @@ window.dark menubutton.status:checked { background-color: @d-surface-sunk; }
 /* GTK dessine le fond du popover sur son nœud « contents ». C'est là que
    doivent aller le rayon et l'ombre, pas sur le popover lui-même. */
 popover.qs-popover > contents {
-  background-color: @l-surface;
-  border: 1px solid @l-border;
+  background-color: @surface;
+  border: 1px solid @border;
   border-radius: 20px;
   padding: 12px;
-  box-shadow: 0 12px 36px @l-shadow,
-              0 2px   8px alpha(#000000, 0.12);
-}
-
-window.dark popover.qs-popover > contents {
-  background-color: @d-surface;
-  border-color: @d-border;
-  box-shadow: 0 12px 36px @d-shadow,
-              0 2px   8px alpha(#000000, 0.35);
+  box-shadow: 0 12px 36px @shadow,
+              0 2px   8px @shadow-close;
 }
 
 /* Largeur fixe : un panneau qui change de taille selon le nom du réseau
@@ -216,7 +179,7 @@ window.dark popover.qs-popover > contents {
      deux pastilles restent blanches quoi qu'on écrive ensuite — constaté à
      l'écran, puis mesuré au pixel. */
   background: none;
-  background-color: @l-surface-alt;
+  background-color: @surface-alt;
   min-height: 56px;
   padding: 8px 12px;
   border: none;
@@ -225,41 +188,24 @@ window.dark popover.qs-popover > contents {
   transition: background-color 120ms ease-out;
 }
 
-window.dark .qs-tile { background-color: @d-surface-alt; }
-
-.qs-tile:hover             { background-color: @l-surface-sunk; }
-window.dark .qs-tile:hover { background-color: @d-surface-sunk; }
+.qs-tile:hover { background-color: @surface-sunk; }
 
 /* Activé : le seul endroit du panneau où l'accent apparaît. Une bascule se
-   lit d'un coup d'œil ou elle ne sert à rien.
-
-   Le sélecteur sombre est répété ici exprès : « window.dark .qs-tile » est
-   plus spécifique que « .qs-tile.on », et l'emporterait donc en thème
-   sombre, laissant la bascule allumée grise. */
-.qs-tile.on,
-window.dark .qs-tile.on             { background-color: @accent; }
-.qs-tile.on:hover,
-window.dark .qs-tile.on:hover       { background-color: @accent-hover; }
+   lit d'un coup d'œil ou elle ne sert à rien. */
+.qs-tile.on       { background-color: @accent; }
+.qs-tile.on:hover { background-color: @accent-hover; }
 
 .qs-tile.on .qs-tile-icon,
 .qs-tile.on .qs-tile-name,
-.qs-tile.on .qs-tile-state,
-window.dark .qs-tile.on .qs-tile-icon,
-window.dark .qs-tile.on .qs-tile-name,
-window.dark .qs-tile.on .qs-tile-state { color: #ffffff; }
+.qs-tile.on .qs-tile-state { color: @on-accent; }
 
-.qs-tile.on .qs-tile-state,
-window.dark .qs-tile.on .qs-tile-state { opacity: 0.82; }
+.qs-tile.on .qs-tile-state { opacity: 0.82; }
 
-.qs-tile:disabled            { opacity: 0.42; }
+.qs-tile:disabled { opacity: 0.42; }
 
-.qs-tile-icon  { color: @l-text; }
-.qs-tile-name  { font-size: 13px; font-weight: 500; color: @l-text; }
-.qs-tile-state { font-size: 11px; color: @l-text-dim; }
-
-window.dark .qs-tile-icon  { color: @d-text; }
-window.dark .qs-tile-name  { color: @d-text; }
-window.dark .qs-tile-state { color: @d-text-dim; }
+.qs-tile-icon  { color: @text; }
+.qs-tile-name  { font-size: 13px; font-weight: 500; color: @text; }
+.qs-tile-state { font-size: 11px; color: @text-dim; }
 
 /* --- Carte batterie ------------------------------------------------------ */
 
@@ -267,45 +213,31 @@ window.dark .qs-tile-state { color: @d-text-dim; }
   background: none;
   padding: 12px 14px;
   border-radius: 16px;
-  background-color: @l-surface-alt;
+  background-color: @surface-alt;
 }
 
-window.dark .qs-card { background-color: @d-surface-alt; }
-
-.qs-battery-icon   { color: @l-text; }
-.qs-battery-pct    { font-size: 20px; font-weight: 500; color: @l-text; }
+.qs-battery-icon   { color: @text; }
+.qs-battery-pct    { font-size: 20px; font-weight: 500; color: @text; }
 /* La consommation en watts vit ici : lisible quand on la cherche, absente
    le reste du temps. */
-.qs-battery-detail { font-size: 12px; color: @l-text-dim; }
-
-window.dark .qs-battery-icon   { color: @d-text; }
-window.dark .qs-battery-pct    { color: @d-text; }
-window.dark .qs-battery-detail { color: @d-text-dim; }
+.qs-battery-detail { font-size: 12px; color: @text-dim; }
 
 /* Application ouverte : l'icône se détache très légèrement du fond. Le point
    sous l'icône porte déjà l'information, ceci ne fait que la renforcer — un
    dock où l'on cherche lequel des points est allumé a raté son but. */
-.dock-item.running            { background-color: @l-surface-alt; }
-window.dark .dock-item.running { background-color: @d-surface-alt; }
+.dock-item.running            { background-color: @surface-alt; }
 
 /* -------------------------------------------------------------------------
    Liste des fenêtres d'une application, au survol de son icône
    ------------------------------------------------------------------------- */
 
 popover.dock-windows-popover > contents {
-  background-color: @l-surface;
-  border: 1px solid @l-border;
+  background-color: @surface;
+  border: 1px solid @border;
   border-radius: 16px;
   padding: 6px;
-  box-shadow: 0 12px 36px @l-shadow,
-              0 2px   8px alpha(#000000, 0.12);
-}
-
-window.dark popover.dock-windows-popover > contents {
-  background-color: @d-surface;
-  border-color: @d-border;
-  box-shadow: 0 12px 36px @d-shadow,
-              0 2px   8px alpha(#000000, 0.35);
+  box-shadow: 0 12px 36px @shadow,
+              0 2px   8px @shadow-close;
 }
 
 .dock-window-row {
@@ -317,51 +249,23 @@ window.dark popover.dock-windows-popover > contents {
   padding: 6px 10px;
   min-height: 0;
   font-size: 13px;
-  color: @l-text;
+  color: @text;
   transition: background-color 120ms ease-out;
 }
-
-window.dark .dock-window-row { color: @d-text; }
 
 /* Le niveau « sunk » plutôt que « alt » : sur le fond du panneau, l'écart de
    « alt » est de trois points de gris et ne se voit pas. Mesuré au pixel,
    pas jugé à l'œil. */
-.dock-window-row:hover             { background-color: @l-surface-sunk; }
-window.dark .dock-window-row:hover { background-color: @d-surface-sunk; }
+.dock-window-row:hover             { background-color: @surface-sunk; }
 
 /* La fenêtre au premier plan, pour se repérer quand il y en a plusieurs. */
-.dock-window-row.active,
-window.dark .dock-window-row.active { background-color: @accent; color: #ffffff; }
+.dock-window-row.active { background-color: @accent; color: @on-accent; }
 
-/* -------------------------------------------------------------------------
-   Fond d'écran par défaut
-
-   Dessiné plutôt qu'embarqué : la distribution doit être présentable au
-   premier démarrage sans transporter de photographie. Sombre, un peu de
-   couleur mais très diluée — deux halos très larges sur une base
-   presque noire.
-
-   Composé une seule fois par le compositeur. Aucune animation : un fond
-   animé serait le plus sûr moyen de réveiller le GPU en permanence.
-   ------------------------------------------------------------------------- */
-
-.fond-degrade {
-  background-color: #161a22;
-  background-image:
-    radial-gradient(ellipse 90% 70% at 22% 8%,  alpha(@accent, 0.28), transparent 62%),
-    radial-gradient(ellipse 80% 60% at 85% 92%, alpha(#1abc9c, 0.18), transparent 58%),
-    linear-gradient(165deg, #1c2129 0%, #141821 55%, #0f1218 100%);
-}
+/* Le dégradé du fond d'écran est défini par CHAQUE THÈME : c'est la partie
+   la plus dépendante de la palette. Voir style/theme-*.css. */
 
 /* En thème clair, le même dessin en très pâle : la cohérence du geste
    compte plus que l'inversion littérale des couleurs. */
-window.shell.fond:not(.dark) .fond-degrade {
-  background-color: #e9ecf1;
-  background-image:
-    radial-gradient(ellipse 90% 70% at 22% 8%,  alpha(@accent, 0.14), transparent 60%),
-    radial-gradient(ellipse 80% 60% at 85% 92%, alpha(#1abc9c, 0.10), transparent 55%),
-    linear-gradient(165deg, #eef1f5 0%, #e4e8ee 55%, #dde2ea 100%);
-}
 
 /* -------------------------------------------------------------------------
    Panneau de réglages
@@ -371,61 +275,45 @@ window.shell.fond:not(.dark) .fond-degrade {
    pas au bureau qu'il règle sonne faux.
    ------------------------------------------------------------------------- */
 
-window.reglages { background-color: @l-surface-alt; }
-window.reglages.dark { background-color: #16181b; }
+/* Le fond du panneau est le niveau « alt » : les cartes, en surface pleine,
+   s'en détachent. Aucune valeur littérale — le thème décide. */
+window.reglages { background-color: @surface-alt; }
 
 .reglages-pile { padding: 16px; }
 
 .reglages-carte {
-  background-color: @l-surface;
-  border: 1px solid @l-border;
+  background-color: @surface;
+  border: 1px solid @border;
   border-radius: 16px;
   padding: 14px 16px;
-}
-
-window.dark .reglages-carte {
-  background-color: @d-surface;
-  border-color: @d-border;
 }
 
 .reglages-titre {
   font-size: 12px;
   font-weight: 600;
-  color: @l-text-dim;
+  color: @text-dim;
   margin-bottom: 6px;
 }
 
-window.dark .reglages-titre { color: @d-text-dim; }
-
 .reglages-ligne { padding: 8px 0; }
 
-.reglages-libelle { font-size: 14px; color: @l-text; }
-.reglages-detail  { font-size: 12px; color: @l-text-dim; margin-top: 2px; }
-
-window.dark .reglages-libelle { color: @d-text; }
-window.dark .reglages-detail  { color: @d-text-dim; }
+.reglages-libelle { font-size: 14px; color: @text; }
+.reglages-detail  { font-size: 12px; color: @text-dim; margin-top: 2px; }
 
 /* Le choix du thème : deux boutons soudés, celui qui est actif prend
    l'accent. C'est le seul endroit coloré du panneau. */
 .reglages-paire button {
   background: none;
-  background-color: @l-surface-alt;
-  border: 1px solid @l-border;
-  color: @l-text;
+  background-color: @surface-alt;
+  border: 1px solid @border;
+  color: @text;
   padding: 5px 16px;
   font-size: 13px;
   box-shadow: none;
 }
 
-window.dark .reglages-paire button {
-  background-color: @d-surface-alt;
-  border-color: @d-border;
-  color: @d-text;
-}
-
-.reglages-paire button:checked,
-window.dark .reglages-paire button:checked {
+.reglages-paire button:checked {
   background-color: @accent;
   border-color: @accent;
-  color: #ffffff;
+  color: @on-accent;
 }

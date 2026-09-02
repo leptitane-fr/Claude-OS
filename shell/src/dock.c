@@ -573,12 +573,8 @@ on_config_reloaded (ShellConfig *cfg, gpointer window)
     shell_config_free (D.cfg);
     D.cfg = cfg;
 
+    shell_styles_load (cfg->theme);
     shell_config_apply (cfg);
-
-    if (cfg->dark)
-        gtk_widget_add_css_class (GTK_WIDGET (window), "dark");
-    else
-        gtk_widget_remove_css_class (GTK_WIDGET (window), "dark");
 
     gtk_layer_set_exclusive_zone (GTK_WINDOW (window),
                                   cfg->reserve_space ? 86 : 0);
@@ -641,8 +637,6 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     GtkWidget *window = gtk_application_window_new (app);
     gtk_widget_add_css_class (window, "shell");
-    if (cfg->dark)
-        gtk_widget_add_css_class (window, "dark");
 
     /* --- Ancrage layer-shell ---------------------------------------------
      * Sans cela, le dock serait une fenetre ordinaire : elle passerait
@@ -717,7 +711,7 @@ main (int argc, char **argv)
 
     GtkApplication *app = gtk_application_new ("os.claude.shell.dock",
                                                G_APPLICATION_DEFAULT_FLAGS);
-    g_signal_connect (app, "startup",  G_CALLBACK (shell_styles_load), NULL);
+    g_signal_connect (app, "startup",  G_CALLBACK (shell_styles_startup), cfg);
     g_signal_connect (app, "activate", G_CALLBACK (on_activate), cfg);
 
     /* Les arguments sont deja traites ci-dessus ; on n'en passe aucun a GTK

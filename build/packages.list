@@ -164,7 +164,11 @@ libglib2.0-bin
 papirus-icon-theme
 
 # --- Polices : le systeme sert a afficher du web ---------------------------
-fonts-inter                   # police de l'interface, proche de la Google Sans
+fonts-inter                   # police des themes Clair et Sombre
+# Police des themes Claude. Les fontes « Anthropic Sans » et « Anthropic
+# Serif » du site d'Anthropic sont proprietaires : Lato leur sert de
+# substitut libre, un sans humaniste plus chaud qu'Inter.
+fonts-lato
 fonts-dejavu
 fonts-liberation2             # substituts metriques Arial/Times/Courier
 fonts-noto-core

@@ -13,7 +13,8 @@ typedef struct {
     char    **pinned;      /* identifiants .desktop, dans l'ordre d'affichage */
     char     *font;        /* famille de police de l'interface                */
     char     *icon_theme;  /* theme d'icones                                  */
-    gboolean  dark;          /* theme sombre                                  */
+    char     *theme;         /* nom du theme : voir shell_themes ()           */
+    gboolean  dark;          /* deduit du theme, pour les widgets GTK natifs  */
     gboolean  reserve_space; /* le dock repousse-t-il les fenetres maximisees */
 
     /* Fond d'ecran. Chemin vide : le degrade dessine par le shell. */
@@ -26,9 +27,25 @@ typedef struct {
  * ecrit. Ne renvoie jamais NULL. */
 ShellConfig *shell_config_load (void);
 
-/* Charge tokens.css puis shell.css pour l'affichage courant. A brancher sur
- * le signal « startup » de GtkApplication. */
-void shell_styles_load (void);
+/* Un theme disponible. */
+typedef struct {
+    const char *id;       /* valeur ecrite dans shell.conf                    */
+    const char *nom;      /* libelle montre a l'utilisateur                   */
+    gboolean    sombre;
+} ShellTheme;
+
+/* Table des themes, terminee par un id NULL. Ajouter un theme, c'est ajouter
+ * une ligne ici et un fichier style/theme-<id>.css : aucune regle de
+ * shell.css n'est a toucher, elle ne connait que des noms de jetons. */
+const ShellTheme *shell_themes (void);
+
+/* Charge le theme demande puis shell.css. Rappelable : le fournisseur du
+ * theme est remplace, pas empile. */
+void shell_styles_load (const char *theme);
+
+/* Meme chose, a la signature du signal « startup » de GtkApplication : a
+ * brancher avec la configuration en donnee utilisateur. */
+void shell_styles_startup (GtkApplication *app, gpointer cfg);
 
 /* Applique le theme d'icones et la police.
  *

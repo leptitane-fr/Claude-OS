@@ -1,0 +1,43 @@
+/* =========================================================================
+   Claude-OS — thème « Claude sombre »
+
+   Mêmes couleurs de marque, en négatif. Une précision d'honnêteté : la
+   feuille de marque publie slate-dark #141413 et slate-medium #3d3d3a, mais
+   aucune des surfaces intermédiaires d'une interface sombre. Les valeurs de
+   surface ci-dessous sont donc CONSTRUITES entre les deux, pour que le dock
+   se détache du fond — elles ne sont pas relevées.
+   ========================================================================= */
+
+@define-color accent            #d97757;  /* clay                            */
+@define-color accent-hover      #e08a6e;
+/* Texte posé sur l'accent : blanc dans les quatre thèmes, mais nommé pour
+   qu'un thème futur puisse en décider autrement. */
+@define-color on-accent         #ffffff;
+
+@define-color accent-press      #c6613f;  /* accent                          */
+
+@define-color surface           #1f1f1d;  /* construit                       */
+@define-color surface-alt       #2a2a27;  /* construit                       */
+@define-color surface-sunk      #3d3d3a;  /* slate-medium                    */
+
+@define-color text              #faf9f5;  /* ivory-light                     */
+@define-color text-dim          #b0aea5;  /* cloud-medium                    */
+
+@define-color border            alpha(#faf9f5, 0.10);
+@define-color shadow            alpha(#000000, 0.52);
+@define-color shadow-close      alpha(#000000, 0.32);
+
+@define-color ok                #8fa66f;  /* olive éclairci pour le sombre   */
+@define-color warn              #d4a27f;  /* kraft                           */
+@define-color danger            #e0705a;
+
+window.shell { font-family: "Lato", "Inter", sans-serif; }
+
+/* slate-dark en base, la même paire de halos que le thème clair. */
+.fond-degrade {
+  background-color: #141413;
+  background-image:
+    radial-gradient(ellipse 90% 70% at 22% 8%,  alpha(#d97757, 0.26), transparent 62%),
+    radial-gradient(ellipse 80% 60% at 85% 92%, alpha(#bcd1ca, 0.13), transparent 58%),
+    linear-gradient(165deg, #1e1e1b 0%, #171716 55%, #111110 100%);
+}

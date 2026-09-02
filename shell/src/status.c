@@ -228,13 +228,9 @@ open_panel_once (gpointer button)
 static void
 on_config_reloaded (ShellConfig *cfg, gpointer window)
 {
+    (void) window;
+    shell_styles_load (cfg->theme);
     shell_config_apply (cfg);
-
-    if (cfg->dark)
-        gtk_widget_add_css_class (GTK_WIDGET (window), "dark");
-    else
-        gtk_widget_remove_css_class (GTK_WIDGET (window), "dark");
-
     shell_config_free (cfg);
 }
 
@@ -251,8 +247,6 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     GtkWidget *window = gtk_application_window_new (app);
     gtk_widget_add_css_class (window, "shell");
-    if (opt->cfg->dark)
-        gtk_widget_add_css_class (window, "dark");
 
     gtk_layer_init_for_window (GTK_WINDOW (window));
     gtk_layer_set_layer (GTK_WINDOW (window), GTK_LAYER_SHELL_LAYER_TOP);
@@ -347,7 +341,7 @@ main (int argc, char **argv)
 
     GtkApplication *app = gtk_application_new ("os.claude.shell.status",
                                                G_APPLICATION_DEFAULT_FLAGS);
-    g_signal_connect (app, "startup",  G_CALLBACK (shell_styles_load), NULL);
+    g_signal_connect (app, "startup",  G_CALLBACK (shell_styles_startup), opt.cfg);
     g_signal_connect (app, "activate", G_CALLBACK (on_activate), &opt);
     int status = g_application_run (G_APPLICATION (app), 0, NULL);
     g_object_unref (app);

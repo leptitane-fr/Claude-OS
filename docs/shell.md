@@ -59,8 +59,8 @@ Une interface immobile doit consommer exactement zéro.
 
 ```
 shell/
-  style/tokens.css     couleurs, rayons, espacements — source unique
-  style/shell.css      règles communes aux composants
+  style/theme-*.css    une palette par thème — la seule source de couleurs
+  style/shell.css      règles communes, en jetons uniquement
   src/dock.c           dock central                        (fait)
   src/status.c         barre d'état bas-droite             (fait)
   src/panel.c          réglages rapides, ouverts au clic   (fait)
@@ -257,8 +257,68 @@ lui — visible immédiatement sur une capture.
 Les composants sont des exécutables **séparés**. Un défaut dans le lanceur
 ne doit pas emporter le dock, et chacun peut être relancé isolément.
 
-## Thèmes clair et sombre
+## Les thèmes
 
-Une seule palette dans `tokens.css`, deux jeux de valeurs. Les composants
-ne référencent jamais une couleur littérale : ils lisent les jetons. Le
-basculement se fait en rechargeant la feuille de style, sans redémarrage.
+Quatre : **Clair**, **Sombre**, **Claude clair**, **Claude sombre**.
+
+### Un fichier par thème, et rien d'autre à toucher
+
+`shell.css` ne connaît que des **noms de jetons** — `@surface`, `@text`,
+`@accent`, `@border`… — et jamais une couleur littérale. Chaque thème est un
+fichier qui définit exactement les mêmes noms. **Ajouter un thème, c'est
+ajouter un fichier et une ligne dans la table `shell_themes()`** : aucune
+règle n'est à modifier.
+
+C'est ce que la première version ne permettait pas. Les couleurs y étaient
+écrites deux fois — `@l-surface` et `@d-surface` — et chaque règle avait son
+doublon `window.dark`. Il y en avait 39. Passer à quatre thèmes aurait voulu
+dire quatre écritures de chaque règle ; le refactor en a supprimé 39 et
+raccourci la feuille de 431 à 331 lignes.
+
+Le basculement recharge le seul fichier de jetons : GTK re-résout les
+couleurs nommées des règles quand le fournisseur qui les définit change.
+Vérifié dans les deux sens — le dock suit le thème sans que `shell.css` soit
+relu.
+
+Chaque thème fixe aussi **sa police** et **son dégradé de fond d'écran** :
+ce sont les deux choses les plus dépendantes de la palette. Un réglage de
+police explicite dans `shell.conf` prend le pas ; vide, c'est le thème qui
+décide.
+
+### Les thèmes Claude
+
+Les couleurs sont **relevées** dans la feuille de style de marque
+d'Anthropic (`anthropic.com`, `ant-brand.shared.css`), pas citées de
+mémoire :
+
+| Nom d'origine | Valeur | Usage ici |
+|---|---|---|
+| `clay` | `#d97757` | accent |
+| `accent` | `#c6613f` | accent enfoncé |
+| `ivory-light` | `#faf9f5` | surface (clair) |
+| `ivory-medium` | `#f0eee6` | surface secondaire |
+| `oat` | `#e3dacc` | surface enfoncée |
+| `slate-dark` | `#141413` | texte (clair), fond (sombre) |
+| `slate-light` | `#5e5d59` | texte secondaire |
+| `slate-medium` | `#3d3d3a` | surface enfoncée (sombre) |
+| `cloud-medium` | `#b0aea5` | texte secondaire (sombre) |
+| `olive`, `kraft`, `cactus` | | états, halos du fond |
+
+Trois honnêtetés à garder en tête.
+
+**Les surfaces du thème sombre sont construites, pas relevées.** La feuille
+de marque publie `slate-dark` et `slate-medium`, mais aucune des surfaces
+intermédiaires d'une interface sombre. `#1f1f1d` et `#2a2a27` sont
+interpolés entre les deux pour que le dock se détache du fond.
+
+**La palette de marque n'a pas de rouge.** Une alerte doit rester lisible
+comme telle : le `danger` est construit dans la même famille chaude.
+
+**Les fontes sont propriétaires.** Le site déclare « Anthropic Sans »,
+« Anthropic Serif » et « Tiempos Text » : rien de tout cela ne peut être
+embarqué. **Lato** leur sert de substitut libre — un sans humaniste, plus
+chaud qu'Inter, qui tient le petit corps. Comparé à l'écran avant d'être
+retenu, pas choisi sur description.
+
+C'est un **hommage, pas un habillage officiel** : ces thèmes ne sont pas des
+ressources d'Anthropic et ne prétendent pas l'être.
