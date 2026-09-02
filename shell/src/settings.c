@@ -26,6 +26,9 @@
  * ------------------------------------------------------------------------- */
 typedef void (*Modif) (ShellConfig *cfg, gpointer data);
 
+/* Rappelee apres chaque enregistrement, avec la configuration ecrite. */
+static void (*apres_modif) (const ShellConfig *cfg) = NULL;
+
 static void
 modifier (Modif apply, gpointer data)
 {
@@ -36,6 +39,13 @@ modifier (Modif apply, gpointer data)
     if (!shell_config_save (cfg, &error))
         g_warning ("enregistrement impossible : %s", error->message);
 
+    /* Le panneau se reapplique a lui-meme sans attendre. Il ne surveille pas
+     * shell.conf -- il en est le seul redacteur pour ces cles -- mais il est
+     * la fenetre que l'utilisateur regarde en choisissant : la voir rester
+     * en arriere donnait l'impression que le reglage n'avait pas pris. */
+    if (apres_modif != NULL)
+        apres_modif (cfg);
+
     shell_config_free (cfg);
 }
 
@@ -45,6 +55,26 @@ static void set_fill      (ShellConfig *c, gpointer d) { c->wallpaper_fill = GPO
 static void set_font      (ShellConfig *c, gpointer d) { g_free (c->font);       c->font       = g_strdup (d); }
 static void set_icons     (ShellConfig *c, gpointer d) { g_free (c->icon_theme); c->icon_theme = g_strdup (d); }
 static void set_wallpaper (ShellConfig *c, gpointer d) { g_free (c->wallpaper);  c->wallpaper  = g_strdup (d); }
+
+/* Widgets que la reapplication doit rafraichir. Un seul panneau par
+ * processus : une structure globale suffit et evite de promener un contexte
+ * dans chaque rappel. */
+static struct {
+    GtkWidget *police_detail;
+} P;
+
+static void mettre_a_jour_police_detail (const ShellConfig *cfg);
+
+static void
+reappliquer (const ShellConfig *cfg)
+{
+    shell_styles_load (cfg->theme);
+    shell_config_apply (cfg);
+    g_object_set (gtk_settings_get_default (),
+                  "gtk-application-prefer-dark-theme",
+                  shell_theme_actif (cfg)->sombre, NULL);
+    mettre_a_jour_police_detail (cfg);
+}
 
 /* -------------------------------------------------------------------------
  * Fabrique de lignes : libelle a gauche, controle a droite
@@ -63,6 +93,8 @@ carte (const char *titre)
     return box;
 }
 
+/* Renvoie l'etiquette de detail, pour les rares lignes dont le texte
+ * explicatif change a l'usage. NULL quand la ligne n'en a pas. */
 static GtkWidget *
 ligne (GtkWidget *carte, const char *libelle, const char *detail, GtkWidget *controle)
 {
@@ -72,14 +104,16 @@ ligne (GtkWidget *carte, const char *libelle, const char *detail, GtkWidget *con
     gtk_widget_set_halign (l, GTK_ALIGN_START);
     gtk_box_append (GTK_BOX (textes), l);
 
+    GtkWidget *d = NULL;
     if (detail != NULL) {
-        GtkWidget *d = gtk_label_new (detail);
+        d = gtk_label_new (detail);
         gtk_widget_add_css_class (d, "reglages-detail");
         gtk_widget_set_halign (d, GTK_ALIGN_START);
         gtk_label_set_wrap (GTK_LABEL (d), TRUE);
         gtk_label_set_max_width_chars (GTK_LABEL (d), 42);
         gtk_box_append (GTK_BOX (textes), d);
     }
+
 
     GtkWidget *row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class (row, "reglages-ligne");
@@ -89,7 +123,7 @@ ligne (GtkWidget *carte, const char *libelle, const char *detail, GtkWidget *con
     gtk_box_append (GTK_BOX (row), controle);
 
     gtk_box_append (GTK_BOX (carte), row);
-    return row;
+    return d;
 }
 
 /* -------------------------------------------------------------------------
@@ -122,6 +156,33 @@ selectionner (GtkDropDown *dd, const char *valeur)
         gtk_drop_down_set_selected (dd, 0);
     }
 }
+/* Ce que l'utilisateur voit vraiment a l'ecran, et pourquoi. */
+static void
+mettre_a_jour_police_detail (const ShellConfig *cfg)
+{
+    if (P.police_detail == NULL)
+        return;
+
+    const ShellTheme *t = shell_theme_actif (cfg);
+    gboolean auto_police = (cfg->font == NULL || *cfg->font == '\0');
+    const char *famille  = auto_police ? t->police : cfg->font;
+
+    g_autofree char *texte = NULL;
+    /* On nomme la police manquante sans deviner son paquet : « Lato » donne
+     * bien fonts-lato, mais « DejaVu Sans » ne donne pas fonts-dejavu-sans.
+     * Une commande fausse serait pire que pas de commande. */
+    if (!shell_police_installee (famille))
+        texte = g_strdup_printf (
+            "« %s » n'est pas installée : le système en substitue une autre.",
+            famille);
+    else if (auto_police)
+        texte = g_strdup_printf ("Le thème « %s » utilise %s.", t->nom, famille);
+    else
+        texte = g_strdup_printf ("%s, choisie explicitement.", famille);
+
+    gtk_label_set_text (GTK_LABEL (P.police_detail), texte);
+}
+
 static void
 on_theme (GObject *dd, GParamSpec *ps, gpointer data)
 {
@@ -131,15 +192,7 @@ on_theme (GObject *dd, GParamSpec *ps, gpointer data)
     if (i == GTK_INVALID_LIST_POSITION)
         return;
 
-    const ShellTheme *t = &shell_themes ()[i];
-    modifier (set_theme, (gpointer) t->id);
-
-    /* Le panneau se repeint lui-meme sans attendre : il est la fenetre que
-     * l'utilisateur regarde en choisissant, ce serait etrange qu'elle soit
-     * la derniere a changer. */
-    shell_styles_load (t->id);
-    g_object_set (gtk_settings_get_default (),
-                  "gtk-application-prefer-dark-theme", t->sombre, NULL);
+    modifier (set_theme, (gpointer) shell_themes ()[i].id);
 }
 
 /* Une liste de familles plutot qu'un GtkFontDialogButton, pour trois
@@ -320,6 +373,8 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     shell_config_apply (cfg);
 
+    apres_modif = reappliquer;
+
     /* Le panneau utilise des widgets GTK ordinaires -- listes deroulantes,
      * commutateurs, selecteur de fichier -- que notre feuille de style ne
      * redessine pas. Sans cela, la barre de titre et les boutons resteraient
@@ -366,10 +421,8 @@ on_activate (GtkApplication *app, gpointer user_data)
     selectionner (GTK_DROP_DOWN (police),
                   (cfg->font != NULL && *cfg->font != '\0') ? cfg->font : AUTO_POLICE);
     g_signal_connect (police, "notify::selected", G_CALLBACK (on_police), NULL);
-    ligne (apparence, "Police de l'interface",
-           "Les thèmes Claude utilisent Lato : les fontes d'Anthropic sont "
-           "propriétaires et ne peuvent pas être embarquées.",
-           police);
+    P.police_detail = ligne (apparence, "Police de l'interface", " ", police);
+    mettre_a_jour_police_detail (cfg);
 
     GtkWidget *icones = gtk_drop_down_new (G_LIST_MODEL (themes_icones ()), NULL);
     selectionner (GTK_DROP_DOWN (icones), cfg->icon_theme);

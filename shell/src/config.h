@@ -32,12 +32,23 @@ typedef struct {
     const char *id;       /* valeur ecrite dans shell.conf                    */
     const char *nom;      /* libelle montre a l'utilisateur                   */
     gboolean    sombre;
+    const char *police;   /* famille par defaut du theme                      */
 } ShellTheme;
 
 /* Table des themes, terminee par un id NULL. Ajouter un theme, c'est ajouter
  * une ligne ici et un fichier style/theme-<id>.css : aucune regle de
  * shell.css n'est a toucher, elle ne connait que des noms de jetons. */
 const ShellTheme *shell_themes (void);
+
+/* Le theme actif, jamais NULL : un identifiant inconnu renvoie le premier. */
+const ShellTheme *shell_theme_actif (const ShellConfig *cfg);
+
+/* Cette famille de police est-elle reellement installee ?
+ *
+ * Le panneau de reglages en a besoin : un theme qui demande une police
+ * absente ne change rien a l'ecran, et sans un mot d'explication cela passe
+ * pour une panne. */
+gboolean shell_police_installee (const char *famille);
 
 /* Charge le theme demande puis shell.css. Rappelable : le fournisseur du
  * theme est remplace, pas empile. */

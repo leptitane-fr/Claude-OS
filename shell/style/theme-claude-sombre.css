@@ -31,8 +31,6 @@
 @define-color warn              #d4a27f;  /* kraft                           */
 @define-color danger            #e0705a;
 
-window.shell { font-family: "Lato", "Inter", sans-serif; }
-
 /* slate-dark en base, la même paire de halos que le thème clair. */
 .fond-degrade {
   background-color: #141413;

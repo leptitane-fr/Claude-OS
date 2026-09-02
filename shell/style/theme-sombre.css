@@ -28,8 +28,6 @@
 @define-color warn              #fbbc05;
 @define-color danger            #ea4335;
 
-window.shell { font-family: "Inter", sans-serif; }
-
 .fond-degrade {
   background-color: #161a22;
   background-image:

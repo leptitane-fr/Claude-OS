@@ -45,8 +45,6 @@
    comme telle, celui-ci est construit dans la même famille chaude. */
 @define-color danger            #b3402f;
 
-window.shell { font-family: "Lato", "Inter", sans-serif; }
-
 /* Halos empruntés aux teintes secondaires de la marque : clay en haut,
    cactus en bas, très dilués sur l'ivoire. */
 .fond-degrade {

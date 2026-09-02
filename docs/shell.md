@@ -285,6 +285,13 @@ ce sont les deux choses les plus dépendantes de la palette. Un réglage de
 police explicite dans `shell.conf` prend le pas ; vide, c'est le thème qui
 décide.
 
+La police est déclarée dans la **table des thèmes** (`config.c`) et non dans
+le fichier CSS, pour qu'elle ait une source unique : le panneau de réglages
+doit pouvoir la nommer et vérifier qu'elle est installée, ce qu'il ne saurait
+pas faire en lisant une règle CSS. Quand la famille demandée est absente, il
+le dit — sans deviner le nom du paquet apt, parce que « Lato » donne bien
+`fonts-lato` mais « DejaVu Sans » ne donne pas `fonts-dejavu-sans`.
+
 ### Les thèmes Claude
 
 Les couleurs sont **relevées** dans la feuille de style de marque

@@ -2,6 +2,8 @@
 
 #include <errno.h>
 
+#include <pango/pangocairo.h>
+
 /* Applications epinglees par defaut : celles pour lesquelles ce systeme
  * existe, plus de quoi ouvrir un dossier et un terminal. */
 static const char *default_pinned[] = {
@@ -14,12 +16,16 @@ static const char *default_pinned[] = {
 /* -------------------------------------------------------------------------
  * Themes
  * ------------------------------------------------------------------------- */
+/* La police est ICI et non dans le fichier CSS du theme, pour qu'elle ait une
+ * source unique : le panneau de reglages doit pouvoir la nommer et verifier
+ * qu'elle est installee, ce qu'il ne saurait pas faire en lisant une regle
+ * CSS. */
 static const ShellTheme themes[] = {
-    { "clair",         "Clair",         FALSE },
-    { "sombre",        "Sombre",        TRUE  },
-    { "claude-clair",  "Claude clair",  FALSE },
-    { "claude-sombre", "Claude sombre", TRUE  },
-    { NULL, NULL, FALSE },
+    { "clair",         "Clair",         FALSE, "Inter" },
+    { "sombre",        "Sombre",        TRUE,  "Inter" },
+    { "claude-clair",  "Claude clair",  FALSE, "Lato"  },
+    { "claude-sombre", "Claude sombre", TRUE,  "Lato"  },
+    { NULL, NULL, FALSE, NULL },
 };
 
 const ShellTheme *
@@ -40,6 +46,32 @@ theme_par_id (const char *id)
         if (g_strcmp0 (themes[i].id, id) == 0)
             return &themes[i];
     return NULL;
+}
+
+const ShellTheme *
+shell_theme_actif (const ShellConfig *cfg)
+{
+    const ShellTheme *t = theme_par_id (cfg->theme);
+    return t != NULL ? t : &themes[0];
+}
+
+gboolean
+shell_police_installee (const char *famille)
+{
+    if (famille == NULL || *famille == '\0')
+        return TRUE;
+
+    PangoFontMap *carte = pango_cairo_font_map_get_default ();
+    PangoFontFamily **familles = NULL;
+    int n = 0;
+    pango_font_map_list_families (carte, &familles, &n);
+
+    gboolean trouvee = FALSE;
+    for (int i = 0; i < n && !trouvee; i++)
+        trouvee = (g_ascii_strcasecmp (pango_font_family_get_name (familles[i]),
+                                       famille) == 0);
+    g_free (familles);
+    return trouvee;
 }
 
 static char *
@@ -304,12 +336,14 @@ shell_config_apply (const ShellConfig *cfg)
             GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
     }
 
-    /* Police vide = « celle du theme » : on VIDE la regle au lieu de ne rien
-     * faire, sinon revenir a l'automatique laisserait l'ancienne famille
-     * dans la cascade. */
-    g_autofree char *rule =
-        (cfg->font != NULL && *cfg->font != '\0')
-        ? g_strdup_printf ("window.shell { font-family: \"%s\"; }", cfg->font)
-        : g_strdup ("");
+    /* Police vide = celle du theme. La regle est TOUJOURS ecrite, jamais
+     * omise : revenir a l'automatique en ne faisant rien laisserait
+     * l'ancienne famille dans la cascade. */
+    const char *famille = (cfg->font != NULL && *cfg->font != '\0')
+                        ? cfg->font
+                        : shell_theme_actif (cfg)->police;
+
+    g_autofree char *rule = g_strdup_printf (
+        "window.shell { font-family: \"%s\"; }", famille);
     gtk_css_provider_load_from_string (font_provider, rule);
 }

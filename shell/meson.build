@@ -13,6 +13,7 @@ gtk        = dependency('gtk4')
 layershell = dependency('gtk4-layer-shell-0')
 giounix    = dependency('gio-unix-2.0')   # GDesktopAppInfo
 wlclient   = dependency('wayland-client')
+pangocairo = dependency('pangocairo')   # liste des familles installees
 
 # wlr-foreign-toplevel-management-v1 : le protocole qui dit quelles fenetres
 # sont ouvertes. Il n'est empaquete nulle part dans Debian trixie -- aucun
@@ -44,22 +45,22 @@ add_project_arguments(
 
 executable('claude-os-dock',
   'src/dock.c', 'src/toplevels.c', ftl_header, ftl_code, commun,
-  dependencies : [gtk, layershell, giounix, wlclient],
+  dependencies : [gtk, layershell, giounix, wlclient, pangocairo],
   install : true)
 
 executable('claude-os-status',
   'src/status.c', 'src/panel.c', commun,
-  dependencies : [gtk, layershell, giounix],
+  dependencies : [gtk, layershell, giounix, pangocairo],
   install : true)
 
 executable('claude-os-fond',
   'src/wallpaper.c', commun,
-  dependencies : [gtk, layershell, giounix],
+  dependencies : [gtk, layershell, giounix, pangocairo],
   install : true)
 
 executable('claude-os-reglages',
   'src/settings.c', commun,
-  dependencies : [gtk, layershell, giounix],
+  dependencies : [gtk, layershell, giounix, pangocairo],
   install : true)
 
 install_data('data/claude-os-reglages.desktop',

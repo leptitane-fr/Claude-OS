@@ -32,11 +32,6 @@
 @define-color warn              #fbbc05;
 @define-color danger            #ea4335;
 
-/* Police par défaut du thème. Un réglage explicite dans shell.conf la
-   remplace : le fournisseur de l'utilisateur passe à une priorité plus
-   haute. */
-window.shell { font-family: "Inter", sans-serif; }
-
 .fond-degrade {
   background-color: #e9ecf1;
   background-image:
