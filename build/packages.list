@@ -139,7 +139,12 @@ lm-sensors
 # Compositeur Wayland et bibliotheques du shell sur-mesure. labwc pese ~15 Mo
 # en memoire, contre ~120 Mo pour la session Xfce complete.
 labwc
-gtk4-layer-shell              # ancrage du dock hors du flux des fenetres
+# Le paquet BINAIRE s'appelle libgtk4-layer-shell0 ; « gtk4-layer-shell » est
+# le nom du paquet SOURCE et ne s'installe pas. L'API madison de Debian
+# renvoie les deux sans les distinguer autrement que par la colonne
+# d'architectures, qui vaut « source » pour l'un et la liste des machines
+# pour l'autre -- verifier cette colonne, pas seulement la presence du nom.
+libgtk4-layer-shell0          # ancrage du dock hors du flux des fenetres
 
 # Filet pour les applications qui ne savent pas parler Wayland. Chromium et
 # Claude Desktop savent le faire nativement, mais un utilitaire ponctuel qui

@@ -43,11 +43,15 @@ le projet, elle n'a donc encore rien du premier groupe.
 ```sh
 sudo apt-get update
 sudo apt-get install --no-install-recommends \
-    labwc gtk4-layer-shell papirus-icon-theme fonts-inter libglib2.0-bin \
+    labwc libgtk4-layer-shell0 papirus-icon-theme fonts-inter libglib2.0-bin \
     xwayland unzip \
     build-essential meson ninja-build pkgconf \
     libgtk-4-dev libgtk4-layer-shell-dev
 ```
+
+Le paquet de la bibliothèque d'ancrage s'appelle `libgtk4-layer-shell0`.
+`gtk4-layer-shell` tout court est le nom du paquet **source** : il apparaît
+dans l'index de Debian, mais ne s'installe pas.
 
 `libglib2.0-bin` n'est pas décoratif : il fournit `gapplication`, sans lequel
 le raccourci de masquage ne ferait rien.
