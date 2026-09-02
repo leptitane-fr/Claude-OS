@@ -30,6 +30,10 @@ shell_config_load (void)
      * son style plat et arrondi est plus proche de ChromeOS. */
     cfg->icon_theme = g_strdup ("Papirus");
     cfg->dark   = FALSE;
+    /* Par defaut le dock ne repousse rien : afficher ou masquer le dock ne
+     * doit pas redimensionner la fenetre en dessous, il doit passer par
+     * dessus. Voir le commentaire de la zone exclusive dans dock.c. */
+    cfg->reserve_space = FALSE;
 
     if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, NULL))
         return cfg;   /* pas de fichier : les defauts suffisent */
@@ -56,6 +60,11 @@ shell_config_load (void)
     g_autofree char *theme = g_key_file_get_string (kf, "appearance", "theme", NULL);
     if (g_strcmp0 (theme, "dark") == 0)
         cfg->dark = TRUE;
+
+    g_autoptr(GError) e = NULL;
+    gboolean reserve = g_key_file_get_boolean (kf, "dock", "reserve_space", &e);
+    if (e == NULL)
+        cfg->reserve_space = reserve;
 
     return cfg;
 }

@@ -13,7 +13,8 @@ typedef struct {
     char    **pinned;      /* identifiants .desktop, dans l'ordre d'affichage */
     char     *font;        /* famille de police de l'interface                */
     char     *icon_theme;  /* theme d'icones                                  */
-    gboolean  dark;        /* theme sombre                                    */
+    gboolean  dark;          /* theme sombre                                  */
+    gboolean  reserve_space; /* le dock repousse-t-il les fenetres maximisees */
 } ShellConfig;
 
 /* Lit ~/.config/claude-os/shell.conf. Absent, les valeurs par defaut

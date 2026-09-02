@@ -79,6 +79,7 @@ sans qu'aucun fichier n'ait été écrit.
 ```ini
 [dock]
 pinned=chromium;claude-desktop;thunar;xfce4-terminal
+reserve_space=false  ; true : les fenêtres maximisées s'arrêtent au-dessus
 
 [appearance]
 font=Inter
@@ -204,15 +205,33 @@ seconde de mouvement.
 
 ## Zones réservées : le piège de l'empilement
 
-Le dock réserve 86 px, ce qui empêche les fenêtres maximisées de passer
-dessous. La barre d'état, elle, déclare `exclusive_zone = -1` : elle
-**ignore** les zones réservées par les autres surfaces.
+**Ni le dock ni la barre ne réservent d'espace.** Le shell passe par-dessus
+les fenêtres ; afficher ou masquer une surface ne doit jamais remettre en
+page ce qu'il y a dessous.
 
-Avec la valeur 0, elle se posait au-dessus des 86 px du dock et flottait
-plus haut que lui — visible immédiatement sur une capture. Avec -1 elle
-s'ancre au vrai bord de l'écran et partage la ligne de base du dock. Elle
-ne réserve rien pour elle-même, sinon la hauteur utile serait amputée deux
-fois.
+Le dock réservait d'abord 86 px, pour que les fenêtres maximisées s'arrêtent
+au-dessus de lui. Conséquence signalée à l'usage, puis reproduite ici :
+
+| | fenêtre maximisée |
+|---|---|
+| dock affiché, `reserve_space=true` | 1920 × **1114** |
+| dock masqué | 1920 × 1200 |
+| dock affiché, défaut actuel | 1920 × 1200 |
+
+La fenêtre se redimensionnait donc à chaque appui sur la touche Windows, et
+la bande de fond d'écran laissée entre elle et le bas de l'écran se voyait
+autour de la pilule. `reserve_space=true` dans `shell.conf` rétablit
+l'ancien comportement pour qui préfère que rien ne passe sous le dock.
+
+Les fenêtres **plein écran** n'ont jamais été concernées : leur géométrie se
+calcule sur la résolution de l'écran et non sur la zone utile (labwc,
+`view_apply_fullscreen_geometry`), mesuré à 1920 × 1200 dans les deux cas.
+C'est bien d'une fenêtre maximisée qu'il s'agissait.
+
+La barre d'état, elle, déclare `exclusive_zone = -1` : elle **ignore** les
+zones réservées par les autres surfaces. Avec la valeur 0, elle se posait
+au-dessus des 86 px que le dock réservait alors, et flottait plus haut que
+lui — visible immédiatement sur une capture.
 
 Les composants sont des exécutables **séparés**. Un défaut dans le lanceur
 ne doit pas emporter le dock, et chacun peut être relancé isolément.

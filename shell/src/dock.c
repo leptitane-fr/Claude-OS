@@ -520,9 +520,27 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_layer_set_anchor (GTK_WINDOW (window), GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
     gtk_layer_set_namespace (GTK_WINDOW (window), "claude-os-dock");
 
-    /* Zone reservee : les fenetres maximisees s'arretent au-dessus du dock.
-     * 68 px de dock + 10 px de marge + 2 px de respiration. */
-    gtk_layer_set_exclusive_zone (GTK_WINDOW (window), 86);
+    /* Zone reservee : par defaut AUCUNE.
+     *
+     * Reserver 86 px faisait retrecir toute fenetre maximisee de la hauteur
+     * du dock -- mesure : 1920x1114 dock affiche, 1920x1200 dock masque. La
+     * fenetre se redimensionnait donc a chaque appui sur la touche Windows,
+     * et la bande de fond d'ecran laissee entre elle et le bas de l'ecran
+     * etait visible autour de la pilule. Constate sur la machine, puis
+     * reproduit ici.
+     *
+     * Le dock passe desormais par-dessus : afficher ou masquer une surface
+     * ne doit pas remettre en page ce qu'il y a dessous.
+     *
+     * Les fenetres PLEIN ECRAN n'etaient, elles, jamais concernees : leur
+     * geometrie se calcule sur la resolution de l'ecran, pas sur la zone
+     * utile (labwc, view_apply_fullscreen_geometry) -- mesure a 1920x1200
+     * dans les deux cas.
+     *
+     * reserve_space=true dans shell.conf retablit l'ancien comportement pour
+     * qui prefere que rien ne passe sous le dock. */
+    gtk_layer_set_exclusive_zone (GTK_WINDOW (window),
+                                  cfg->reserve_space ? 86 : 0);
 
     /* Le dock ne prend le clavier a aucun moment : la saisie continue d'aller
      * a la fenetre active meme quand la souris le survole. */

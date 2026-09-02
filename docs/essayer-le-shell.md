@@ -98,11 +98,15 @@ sudo install -m755 ../overlay/usr/local/bin/claude-os-shell-basculer /usr/local/
 
 Les applications épinglées : n'y mettre que ce qui est réellement installé,
 sinon le dock affiche un pictogramme générique qui ne lance rien.
+`reserve_space=true` ferait s'arrêter les fenêtres maximisées au-dessus du
+dock, au prix d'un redimensionnement à chaque affichage de celui-ci.
 
 ```sh
 cat > ~/.config/claude-os/shell.conf <<'FIN'
 [dock]
 pinned=chromium;thunar;xfce4-terminal
+
+reserve_space=false
 
 [appearance]
 font=Inter
