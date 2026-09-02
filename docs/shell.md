@@ -167,21 +167,50 @@ en sont copiés plutôt que cités de mémoire.
 
 ### Aucun appel D-Bus bloquant, jamais
 
-C'est la leçon la plus chère de ce composant. `g_dbus_proxy_new_for_bus_sync`
-**n'accepte aucun délai** et attend les vingt-cinq secondes réglementaires
-quand le service tarde à répondre. Mesuré au banc d'essai contre un faux
-NetworkManager muet : la barre d'état ne s'affichait pas du tout pendant ce
-temps, alors même que sa fenêtre avait déjà été présentée.
+`g_dbus_proxy_new_for_bus_sync` **n'accepte aucun délai** et attend les
+vingt-cinq secondes réglementaires quand le service ne répond pas. Trois
+appels de ce type se trouvaient sur le chemin de démarrage — l'icône réseau
+de la barre, la bascule Wi-Fi, la bascule Bluetooth — plus une recherche
+d'adaptateur BlueZ sans borne. Mesuré : vingt-cinq secondes pendant
+lesquelles la barre d'état ne s'affichait pas du tout, alors même que sa
+fenêtre avait déjà été présentée.
 
-Trois appels de ce type se trouvaient sur le chemin de démarrage — l'icône
-réseau de la barre, la bascule Wi-Fi, la bascule Bluetooth — plus une
-recherche d'adaptateur BlueZ sans borne. Tous sont désormais asynchrones ou
-bornés à quelques secondes, et la lecture des réseaux l'est de bout en bout :
-service → périphériques → carte → bornes, en comptant les réponses en attente
-à chaque étage.
+Tous sont désormais asynchrones ou bornés, et la lecture des réseaux l'est de
+bout en bout : service → périphériques → carte → bornes, en comptant les
+réponses en attente à chaque étage.
+
+**Une précision d'honnêteté sur ce chiffre.** Le service muet qui a produit
+ces vingt-cinq secondes l'était à cause du banc d'essai lui-même : la
+politique du démon D-Bus n'autorisait pas l'envoi des `method_return`, et le
+démon rejetait donc silencieusement *toutes* les réponses. Ce n'est donc pas
+la preuve qu'un vrai NetworkManager se comporterait ainsi. Mais la démons­tration
+du mode de défaillance, elle, est exacte : un service qui ne répond pas gèle
+le shell entier, et un shell ne doit pas dépendre de la promptitude d'un
+service pour s'afficher. La correction reste juste, la mesure ne prouvait pas
+ce que j'en avais d'abord conclu.
 
 Les propriétés se lisent par `GetAll` et non une par une : vingt bornes
 visibles font la différence entre vingt allers-retours et cent.
+
+### Ce que le faux NetworkManager a vérifié
+
+Un service factice monté sur un bus système privé, avec des cas choisis pour
+être désagréables. Chaîne complète relevée dans son journal :
+
+| Cas | Résultat |
+|---|---|
+| Carte Ethernet et carte Wi-Fi | la première écartée sur `DeviceType` |
+| Deux bornes du même SSID | fusionnées, la plus forte conservée |
+| SSID accentué (`Café du Coin`) | décodé, et ré-encodé en octets à la connexion |
+| SSID non UTF-8 | « (nom illisible, 3 octets) », aucun plantage |
+| SSID vide | « (réseau masqué) » |
+| Réseau connecté | placé en tête, marqué |
+| Clic sur un réseau connu | `ActivateConnection("/", carte, borne)` |
+| Clic sur un réseau protégé | champ déplié, puis `AddAndActivateConnection` avec `wpa-psk` |
+
+**Le Bluetooth n'a pas eu droit au même traitement** : aucun faux BlueZ n'a
+été écrit. Sa mise en page et sa navigation sont vérifiées, ses appels ne le
+sont pas.
 
 ### Les bascules ne mentent pas
 

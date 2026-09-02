@@ -231,8 +231,14 @@ on_reseau_clic (GtkButton *b, gpointer data)
      * aller-retour ou l'utilisateur clique deux fois sans comprendre. */
     connecter_connu (l->w, l->r->ap);
 
-    if (l->r->protege)
+    if (l->r->protege) {
         gtk_revealer_set_reveal_child (GTK_REVEALER (l->revelateur), TRUE);
+        /* Le curseur va dans le champ : deplier une zone de saisie sans y
+         * mettre le focus oblige a cliquer dedans, ce que personne ne
+         * devine. Constate au banc d'essai -- la frappe partait sur le
+         * bouton de la ligne, qui relançait la connexion. */
+        gtk_widget_grab_focus (l->champ);
+    }
 }
 
 /* Prend possession de `r`. */
