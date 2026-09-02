@@ -52,6 +52,19 @@ executable('claude-os-status',
   dependencies : [gtk, layershell, giounix],
   install : true)
 
+executable('claude-os-fond',
+  'src/wallpaper.c', commun,
+  dependencies : [gtk, layershell, giounix],
+  install : true)
+
+executable('claude-os-reglages',
+  'src/settings.c', commun,
+  dependencies : [gtk, layershell, giounix],
+  install : true)
+
+install_data('data/claude-os-reglages.desktop',
+  install_dir : get_option('prefix') / get_option('datadir') / 'applications')
+
 install_subdir('style',
   install_dir : data_dir,
   strip_directory : false)

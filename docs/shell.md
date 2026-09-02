@@ -78,14 +78,21 @@ sans qu'aucun fichier n'ait été écrit.
 
 ```ini
 [dock]
-pinned=chromium;claude-desktop;thunar;xfce4-terminal
+pinned=chromium;claude-desktop;thunar;xfce4-terminal;claude-os-reglages
 reserve_space=false  ; true : les fenêtres maximisées s'arrêtent au-dessus
 
 [appearance]
 font=Inter
 icon_theme=Papirus
 theme=light          ; ou dark
+
+[wallpaper]
+image=               ; vide : le dégradé dessiné par le shell
+fill=true            ; false : image entière, dégradé sur les côtés
 ```
+
+Tout cela se règle dans le panneau de réglages ; le fichier reste modifiable
+à la main, et les composants le relisent aussitôt dans les deux cas.
 
 Le dock **et** la barre d'état lisent ce fichier, par le même code
 (`config.c`), et le **relisent à chaud** : chaque composant surveille

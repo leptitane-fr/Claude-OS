@@ -15,6 +15,10 @@ typedef struct {
     char     *icon_theme;  /* theme d'icones                                  */
     gboolean  dark;          /* theme sombre                                  */
     gboolean  reserve_space; /* le dock repousse-t-il les fenetres maximisees */
+
+    /* Fond d'ecran. Chemin vide : le degrade dessine par le shell. */
+    char     *wallpaper;     /* chemin d'une image, ou ""                    */
+    gboolean  wallpaper_fill;/* couvrir en rognant plutot que tout montrer   */
 } ShellConfig;
 
 /* Lit ~/.config/claude-os/shell.conf. Absent, les valeurs par defaut
@@ -46,6 +50,8 @@ gboolean shell_config_save (const ShellConfig *cfg, GError **error);
 
 /* Libere une configuration. */
 void shell_config_free (ShellConfig *cfg);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (ShellConfig, shell_config_free)
 
 /* Appelee quand shell.conf change sur le disque, avec la configuration
  * relue. Elle appartient a l'appelant, qui doit la liberer. */

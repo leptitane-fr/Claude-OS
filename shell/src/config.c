@@ -5,7 +5,10 @@
 /* Applications epinglees par defaut : celles pour lesquelles ce systeme
  * existe, plus de quoi ouvrir un dossier et un terminal. */
 static const char *default_pinned[] = {
-    "chromium", "claude-desktop", "thunar", "xfce4-terminal", NULL
+    "chromium", "claude-desktop", "thunar", "xfce4-terminal",
+    /* Tant qu'il n'y a pas de lanceur, le panneau de reglages ne serait
+     * atteignable par aucun moyen s'il n'etait pas epingle. */
+    "claude-os-reglages", NULL
 };
 
 static char *
@@ -36,6 +39,8 @@ shell_config_load (void)
      * doit pas redimensionner la fenetre en dessous, il doit passer par
      * dessus. Voir le commentaire de la zone exclusive dans dock.c. */
     cfg->reserve_space = FALSE;
+    cfg->wallpaper      = g_strdup ("");
+    cfg->wallpaper_fill = TRUE;
 
     if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, NULL))
         return cfg;   /* pas de fichier : les defauts suffisent */
@@ -68,6 +73,17 @@ shell_config_load (void)
     if (e == NULL)
         cfg->reserve_space = reserve;
 
+    g_autofree char *wp = g_key_file_get_string (kf, "wallpaper", "image", NULL);
+    if (wp != NULL) {
+        g_free (cfg->wallpaper);
+        cfg->wallpaper = g_steal_pointer (&wp);
+    }
+
+    g_autoptr(GError) e2 = NULL;
+    gboolean fill = g_key_file_get_boolean (kf, "wallpaper", "fill", &e2);
+    if (e2 == NULL)
+        cfg->wallpaper_fill = fill;
+
     return cfg;
 }
 
@@ -79,6 +95,7 @@ shell_config_free (ShellConfig *cfg)
     g_strfreev (cfg->pinned);
     g_free (cfg->font);
     g_free (cfg->icon_theme);
+    g_free (cfg->wallpaper);
     g_free (cfg);
 }
 
@@ -106,6 +123,8 @@ shell_config_save (const ShellConfig *cfg, GError **error)
     g_key_file_set_string  (kf, "appearance", "font", cfg->font);
     g_key_file_set_string  (kf, "appearance", "icon_theme", cfg->icon_theme);
     g_key_file_set_string  (kf, "appearance", "theme", cfg->dark ? "dark" : "light");
+    g_key_file_set_string  (kf, "wallpaper", "image", cfg->wallpaper);
+    g_key_file_set_boolean (kf, "wallpaper", "fill", cfg->wallpaper_fill);
 
     return g_key_file_save_to_file (kf, path, error);
 }

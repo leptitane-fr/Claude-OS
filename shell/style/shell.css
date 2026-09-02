@@ -332,3 +332,100 @@ window.dark .dock-window-row:hover { background-color: @d-surface-sunk; }
 /* La fenêtre au premier plan, pour se repérer quand il y en a plusieurs. */
 .dock-window-row.active,
 window.dark .dock-window-row.active { background-color: @accent; color: #ffffff; }
+
+/* -------------------------------------------------------------------------
+   Fond d'écran par défaut
+
+   Dessiné plutôt qu'embarqué : la distribution doit être présentable au
+   premier démarrage sans transporter de photographie. Sombre, un peu de
+   couleur mais très diluée — deux halos très larges sur une base
+   presque noire.
+
+   Composé une seule fois par le compositeur. Aucune animation : un fond
+   animé serait le plus sûr moyen de réveiller le GPU en permanence.
+   ------------------------------------------------------------------------- */
+
+.fond-degrade {
+  background-color: #161a22;
+  background-image:
+    radial-gradient(ellipse 90% 70% at 22% 8%,  alpha(@accent, 0.28), transparent 62%),
+    radial-gradient(ellipse 80% 60% at 85% 92%, alpha(#1abc9c, 0.18), transparent 58%),
+    linear-gradient(165deg, #1c2129 0%, #141821 55%, #0f1218 100%);
+}
+
+/* En thème clair, le même dessin en très pâle : la cohérence du geste
+   compte plus que l'inversion littérale des couleurs. */
+window.shell.fond:not(.dark) .fond-degrade {
+  background-color: #e9ecf1;
+  background-image:
+    radial-gradient(ellipse 90% 70% at 22% 8%,  alpha(@accent, 0.14), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 85% 92%, alpha(#1abc9c, 0.10), transparent 55%),
+    linear-gradient(165deg, #eef1f5 0%, #e4e8ee 55%, #dde2ea 100%);
+}
+
+/* -------------------------------------------------------------------------
+   Panneau de réglages
+
+   Une fenêtre ordinaire, mais le même langage que le reste : mêmes surfaces,
+   mêmes rayons, mêmes espacements. Un panneau de réglages qui ne ressemble
+   pas au bureau qu'il règle sonne faux.
+   ------------------------------------------------------------------------- */
+
+window.reglages { background-color: @l-surface-alt; }
+window.reglages.dark { background-color: #16181b; }
+
+.reglages-pile { padding: 16px; }
+
+.reglages-carte {
+  background-color: @l-surface;
+  border: 1px solid @l-border;
+  border-radius: 16px;
+  padding: 14px 16px;
+}
+
+window.dark .reglages-carte {
+  background-color: @d-surface;
+  border-color: @d-border;
+}
+
+.reglages-titre {
+  font-size: 12px;
+  font-weight: 600;
+  color: @l-text-dim;
+  margin-bottom: 6px;
+}
+
+window.dark .reglages-titre { color: @d-text-dim; }
+
+.reglages-ligne { padding: 8px 0; }
+
+.reglages-libelle { font-size: 14px; color: @l-text; }
+.reglages-detail  { font-size: 12px; color: @l-text-dim; margin-top: 2px; }
+
+window.dark .reglages-libelle { color: @d-text; }
+window.dark .reglages-detail  { color: @d-text-dim; }
+
+/* Le choix du thème : deux boutons soudés, celui qui est actif prend
+   l'accent. C'est le seul endroit coloré du panneau. */
+.reglages-paire button {
+  background: none;
+  background-color: @l-surface-alt;
+  border: 1px solid @l-border;
+  color: @l-text;
+  padding: 5px 16px;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+window.dark .reglages-paire button {
+  background-color: @d-surface-alt;
+  border-color: @d-border;
+  color: @d-text;
+}
+
+.reglages-paire button:checked,
+window.dark .reglages-paire button:checked {
+  background-color: @accent;
+  border-color: @accent;
+  color: #ffffff;
+}

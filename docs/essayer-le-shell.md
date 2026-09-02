@@ -104,8 +104,7 @@ dock, au prix d'un redimensionnement à chaque affichage de celui-ci.
 ```sh
 cat > ~/.config/claude-os/shell.conf <<'FIN'
 [dock]
-pinned=chromium;thunar;xfce4-terminal
-
+pinned=chromium;thunar;xfce4-terminal;claude-os-reglages
 reserve_space=false
 
 [appearance]
@@ -146,6 +145,8 @@ et donc le raccourci de masquage — n'aurait personne à qui parler.
 | `Super+Entrée` | terminal |
 | `Super+B` | Chromium |
 | Survol d'une icône d'application ouverte | liste de ses fenêtres, cliquables |
+| Glisser une icône épinglée | réorganise le dock, ordre enregistré |
+| Icône « Réglages » du dock | thème, police, icônes, fond d'écran |
 | `Super+Maj+Q` | quitter la session |
 
 `Super+Entrée` et `Super+B` sont des filets de sécurité : tant que le shell
@@ -196,7 +197,19 @@ Retélécharger le ZIP, puis, depuis le nouveau dossier :
 cd ~/Claude-OS-*/shell
 meson setup build --prefix=/usr/local
 ninja -C build && sudo meson install -C build
-cp ../overlay/etc/xdg/labwc/rc.xml ~/.config/labwc/
+cp ../overlay/etc/xdg/labwc/rc.xml    ~/.config/labwc/
+cp ../overlay/etc/xdg/labwc/autostart ~/.config/labwc/
+```
+
+Recopier `autostart` n'est pas facultatif quand de nouveaux composants
+apparaissent : sans cela le fond d'écran ne serait pas lancé.
+
+Ajouter aussi le panneau de réglages aux icônes épinglées, faute de quoi
+rien ne permettrait de l'ouvrir :
+
+```sh
+sed -i 's/^pinned=.*/pinned=chromium;thunar;xfce4-terminal;claude-os-reglages/' \
+    ~/.config/claude-os/shell.conf
 ```
 
 Dans la session d'essai, `Super+Maj+Q` puis relancer `dbus-run-session labwc`
@@ -207,8 +220,6 @@ suffit à reprendre les nouveaux binaires.
 - **Aucun lanceur d'applications** : seules les icônes épinglées, les
   applications déjà ouvertes et les deux raccourcis de secours ouvrent
   quelque chose.
-- **Aucun réorganisation du dock par glisser-déposer.**
-- **Aucun choix de fond d'écran** : le fond est celui que labwc dessine.
 - **Aucune notification, aucun réglage de volume ni de luminosité.**
 
 ## Ce que l'essai sur la machine a tranché

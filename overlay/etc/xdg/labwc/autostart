@@ -8,5 +8,8 @@
 # Noms nus plutôt que chemins absolus : le même fichier sert pour l'image
 # construite (binaires dans /usr/bin) et pour un essai compilé à la main sur
 # une machine déjà installée (/usr/local/bin, qui vient en premier dans PATH).
+# Le fond d'ecran en premier : il occupe la couche la plus basse, et le
+# voir apparaitre apres le dock donnerait un demarrage en deux temps.
+claude-os-fond   &
 claude-os-dock   &
 claude-os-status &
