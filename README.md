@@ -35,7 +35,7 @@ comme environnement de travail principal, doté de privilèges étendus sur le s
 | Système de fichiers | **btrfs + compression zstd** | Gain d'espace notable sur un eMMC de faible capacité, et surtout **snapshots instantanés** — le mécanisme qui rend les privilèges étendus de Claude réversibles. |
 | Mémoire | **zram (zstd)** | Indispensable si la machine est en 4 Go, une fois Electron chargé. |
 | Machine cible | **`MADOO`** — N6000, 4 Go | Board confirmé sur trois sources indépendantes. 4 Go de LPDDR4x **soudée** : plafond définitif, non extensible. |
-| Levée du write-protect | **Décidée après le relevé** | La procédure CCD dépend de la version du CR50, que seul le relevé donne. |
+| Levée du write-protect | **SuzyQ requis** ⚠️ | Mesuré : `wpsw_cur` = `1` batterie débranchée. MADOO ne suit pas la ligne batterie (la table MrChromebox ne liste pas `battery` pour cette carte). **Point de blocage matériel actuel.** |
 | Filet de récupération | **Sauvegarde USB seule** | Pas de programmateur SPI externe. La sauvegarde du firmware devient donc le seul recours, d'où un protocole de vérification strict. |
 
 Le détail et les sources de chaque point sont dans [`docs/`](docs/).

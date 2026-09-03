@@ -109,43 +109,75 @@ en amont.
 
 ## 1.2 Le verrou : write-protect
 
-Sur Jasper Lake / Dedede, il **n'y a pas de vis de write-protect** : la
-protection est pilotée par la puce **CR50**. Sur la plupart des plateformes
-CR50, le CR50 aligne l'état du WP sur la ligne de détection de la batterie —
-**débrancher le connecteur de batterie de la carte mère lève donc la
-protection**.
+### Constat sur la machine : la batterie ne suffit pas
 
-Attention : ce n'est pas universel. Sur certaines plateformes plus récentes, le
-WP ne se lève pas par la batterie mais par un cavalier non peuplé à ponter.
-D'où la règle : **ne jamais supposer, toujours vérifier.**
+**Mesuré, pas supposé.** Batterie physiquement débranchée, machine démarrée sur
+secteur :
 
-### Vérification (impérative avant toute écriture)
+```
+$ sudo crossystem wpsw_cur
+1
+```
+
+`1` = write-protect **toujours actif**. La déconnexion de batterie n'a aucun
+effet sur cette carte.
+
+> `crossystem` affiche sa valeur **sans saut de ligne** : le résultat se colle
+> au prompt suivant (`1chronos@madoo-rev4`). Ce n'est pas une absence de
+> retour.
+
+### Pourquoi : MADOO ne suit pas la ligne batterie
+
+La table MrChromebox est explicite, colonne « WP Method » :
+
+| Board | Plateforme | Méthode WP documentée |
+|---|---|---|
+| **MADOO** | Jasper Lake | **`CR50 (SuzyQ)` + `jumper?`** |
+| DRAWCIA | Jasper Lake | `CR50 (SuzyQ)` + jumper *(photo disponible)* |
+| BOTEN | Jasper Lake | `CR50 (SuzyQ)` + jumper *(photo disponible)* |
+| CRET | Jasper Lake | `CR50 (SuzyQ)` + screw/jumper *(photo disponible)* |
+| GALTIC | Jasper Lake | `CR50 (SuzyQ, **battery**)` |
+
+MADOO **ne mentionne pas `battery`**, là où GALTIC l'indique explicitement. La
+mention `jumper?`, avec son point d'interrogation et sans photo, signifie que
+l'emplacement du cavalier n'est **pas documenté** pour cette carte —
+contrairement à DRAWCIA, BOTEN et CRET qui disposent de photos de référence.
+
+Erreur à ne pas reproduire : une version antérieure de ce document donnait la
+déconnexion de batterie comme voie valable, par généralisation depuis l'entrée
+du 14b-**ca0** (BLOOGUARD, Gemini Lake), qui n'est pas la même carte. D'où la
+règle maintenue : **vérifier `wpsw_cur`, ne jamais supposer.**
+
+### Les deux voies réellement ouvertes
+
+**1. Câble SuzyQ (CCD) — voie documentée et fiable.**
+
+La commande console `wp` du CR50 n'est accessible que par ce câble ; la
+documentation Chromium comme celle de MrChromebox sont formelles, il n'existe
+pas de contournement logiciel. Déroulé :
 
 ```sh
-sudo crossystem wpsw_cur
+# Étape 1 — ouvrir le CCD (sur la machine, sans câble)
+sudo gsctool -a -o
+# puis appuyer sur le bouton d alimentation plusieurs fois pendant 2-3 minutes
+# la machine redémarre ; réactiver le mode développeur
+
+# Étape 2 — désactiver le WP (câble branché sur le port USB-C gauche)
+ls /dev/ttyUSB*                      # attendu : ttyUSB0, ttyUSB1, ttyUSB2
+echo "wp false" > /dev/ttyUSB0
+echo "wp false atboot" > /dev/ttyUSB0
+echo "ccd reset factory" > /dev/ttyUSB0
+
+# Étape 3 — vérifier
+sudo crossystem wpsw_cur             # doit renvoyer 0
 ```
 
-**`sudo` est indispensable.** `wpsw_cur` lit l'état d'une broche GPIO, ce qui
-exige root. Sans `sudo`, la commande échoue ainsi — et cette erreur ne dit
-rien de l'état du write-protect :
+**2. Cavalier — voie non documentée pour MADOO.**
 
-```
-Unable to open /dev/gpiochip0
-open: Permission denied
-```
-
-Relevé plus complet, également utile pour la suite :
-
-```sh
-for k in wpsw_cur mainfw_type devsw_boot cros_debug; do
-  printf '%-14s %s\n' "$k" "$(sudo crossystem $k)"
-done
-```
-
-| Valeur | Signification |
-|---|---|
-| `0` | Write-protect **levé** — le flash est possible. |
-| `1` | Write-protect **toujours actif** — la déconnexion de batterie n'a pas suffi sur cette carte. Ne rien flasher ; il faut la voie CCD (SuzyQ) ou le cavalier. |
+Deux pastilles non peuplées à ponter sur la carte mère. L'emplacement n'étant
+pas publié pour MADOO, il faudrait l'identifier par comparaison avec les
+photos des cartes Dedede voisines. Ponter les mauvaises pastilles peut
+endommager la carte : à ne tenter que sur identification certaine.
 
 ### Accès au terminal : VT2, pas crosh
 
@@ -156,19 +188,38 @@ shell de `crosh`. Il faut un vrai terminal virtuel :
 - se connecter en `chronos` (aucun mot de passe en mode développeur) ;
 - **Ctrl + Alt + F1** pour revenir à l'interface graphique.
 
-Le script se lance en utilisateur normal, pas en root — il appelle `sudo`
-lui-même :
+Le script se lance en utilisateur normal — il appelle `sudo` lui-même :
 
 ```sh
 cd; curl -LOf https://mrchromebox.tech/firmware-util.sh && sudo bash firmware-util.sh
 ```
 
-### Après le flash
+### Vérification, impérative avant toute écriture
 
-Séquence de remontage imposée par la procédure : éteindre la machine,
-**débrancher l'alimentation externe**, puis rebrancher délicatement le
-connecteur de batterie. La batterie reste débranchée pendant toute la durée du
-flash.
+```sh
+sudo crossystem wpsw_cur
+```
+
+**`sudo` est indispensable.** `wpsw_cur` lit l'état d'une broche GPIO, ce qui
+exige root. Sans `sudo` :
+
+```
+Unable to open /dev/gpiochip0
+open: Permission denied
+```
+
+Cette erreur ne dit **rien** de l'état du write-protect.
+
+| Valeur | Signification |
+|---|---|
+| `0` | Write-protect **levé** — le flash est possible. |
+| `1` | Write-protect **actif** — ne rien flasher. |
+
+### Remontage de la batterie
+
+Tant que le WP n'est pas levé, laisser la machine ouverte n'apporte rien.
+Séquence : éteindre, **débrancher l'alimentation externe**, puis rebrancher
+délicatement le connecteur de batterie.
 
 ---
 
@@ -191,16 +242,16 @@ sur cette carte. Il se réduit, il ne s'élimine pas :
 
 Deux arbitrages ont été tranchés en amont ; ils conditionnent la procédure.
 
-### Levée du write-protect : décidée après le relevé
+### Levée du write-protect : tranchée par la mesure
 
-Le choix entre **déconnexion de la batterie** et **câble SuzyQ** est reporté
-après l'exécution de `tools/probe-hardware.sh`. Motif : la procédure CCD exacte
-dépend de la version du CR50 embarquée, que le relevé donne (`gsctool -a -f`),
-et l'état courant du write-protect (`crossystem wpsw_cur`) peut déjà être
-différent de celui supposé. Décider avant de savoir n'apporterait rien.
+Le choix n'en est plus un. `wpsw_cur` renvoyant `1` batterie débranchée, et la
+table MrChromebox ne listant pas `battery` pour MADOO, il ne reste que deux
+voies : **câble SuzyQ** (documentée, fiable) ou **cavalier** (emplacement non
+publié pour cette carte).
 
-Le relevé fournit les trois entrées de la décision : version du CR50, état CCD,
-état du write-protect matériel.
+Conséquence de calendrier : le projet est **bloqué au niveau matériel** tant
+que le write-protect n'est pas levé. Aucune étape ultérieure — sauvegarde,
+flash, installation — ne peut avancer sans cela.
 
 ### Récupération : sauvegarde USB, sans programmateur externe
 
