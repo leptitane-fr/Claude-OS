@@ -1,167 +1,161 @@
 <title>Étagère Claude OS</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap">
 <style>
-  /* ---------- jetons : thème clair par défaut ---------- */
   :root{
     --ink:#14161d; --ink-2:#4a4f5e; --ink-3:#767d8f;
     --ground:#eceef3; --surface:#ffffff; --surface-2:#f5f6fa;
     --line:#d8dce6; --line-strong:#bcc2d1;
-    --accent:#3b5bdb; --accent-soft:#e5e9fb;
-    --warn:#a8620a;
-    --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --accent:#3b5bdb; --ok:#1f7a4d; --warn:#a8620a;
+    --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace;
     --sans:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,sans-serif;
     --shell:'Inter',system-ui,sans-serif;
   }
-  @media (prefers-color-scheme:dark){
-    :root:not([data-theme="light"]){
-      --ink:#e7e9f0; --ink-2:#a6acbd; --ink-3:#767d8f;
-      --ground:#0e1016; --surface:#171a22; --surface-2:#1e222c;
-      --line:#2a2f3c; --line-strong:#3a4152;
-      --accent:#8ab4f8; --accent-soft:#1c2740;
-      --warn:#e0a458;
-    }
-  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --ink:#e7e9f0; --ink-2:#a6acbd; --ink-3:#767d8f;
+    --ground:#0e1016; --surface:#171a22; --surface-2:#1e222c;
+    --line:#2a2f3c; --line-strong:#3a4152;
+    --accent:#8ab4f8; --ok:#6ec99b; --warn:#e0a458;
+  }}
   :root[data-theme="dark"]{
     --ink:#e7e9f0; --ink-2:#a6acbd; --ink-3:#767d8f;
     --ground:#0e1016; --surface:#171a22; --surface-2:#1e222c;
     --line:#2a2f3c; --line-strong:#3a4152;
-    --accent:#8ab4f8; --accent-soft:#1c2740;
-    --warn:#e0a458;
+    --accent:#8ab4f8; --ok:#6ec99b; --warn:#e0a458;
   }
-
   *{box-sizing:border-box}
-  body{
-    margin:0; background:var(--ground); color:var(--ink);
-    font-family:var(--sans); line-height:1.55;
-    -webkit-font-smoothing:antialiased;
-  }
-  .wrap{max-width:1180px; margin:0 auto; padding:32px 24px 72px; display:flex; flex-direction:column; gap:28px}
-
-  /* ---------- en-tête ---------- */
+  body{margin:0; background:var(--ground); color:var(--ink); font-family:var(--sans); line-height:1.55; -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px; margin:0 auto; padding:32px 24px 72px; display:flex; flex-direction:column; gap:26px}
   header{display:flex; flex-wrap:wrap; align-items:flex-end; gap:16px 28px; justify-content:space-between}
-  h1{
-    font-size:clamp(26px,3.4vw,38px); font-weight:700; letter-spacing:-.022em;
-    margin:0; text-wrap:balance;
-  }
-  .sub{margin:6px 0 0; color:var(--ink-2); max-width:62ch; font-size:15px}
+  h1{font-size:clamp(26px,3.4vw,38px); font-weight:700; letter-spacing:-.022em; margin:0; text-wrap:balance}
+  .sub{margin:6px 0 0; color:var(--ink-2); max-width:64ch; font-size:15px}
   .meta{display:flex; gap:20px; font-family:var(--mono); font-size:12px; color:var(--ink-3)}
   .meta b{display:block; color:var(--ink); font-weight:500; font-size:13px}
 
-  /* ---------- écran simulé ---------- */
-  .stage{
-    background:var(--surface); border:1px solid var(--line); border-radius:14px;
-    padding:14px; display:flex; flex-direction:column; gap:12px;
-  }
+  .stage{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:14px; display:flex; flex-direction:column; gap:12px}
   .stage-bar{display:flex; flex-wrap:wrap; align-items:center; gap:10px; justify-content:space-between}
   .segs{display:flex; gap:4px; background:var(--surface-2); border:1px solid var(--line); border-radius:9px; padding:3px}
-  .segs button{
-    font:500 12.5px/1 var(--sans); color:var(--ink-2); background:none; border:0;
-    padding:7px 13px; border-radius:6px; cursor:pointer;
-  }
+  .segs button{font:500 12.5px/1 var(--sans); color:var(--ink-2); background:none; border:0; padding:7px 13px; border-radius:6px; cursor:pointer}
   .segs button[aria-pressed="true"]{background:var(--accent); color:#fff}
-  .segs button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .segs button:focus-visible, .keybtn:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+  .keybtn{
+    display:inline-flex; align-items:center; gap:8px; font:500 12.5px/1 var(--sans);
+    background:var(--surface-2); border:1px solid var(--line-strong); color:var(--ink-2);
+    border-radius:9px; padding:8px 13px; cursor:pointer;
+  }
+  .keybtn[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:#fff}
   .dims{font-family:var(--mono); font-size:11.5px; color:var(--ink-3)}
 
   .screen{
-    container-type:inline-size;
+    container-type:inline-size; --u:0.0520833cqw;
     position:relative; width:100%; aspect-ratio:16/9; overflow:hidden;
-    border-radius:8px; border:1px solid var(--line-strong);
-    font-family:var(--shell);
+    border-radius:8px; border:1px solid var(--line-strong); font-family:var(--shell);
     background:
       radial-gradient(ellipse 52% 34% at 26% 20%, rgba(66,120,205,.60), transparent 68%),
       radial-gradient(ellipse 46% 30% at 84% 88%, rgba(78,62,150,.58), transparent 70%),
       linear-gradient(178deg,#1e263e 0%,#141827 45%,#0a0c12 100%);
   }
-  /* 1 px réel de l'écran 1920 = 0.0520833cqw */
-  .screen{--u:0.0520833cqw}
 
-  /* fenêtre applicative */
-  .app{
-    position:absolute; inset:0 0 calc(72*var(--u)) 0; margin:calc(14*var(--u));
-    margin-bottom:0; border-radius:calc(14*var(--u)); overflow:hidden;
-    background:#101319; border:1px solid rgba(255,255,255,.07);
-    box-shadow:0 calc(14*var(--u)) calc(40*var(--u)) rgba(0,0,0,.45);
-    display:flex; flex-direction:column; opacity:0; transform:scale(.995);
-    transition:opacity .22s ease, transform .22s ease; pointer-events:none;
+  /* icônes du bureau */
+  .desk-icons{position:absolute; top:calc(22*var(--u)); left:calc(24*var(--u)); display:flex; flex-direction:column; gap:calc(14*var(--u))}
+  .di{display:flex; flex-direction:column; align-items:center; gap:calc(6*var(--u)); width:calc(76*var(--u)); text-align:center}
+  .di svg{width:calc(44*var(--u)); height:calc(44*var(--u)); filter:drop-shadow(0 calc(2*var(--u)) calc(4*var(--u)) rgba(0,0,0,.5))}
+  .di span{font-size:calc(11.5*var(--u)); color:#e8eaed; text-shadow:0 1px 3px rgba(0,0,0,.8); line-height:1.3}
+
+  /* fenêtre */
+  .win{
+    position:absolute; overflow:hidden; display:none; flex-direction:column;
+    border-radius:calc(var(--radius-w)*var(--u));
+    box-shadow:calc(-1*var(--sr)*var(--u)) calc(-1*(var(--sr) - 3)*var(--u)) calc(var(--sr)*2.4*var(--u)) rgba(0,0,0,var(--so)),
+               calc(var(--sr)*var(--u)) calc((var(--sr) - 3)*var(--u)) calc(var(--sr)*2.4*var(--u)) rgba(0,0,0,var(--so));
   }
-  .screen[data-view="app"] .app{opacity:1; transform:none}
-  .app-top{
-    display:flex; align-items:center; gap:calc(9*var(--u));
-    padding:calc(11*var(--u)) calc(15*var(--u)); background:#1b1f27;
-    border-bottom:1px solid rgba(255,255,255,.06);
+  .screen[data-view="note"] .win.note{display:flex}
+  .screen[data-view="chrome"] .win.chrome{display:flex}
+  /* fenêtre flottante */
+  .win.note{left:calc(300*var(--u)); top:calc(150*var(--u)); width:calc(1000*var(--u)); height:calc(650*var(--u))}
+  /* maximisée : occupe tout l'écran, donc PASSE SOUS les panneaux */
+  .win.chrome{inset:0; border-radius:0}
+
+  .titlebar{
+    height:calc(34*var(--u)); background:#202124; display:flex; align-items:center;
+    padding:0 calc(8*var(--u)); flex:none; position:relative;
   }
-  .tab{
-    display:flex; align-items:center; gap:calc(8*var(--u));
-    background:#2a2f39; border-radius:calc(9*var(--u));
-    padding:calc(7*var(--u)) calc(14*var(--u));
-    font-size:calc(13*var(--u)); color:#e8eaed; max-width:38%;
+  .titlebar .t{
+    position:absolute; left:0; right:0; text-align:center; font-size:calc(12.5*var(--u));
+    color:#e8eaed; font-weight:500; pointer-events:none;
   }
-  .tab span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-  .omni{
-    flex:1; background:#0f1218; border-radius:calc(999*var(--u));
-    padding:calc(7*var(--u)) calc(15*var(--u)); font-size:calc(12.5*var(--u));
-    color:#9aa0a6; border:1px solid rgba(255,255,255,.06);
+  .wbtns{margin-left:auto; display:flex; gap:calc(2*var(--u)); z-index:1}
+  .wb{
+    width:calc(26*var(--u)); height:calc(24*var(--u)); border-radius:calc(6*var(--u));
+    display:flex; align-items:center; justify-content:center; transition:background .12s;
   }
-  .app-body{flex:1; padding:calc(30*var(--u)) calc(38*var(--u)); display:flex; flex-direction:column; gap:calc(15*var(--u))}
+  .wb:hover{background:#33415a}
+  .wb svg{width:calc(11*var(--u)); height:calc(11*var(--u)); stroke:#e8eaed; stroke-width:1.7; fill:none}
+  .menubar{
+    height:calc(30*var(--u)); background:#26282d; display:flex; align-items:center; gap:calc(18*var(--u));
+    padding:0 calc(14*var(--u)); flex:none; border-bottom:1px solid rgba(255,255,255,.05);
+  }
+  .menubar span{font-size:calc(12*var(--u)); color:#c8cbd1}
+  .winbody{flex:1; background:#16181d; padding:calc(20*var(--u)) calc(24*var(--u)); overflow:hidden}
+  .winbody p{margin:0 0 calc(9*var(--u)); font-size:calc(13*var(--u)); color:#c8cbd1; line-height:1.7; font-family:var(--mono)}
+  .caret{display:inline-block; width:calc(1.6*var(--u)); height:calc(15*var(--u)); background:#8ab4f8; vertical-align:-3px}
+
+  /* chromium : cadre applicatif, pas de barre Openbox */
+  .ctop{background:#1b1f27; padding:calc(9*var(--u)) calc(12*var(--u)) 0; flex:none}
+  .ctabs{display:flex; align-items:flex-end; gap:calc(4*var(--u))}
+  .ctab{
+    display:flex; align-items:center; gap:calc(8*var(--u)); background:#2a2f39;
+    border-radius:calc(9*var(--u)) calc(9*var(--u)) 0 0; padding:calc(8*var(--u)) calc(14*var(--u));
+    font-size:calc(12.5*var(--u)); color:#e8eaed; max-width:calc(280*var(--u));
+  }
+  .ctab.dim{background:#22262e; color:#9aa0a6}
+  .ctab span{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .cwin{margin-left:auto; display:flex; gap:calc(2*var(--u)); align-self:flex-start}
+  .ctool{background:#2a2f39; display:flex; align-items:center; gap:calc(10*var(--u)); padding:calc(8*var(--u)) calc(12*var(--u)); flex:none}
+  .omni{flex:1; background:#12151b; border-radius:calc(999*var(--u)); padding:calc(6*var(--u)) calc(14*var(--u)); font-size:calc(12.5*var(--u)); color:#9aa0a6}
+  .cbody{flex:1; background:#101319; padding:calc(34*var(--u)) calc(46*var(--u)); display:flex; flex-direction:column; gap:calc(14*var(--u))}
   .sk{background:rgba(255,255,255,.07); border-radius:calc(5*var(--u)); height:calc(11*var(--u))}
-  .sk.t{height:calc(24*var(--u)); width:46%; background:rgba(255,255,255,.14)}
-  .sk.w1{width:88%} .sk.w2{width:76%} .sk.w3{width:82%} .sk.w4{width:58%}
-  .sk-row{display:flex; gap:calc(14*var(--u)); margin-top:calc(8*var(--u))}
-  .sk-card{flex:1; height:calc(96*var(--u)); border-radius:calc(10*var(--u)); background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.05)}
+  .sk.t{height:calc(26*var(--u)); width:42%; background:rgba(255,255,255,.15)}
+  .sk-row{display:flex; gap:calc(14*var(--u)); margin-top:calc(10*var(--u))}
+  .sk-card{flex:1; height:calc(110*var(--u)); border-radius:calc(10*var(--u)); background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.05)}
 
   /* panneaux */
   .panel{
-    position:absolute; bottom:calc(var(--margin)*var(--u));
-    height:calc(var(--h)*var(--u));
-    display:flex; align-items:center;
-    border-radius:calc(var(--radius)*var(--u));
-    background:rgba(32,33,36,var(--alpha));
-    border:1px solid rgba(255,255,255,var(--border));
-    box-shadow:0 calc(6*var(--u)) calc(22*var(--u)) rgba(0,0,0,.34);
+    position:absolute; bottom:calc(var(--margin)*var(--u)); height:calc(var(--h)*var(--u));
+    display:flex; align-items:center; border-radius:calc(var(--radius)*var(--u));
+    background:rgba(32,33,36,var(--alpha)); border:1px solid rgba(255,255,255,.10);
+    box-shadow:0 calc(4*var(--u)) calc(var(--sr)*1.6*var(--u)) rgba(0,0,0,var(--so));
+    transition:opacity .18s ease, transform .18s ease;
   }
-  .screen[data-blur="on"] .panel{backdrop-filter:blur(calc(var(--blur)*var(--u))); -webkit-backdrop-filter:blur(calc(var(--blur)*var(--u)))}
-  .dock{left:50%; transform:translateX(-50%); padding:0 calc(10*var(--u)); gap:calc(4*var(--u))}
+  .screen[data-shelf="off"] .panel{opacity:0; transform:translateY(calc(20*var(--u))); pointer-events:none}
+  .dock{left:50%; padding:0 calc(9*var(--u)); gap:calc(3*var(--u)); transform:translateX(-50%)}
+  .screen[data-shelf="off"] .dock{transform:translateX(-50%) translateY(calc(20*var(--u)))}
   .status{right:calc(10*var(--u)); padding:0 calc(8*var(--u)); gap:calc(2*var(--u))}
 
   .slot{
     display:flex; align-items:center; justify-content:center;
     width:calc((var(--icon) + 16)*var(--u)); height:calc((var(--icon) + 12)*var(--u));
-    border-radius:calc(12*var(--u)); transition:background .13s ease;
-    cursor:default;
+    border-radius:calc(12*var(--u)); transition:transform .14s ease, background .13s ease; transform-origin:bottom center;
   }
-  .slot:hover{background:rgba(138,180,248,calc(var(--hover)/100))}
-  .slot svg{width:calc(var(--icon)*var(--u)); height:calc(var(--icon)*var(--u)); display:block}
+  .slot:hover{background:rgba(138,180,248,.18)}
+  .screen[data-zoom="on"] .slot:hover{transform:scale(calc(var(--zoom)/100))}
+  .slot svg{width:calc(var(--icon)*var(--u)); height:calc(var(--icon)*var(--u)); display:block;
+            filter:drop-shadow(0 calc(2*var(--u)) calc(3*var(--u)) rgba(0,0,0,.55))}
+  .sep{width:1px; height:calc(var(--icon)*.7*var(--u)); background:rgba(255,255,255,.14); margin:0 calc(4*var(--u))}
 
-  .tray{display:flex; align-items:center; gap:calc(2*var(--u))}
-  .tslot{
-    display:flex; align-items:center; justify-content:center;
-    width:calc(32*var(--u)); height:calc(32*var(--u)); border-radius:calc(10*var(--u));
-    transition:background .13s ease;
-  }
-  .tslot:hover{background:rgba(138,180,248,calc(var(--hover)/100))}
+  .tslot{display:flex; align-items:center; justify-content:center; width:calc(32*var(--u)); height:calc(32*var(--u)); border-radius:calc(10*var(--u)); transition:background .13s}
+  .tslot:hover{background:rgba(138,180,248,.18)}
   .tslot svg{width:calc(20*var(--u)); height:calc(20*var(--u)); display:block; opacity:.92}
-  .batt{
-    display:flex; align-items:center; padding:0 calc(9*var(--u)); border-radius:calc(10*var(--u));
-    font-size:calc(13*var(--u)); color:#e8eaed; font-variant-numeric:tabular-nums;
-    transition:background .13s ease;
-  }
-  .batt:hover{background:rgba(138,180,248,calc(var(--hover)/100))}
-  .clock{
-    display:flex; flex-direction:column; align-items:flex-end; justify-content:center;
-    padding:0 calc(10*var(--u)); border-radius:calc(10*var(--u)); line-height:1.18;
-    transition:background .13s ease;
-  }
-  .clock:hover{background:rgba(138,180,248,calc(var(--hover)/100))}
+  .batt{display:flex; align-items:center; padding:0 calc(9*var(--u)); border-radius:calc(10*var(--u)); font-size:calc(13*var(--u)); color:#e8eaed; font-variant-numeric:tabular-nums}
+  .batt:hover,.clock:hover{background:rgba(138,180,248,.18)}
+  .clock{display:flex; flex-direction:column; align-items:flex-end; justify-content:center; padding:0 calc(10*var(--u)); border-radius:calc(10*var(--u)); line-height:1.18}
   .clock .t1{font-size:calc(15*var(--u)); color:#e8eaed; font-weight:500; font-variant-numeric:tabular-nums}
   .clock .t2{font-size:calc(11*var(--u)); color:#9aa0a6}
 
-  /* ---------- réglages ---------- */
   .cols{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:22px}
-  @media (max-width:860px){.cols{grid-template-columns:1fr}}
+  @media (max-width:880px){.cols{grid-template-columns:1fr}}
   .card{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:20px 22px}
   .card h2{margin:0 0 3px; font-size:16px; font-weight:600; letter-spacing:-.01em}
-  .card .hint{margin:0 0 18px; color:var(--ink-3); font-size:13px}
-
+  .card .hint{margin:0 0 16px; color:var(--ink-3); font-size:13px}
   .ctrl{display:flex; flex-direction:column; gap:7px; padding:13px 0; border-top:1px solid var(--line)}
   .ctrl:first-of-type{border-top:0; padding-top:0}
   .ctrl-head{display:flex; justify-content:space-between; align-items:baseline; gap:12px}
@@ -170,30 +164,11 @@
   .ctrl small{color:var(--ink-3); font-size:12px}
   input[type=range]{width:100%; accent-color:var(--accent); margin:0}
   input[type=range]:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:4px}
-
-  .switch{display:flex; align-items:center; justify-content:space-between; gap:14px}
-  .switch button{
-    font:500 12.5px/1 var(--sans); border:1px solid var(--line-strong); background:var(--surface-2);
-    color:var(--ink-2); border-radius:999px; padding:7px 15px; cursor:pointer;
-  }
-  .switch button[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:#fff}
-  .switch button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
-
-  pre{
-    margin:0; background:var(--surface-2); border:1px solid var(--line); border-radius:10px;
-    padding:15px 16px; overflow-x:auto; font-family:var(--mono); font-size:12.3px;
-    line-height:1.72; color:var(--ink);
-  }
-  pre .c{color:var(--ink-3)}
-  pre .f{color:var(--ink-2)}
-  pre b{color:var(--accent); font-weight:500}
-  .file{font-family:var(--mono); font-size:11.5px; color:var(--ink-3); margin:16px 0 6px; letter-spacing:.02em}
+  pre{margin:0; background:var(--surface-2); border:1px solid var(--line); border-radius:10px; padding:14px 16px; overflow-x:auto; font-family:var(--mono); font-size:12.2px; line-height:1.7}
+  pre .c{color:var(--ink-3)} pre b{color:var(--accent); font-weight:500}
+  .file{font-family:var(--mono); font-size:11.5px; color:var(--ink-3); margin:15px 0 6px}
   .file:first-child{margin-top:0}
-
-  .note{
-    display:flex; gap:11px; align-items:flex-start; border-left:2px solid var(--warn);
-    padding:2px 0 2px 13px; color:var(--ink-2); font-size:13px; margin-top:18px;
-  }
+  .note{display:flex; gap:11px; border-left:2px solid var(--warn); padding:2px 0 2px 13px; color:var(--ink-2); font-size:13px; margin-top:16px}
   .note b{color:var(--ink); font-weight:600}
   footer{color:var(--ink-3); font-size:12.5px; border-top:1px solid var(--line); padding-top:18px}
   @media (prefers-reduced-motion:reduce){*{transition:none !important}}
@@ -203,93 +178,117 @@
   <header>
     <div>
       <h1>Étagère Claude OS</h1>
-      <p class="sub">Rendu fidèle du dock et de la barre d'état, aux dimensions et couleurs réelles des fichiers de configuration. Chaque réglage émet la ligne <span style="font-family:var(--mono);font-size:.92em">tint2</span> ou <span style="font-family:var(--mono);font-size:.92em">picom</span> correspondante.</p>
+      <p class="sub">Rendu aux dimensions et couleurs réelles des fichiers de configuration. Les vues montrent ce que les réglages seuls ne disent pas : le cadre des fenêtres, et le passage des fenêtres maximisées <em>sous</em> l'étagère.</p>
     </div>
     <div class="meta">
       <div>Cible<b>1920 × 1080</b></div>
-      <div>Machine<b>MADOO · N6000</b></div>
-      <div>Mémoire<b>4 Go</b></div>
+      <div>Dock<b>plank</b></div>
+      <div>Barre<b>tint2</b></div>
     </div>
   </header>
 
   <section class="stage">
     <div class="stage-bar">
-      <div class="segs" role="group" aria-label="Contenu affiché">
+      <div class="segs" role="group" aria-label="Vue">
         <button id="v-desk" aria-pressed="true">Bureau</button>
-        <button id="v-app" aria-pressed="false">Application ouverte</button>
+        <button id="v-note" aria-pressed="false">Bloc-notes</button>
+        <button id="v-chrome" aria-pressed="false">Chromium maximisé</button>
       </div>
+      <button class="keybtn" id="k-loupe" aria-pressed="false">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg>
+        Touche Loupe
+      </button>
       <div class="dims" id="dims"></div>
     </div>
 
-    <div class="screen" id="screen" data-view="desk" data-blur="on"
-         style="--h:60;--radius:18;--icon:40;--alpha:.90;--border:.10;--hover:18;--margin:10;--blur:14">
+    <div class="screen" id="screen" data-view="desk" data-shelf="on" data-zoom="on"
+         style="--h:60;--radius:18;--icon:40;--alpha:.90;--margin:10;--sr:15;--so:.30;--radius-w:14;--zoom:120">
 
-      <div class="app" aria-hidden="true">
-        <div class="app-top">
-          <div class="tab">
-            <svg viewBox="0 0 24 24" style="width:calc(14*var(--u));height:calc(14*var(--u));flex:none"><circle cx="12" cy="12" r="10" fill="none" stroke="#9aa0a6" stroke-width="2"/><circle cx="12" cy="12" r="3.6" fill="#8ab4f8"/></svg>
-            <span>Tableau de bord</span>
-          </div>
-          <div class="omni">claude.ai/chat</div>
+      <div class="desk-icons" aria-hidden="true">
+        <div class="di">
+          <svg viewBox="0 0 48 48"><path d="M4 12a4 4 0 0 1 4-4h11l4 5h17a4 4 0 0 1 4 4v19a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z" fill="#8ab4f8"/><path d="M4 18h40v18a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z" fill="#5b8dd9"/></svg>
+          <span>Documents</span>
         </div>
-        <div class="app-body">
-          <div class="sk t"></div>
-          <div class="sk w1"></div><div class="sk w2"></div><div class="sk w3"></div><div class="sk w4"></div>
-          <div class="sk-row"><div class="sk-card"></div><div class="sk-card"></div><div class="sk-card"></div></div>
+        <div class="di">
+          <svg viewBox="0 0 48 48"><rect x="10" y="5" width="28" height="38" rx="4" fill="#e8eaed"/><g stroke="#5f6368" stroke-width="2" stroke-linecap="round"><path d="M17 15h14"/><path d="M17 22h14"/><path d="M17 29h9"/></g></svg>
+          <span>notes.txt</span>
         </div>
       </div>
 
-      <!-- dock centré -->
+      <!-- Bloc-notes : cadre Openbox — barre de titre seule -->
+      <div class="win note">
+        <div class="titlebar">
+          <div class="t">notes.txt — Bloc-notes</div>
+          <div class="wbtns">
+            <div class="wb"><svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg></div>
+            <div class="wb"><svg viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" rx="1"/></svg></div>
+            <div class="wb"><svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg></div>
+          </div>
+        </div>
+        <div class="menubar"><span>Fichier</span><span>Édition</span><span>Affichage</span><span>Aide</span></div>
+        <div class="winbody">
+          <p># Claude OS</p>
+          <p>Aucun cadre à gauche, à droite ni en bas.</p>
+          <p>Seules la barre de titre et la barre de menu.<span class="caret"></span></p>
+        </div>
+      </div>
+
+      <!-- Chromium maximisé : cadre applicatif, et il passe SOUS les panneaux -->
+      <div class="win chrome">
+        <div class="ctop">
+          <div class="ctabs">
+            <div class="ctab"><svg viewBox="0 0 24 24" style="width:calc(13*var(--u));height:calc(13*var(--u));flex:none"><circle cx="12" cy="12" r="10" fill="none" stroke="#9aa0a6" stroke-width="2"/><circle cx="12" cy="12" r="3.6" fill="#8ab4f8"/></svg><span>Claude</span></div>
+            <div class="ctab dim"><span>Recherche</span></div>
+            <div class="cwin">
+              <div class="wb"><svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg></div>
+              <div class="wb"><svg viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" rx="1"/></svg></div>
+              <div class="wb"><svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg></div>
+            </div>
+          </div>
+        </div>
+        <div class="ctool"><div class="omni">claude.ai/chat</div></div>
+        <div class="cbody">
+          <div class="sk t"></div><div class="sk" style="width:88%"></div><div class="sk" style="width:74%"></div><div class="sk" style="width:81%"></div>
+          <div class="sk-row"><div class="sk-card"></div><div class="sk-card"></div><div class="sk-card"></div></div>
+          <div class="sk" style="width:64%"></div><div class="sk" style="width:70%"></div>
+        </div>
+      </div>
+
       <div class="panel dock" role="group" aria-label="Dock">
+        <div class="slot" title="Applications">
+          <svg viewBox="0 0 48 48" aria-hidden="true">
+            <rect x="3" y="3" width="42" height="42" rx="11" fill="#2f3742"/>
+            <g fill="#e8eaed"><rect x="12" y="12" width="7" height="7" rx="2"/><rect x="20.5" y="12" width="7" height="7" rx="2"/><rect x="29" y="12" width="7" height="7" rx="2"/><rect x="12" y="20.5" width="7" height="7" rx="2"/><rect x="20.5" y="20.5" width="7" height="7" rx="2"/><rect x="29" y="20.5" width="7" height="7" rx="2"/><rect x="12" y="29" width="7" height="7" rx="2"/><rect x="20.5" y="29" width="7" height="7" rx="2"/><rect x="29" y="29" width="7" height="7" rx="2"/></g>
+          </svg>
+        </div>
+        <div class="sep"></div>
         <div class="slot" title="Chromium">
           <svg viewBox="0 0 48 48" aria-hidden="true">
             <circle cx="24" cy="24" r="21" fill="#2b2f36"/>
             <path d="M24 3a21 21 0 0 1 18.2 10.5H24a10.5 10.5 0 0 0-9.1 5.3L8.8 8.2A20.9 20.9 0 0 1 24 3Z" fill="#e8554f"/>
             <path d="M8.8 8.2 15 18.8a10.5 10.5 0 0 0 0 10.4L8.9 39.8A21 21 0 0 1 8.8 8.2Z" fill="#f2b736"/>
             <path d="M8.9 39.8 15 29.2A10.5 10.5 0 0 0 24 34.5h18.2A21 21 0 0 1 8.9 39.8Z" fill="#54a75b"/>
-            <circle cx="24" cy="24" r="8.4" fill="#8ab4f8"/>
-            <circle cx="24" cy="24" r="5.4" fill="#1f6feb"/>
+            <circle cx="24" cy="24" r="8.4" fill="#8ab4f8"/><circle cx="24" cy="24" r="5.4" fill="#1f6feb"/>
           </svg>
         </div>
         <div class="slot" title="Claude">
           <svg viewBox="0 0 48 48" aria-hidden="true">
             <rect x="3" y="3" width="42" height="42" rx="11" fill="#c96442"/>
-            <g stroke="#fdf7f2" stroke-width="3.4" stroke-linecap="round">
-              <path d="M24 12v24"/><path d="M13.6 18l20.8 12"/><path d="M13.6 30l20.8-12"/>
-            </g>
+            <g stroke="#fdf7f2" stroke-width="3.4" stroke-linecap="round"><path d="M24 12v24"/><path d="M13.6 18l20.8 12"/><path d="M13.6 30l20.8-12"/></g>
           </svg>
         </div>
         <div class="slot" title="Bloc-notes">
           <svg viewBox="0 0 48 48" aria-hidden="true">
-            <rect x="9" y="5" width="30" height="38" rx="5" fill="#e8eaed"/>
-            <rect x="9" y="5" width="6" height="38" rx="3" fill="#9aa0a6"/>
-            <g stroke="#5f6368" stroke-width="2.2" stroke-linecap="round">
-              <path d="M20 15h13"/><path d="M20 22h13"/><path d="M20 29h9"/>
-            </g>
+            <rect x="9" y="5" width="30" height="38" rx="5" fill="#e8eaed"/><rect x="9" y="5" width="6" height="38" rx="3" fill="#9aa0a6"/>
+            <g stroke="#5f6368" stroke-width="2.2" stroke-linecap="round"><path d="M20 15h13"/><path d="M20 22h13"/><path d="M20 29h9"/></g>
           </svg>
         </div>
       </div>
 
-      <!-- barre d'état, bas droite -->
       <div class="panel status" role="group" aria-label="Barre d'état">
-        <div class="tray">
-          <div class="tslot" title="Wi-Fi">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#e8eaed" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-              <path d="M2.5 8.5a15 15 0 0 1 19 0"/><path d="M5.8 12.2a10 10 0 0 1 12.4 0"/><path d="M9 15.8a5 5 0 0 1 6 0"/>
-              <circle cx="12" cy="19.3" r="1.15" fill="#e8eaed" stroke="none"/>
-            </svg>
-          </div>
-          <div class="tslot" title="Bluetooth">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#e8eaed" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">
-              <path d="M7 7.5 17 16.5 12 21V3l5 4.5L7 16.5"/>
-            </svg>
-          </div>
-          <div class="tslot" title="Volume">
-            <svg viewBox="0 0 24 24" fill="none" stroke="#e8eaed" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true">
-              <path d="M11 5 6.5 9H3v6h3.5L11 19z" fill="#e8eaed"/><path d="M15.5 9.2a4 4 0 0 1 0 5.6"/><path d="M18.4 6.4a8 8 0 0 1 0 11.2"/>
-            </svg>
-          </div>
-        </div>
+        <div class="tslot" title="Wi-Fi"><svg viewBox="0 0 24 24" fill="none" stroke="#e8eaed" stroke-width="2" stroke-linecap="round"><path d="M2.5 8.5a15 15 0 0 1 19 0"/><path d="M5.8 12.2a10 10 0 0 1 12.4 0"/><path d="M9 15.8a5 5 0 0 1 6 0"/><circle cx="12" cy="19.3" r="1.15" fill="#e8eaed" stroke="none"/></svg></div>
+        <div class="tslot" title="Bluetooth"><svg viewBox="0 0 24 24" fill="none" stroke="#e8eaed" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M7 7.5 17 16.5 12 21V3l5 4.5L7 16.5"/></svg></div>
+        <div class="tslot" title="Volume"><svg viewBox="0 0 24 24" fill="none" stroke="#e8eaed" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M11 5 6.5 9H3v6h3.5L11 19z" fill="#e8eaed"/><path d="M15.5 9.2a4 4 0 0 1 0 5.6"/><path d="M18.4 6.4a8 8 0 0 1 0 11.2"/></svg></div>
         <div class="batt">78 %</div>
         <div class="clock"><div class="t1">14:32</div><div class="t2">jeu. 3 sept.</div></div>
       </div>
@@ -299,154 +298,116 @@
   <div class="cols">
     <section class="card">
       <h2>Réglages</h2>
-      <p class="hint">Les valeurs sont celles des fichiers réels. Dites-moi lesquelles vous retenez, je les écris dans le dépôt.</p>
+      <p class="hint">Ce sont les mêmes que ceux du panneau <span style="font-family:var(--mono);font-size:.92em">claude-os-settings</span> sur la machine. Dites-moi vos valeurs, je les inscris comme valeurs par défaut.</p>
 
+      <div class="ctrl">
+        <div class="ctrl-head"><label for="r-so">Intensité des ombres</label><span class="val" id="o-so"></span></div>
+        <input type="range" id="r-so" min="5" max="60" step="1" value="30">
+        <small>Portent sur les fenêtres, le dock, la barre d'état et les icônes.</small>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head"><label for="r-sr">Diffusion des ombres</label><span class="val" id="o-sr"></span></div>
+        <input type="range" id="r-sr" min="4" max="34" step="1" value="15">
+        <small>Plus la valeur monte, plus l'ombre est douce et étalée.</small>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head"><label for="r-rw">Coins des fenêtres</label><span class="val" id="o-rw"></span></div>
+        <input type="range" id="r-rw" min="0" max="24" step="1" value="14">
+      </div>
       <div class="ctrl">
         <div class="ctrl-head"><label for="r-alpha">Opacité des panneaux</label><span class="val" id="o-alpha"></span></div>
         <input type="range" id="r-alpha" min="60" max="100" step="1" value="90">
-        <small>Plus bas, le fond transparaît davantage. En dessous de 80 %, la lisibilité de l'heure se dégrade sur un fond clair.</small>
       </div>
-
       <div class="ctrl">
-        <div class="ctrl-head"><label for="r-radius">Rayon des coins</label><span class="val" id="o-radius"></span></div>
+        <div class="ctrl-head"><label for="r-radius">Rayon des panneaux</label><span class="val" id="o-radius"></span></div>
         <input type="range" id="r-radius" min="0" max="30" step="1" value="18">
-        <small>18 px donne l'arrondi de ChromeOS. Au-delà de 24, l'étagère prend une allure de pastille.</small>
       </div>
-
       <div class="ctrl">
-        <div class="ctrl-head"><label for="r-icon">Taille des icônes</label><span class="val" id="o-icon"></span></div>
-        <input type="range" id="r-icon" min="28" max="52" step="2" value="40">
-        <small>La hauteur du panneau suit automatiquement : icône + 20 px.</small>
+        <div class="ctrl-head"><label for="r-icon">Icônes du dock</label><span class="val" id="o-icon"></span></div>
+        <input type="range" id="r-icon" min="28" max="56" step="2" value="40">
+        <small>La hauteur des panneaux suit : icône + 20 px.</small>
       </div>
-
       <div class="ctrl">
-        <div class="ctrl-head"><label for="r-margin">Écart au bord</label><span class="val" id="o-margin"></span></div>
-        <input type="range" id="r-margin" min="0" max="28" step="1" value="10">
-        <small>À 0, les panneaux touchent le bas de l'écran, façon barre des tâches. Détachés, ils flottent.</small>
-      </div>
-
-      <div class="ctrl">
-        <div class="ctrl-head"><label for="r-hover">Accent au survol</label><span class="val" id="o-hover"></span></div>
-        <input type="range" id="r-hover" min="0" max="45" step="1" value="18">
-        <small>Intensité du bleu <span style="font-family:var(--mono)">#8ab4f8</span> sous l'icône survolée. Passez la souris sur le dock.</small>
-      </div>
-
-      <div class="ctrl">
-        <div class="switch">
-          <div>
-            <label for="b-blur" style="font-size:13.5px;font-weight:500;display:block">Flou d'arrière-plan</label>
-            <small>Le premier réglage à sacrifier si l'affichage saccade.</small>
-          </div>
-          <button id="b-blur" aria-pressed="true">Activé</button>
-        </div>
+        <div class="ctrl-head"><label for="r-zoom">Agrandissement au survol</label><span class="val" id="o-zoom"></span></div>
+        <input type="range" id="r-zoom" min="100" max="180" step="5" value="120">
+        <small>L'effet loupe de plank. Survolez une icône du dock.</small>
       </div>
     </section>
 
     <section class="card">
       <h2>Configuration produite</h2>
-      <p class="hint">Ce que valent vos réglages une fois traduits dans les fichiers.</p>
-      <div class="file">rootfs/usr/share/claude-os/tint2/dock.tint2rc · status.tint2rc</div>
-      <pre id="out-tint2"></pre>
-      <div class="file">rootfs/usr/share/claude-os/picom/picom.conf</div>
+      <p class="hint">Vos réglages, traduits dans les fichiers du dépôt.</p>
+      <div class="file">picom.conf</div>
       <pre id="out-picom"></pre>
-      <div class="note">
-        <div><b>Rendu approché.</b> Le flou du navigateur et celui de picom ne sont pas le même algorithme, et les icônes réelles viendront du thème Papirus et du paquet <span style="font-family:var(--mono);font-size:.92em">claude-desktop</span>. Les dimensions, couleurs et rayons, eux, sont exacts.</div>
-      </div>
+      <div class="file">tint2/status.tint2rc</div>
+      <pre id="out-tint2"></pre>
+      <div class="file">~/.config/plank/dock1/settings</div>
+      <pre id="out-plank"></pre>
+      <div class="note"><div><b>Ce que la maquette ne rend pas.</b> Le zoom de plank agrandit ses voisines en cascade, ici seule l'icône survolée bouge. Les icônes définitives viendront du thème Papirus et du paquet <span style="font-family:var(--mono);font-size:.92em">claude-desktop</span>. Dimensions, couleurs et rayons sont exacts.</div></div>
     </section>
   </div>
 
-  <footer>Claude OS · HP Chromebook x360 14b-cb0000sf · carte MADOO, Jasper Lake · Debian 13 « trixie »</footer>
+  <footer>Claude OS · MADOO / Jasper Lake · Debian 13 · Openbox + plank + tint2 + picom</footer>
 </div>
 
 <script>
 (function(){
-  var screen = document.getElementById('screen');
-  var blurOn = true;
-
-  var R = {
-    alpha:  document.getElementById('r-alpha'),
-    radius: document.getElementById('r-radius'),
-    icon:   document.getElementById('r-icon'),
-    margin: document.getElementById('r-margin'),
-    hover:  document.getElementById('r-hover')
-  };
-  var O = {
-    alpha:  document.getElementById('o-alpha'),
-    radius: document.getElementById('o-radius'),
-    icon:   document.getElementById('o-icon'),
-    margin: document.getElementById('o-margin'),
-    hover:  document.getElementById('o-hover')
-  };
-
-  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+  var screen=document.getElementById('screen'), shelf=true;
+  var ids=['so','sr','rw','alpha','radius','icon','zoom'], R={}, O={};
+  ids.forEach(function(k){ R[k]=document.getElementById('r-'+k); O[k]=document.getElementById('o-'+k); });
 
   function render(){
-    var a = +R.alpha.value, rad = +R.radius.value, ic = +R.icon.value,
-        mg = +R.margin.value, hv = +R.hover.value;
-    var h = ic + 20;
+    var so=+R.so.value, sr=+R.sr.value, rw=+R.rw.value,
+        al=+R.alpha.value, rad=+R.radius.value, ic=+R.icon.value, zm=+R.zoom.value;
+    var h=ic+20;
+    var S=screen.style;
+    S.setProperty('--so',(so/100).toFixed(2)); S.setProperty('--sr',sr);
+    S.setProperty('--radius-w',rw); S.setProperty('--alpha',(al/100).toFixed(2));
+    S.setProperty('--radius',rad); S.setProperty('--icon',ic); S.setProperty('--h',h);
+    S.setProperty('--zoom',zm);
+    screen.setAttribute('data-zoom', zm>100?'on':'off');
 
-    screen.style.setProperty('--alpha', (a/100).toFixed(2));
-    screen.style.setProperty('--radius', rad);
-    screen.style.setProperty('--icon', ic);
-    screen.style.setProperty('--margin', mg);
-    screen.style.setProperty('--hover', hv);
-    screen.style.setProperty('--h', h);
-    screen.setAttribute('data-blur', blurOn ? 'on' : 'off');
+    O.so.textContent=so+' %'; O.sr.textContent=sr+' px'; O.rw.textContent=rw+' px';
+    O.alpha.textContent=al+' %'; O.radius.textContent=rad+' px';
+    O.icon.textContent=ic+' px'; O.zoom.textContent=zm+' %';
+    document.getElementById('dims').textContent='panneaux '+h+' px · icônes '+ic+' px · ombre '+sr+'/'+so+' %';
 
-    O.alpha.textContent  = a + ' %';
-    O.radius.textContent = rad + ' px';
-    O.icon.textContent   = ic + ' px';
-    O.margin.textContent = mg + ' px';
-    O.hover.textContent  = hv + ' %';
-
-    document.getElementById('dims').textContent =
-      'panneaux ' + h + ' px · icônes ' + ic + ' px · rayon ' + rad + ' px · marge ' + mg + ' px';
-
-    document.getElementById('out-tint2').innerHTML =
-      '<span class="c"># panneau</span>\n' +
-      'panel_size = <b>0 ' + h + '</b>\n' +
-      'panel_margin = <span class="f">' + (mg) + ' ' + mg + '</span>\n' +
-      '\n<span class="c"># arrière-plan 1 — le panneau</span>\n' +
-      'rounded = <b>' + rad + '</b>\n' +
-      'background_color = <b>#202124 ' + a + '</b>\n' +
-      'border_color = <span class="f">#ffffff 10</span>\n' +
-      '\n<span class="c"># arrière-plan 2 — pastille de survol</span>\n' +
-      'rounded = <span class="f">' + Math.max(0, Math.round(rad*0.66)) + '</span>\n' +
-      'background_color_hover = <b>#8ab4f8 ' + hv + '</b>\n' +
-      'background_color_pressed = <span class="f">#8ab4f8 ' + Math.min(100, hv+10) + '</span>\n' +
-      '\n<span class="c"># lanceurs (dock.tint2rc)</span>\n' +
-      'launcher_icon_size = <b>' + ic + '</b>';
-
-    document.getElementById('out-picom').innerHTML = blurOn
-      ? 'corner-radius = <b>' + rad + '</b>;\n' +
-        'blur-method = <b>"dual_kawase"</b>;\n' +
-        'blur-strength = <b>4</b>;\n' +
-        '<span class="c">// le flou ne touche que les fenêtres translucides,</span>\n' +
-        '<span class="c">// donc les deux panneaux seulement.</span>'
-      : 'corner-radius = <b>' + rad + '</b>;\n' +
-        'blur-method = <b>"none"</b>;\n' +
-        '<span class="c">// flou désactivé : quelques images par seconde</span>\n' +
-        '<span class="c">// regagnées sur le GPU 32 EU.</span>';
+    document.getElementById('out-picom').innerHTML=
+      'shadow = <b>true</b>;\n'+
+      'shadow-radius = <b>'+sr+'</b>;\n'+
+      'shadow-opacity = <b>'+(so/100).toFixed(2)+'</b>;\n'+
+      'corner-radius = <b>'+rw+'</b>;\n'+
+      'blur-method = <b>"none"</b>;\n'+
+      '<span class="c">// flou retiré : sans apport une fois les ombres en place</span>';
+    document.getElementById('out-tint2').innerHTML=
+      'panel_size = <b>0 '+h+'</b>\n'+
+      'rounded = <b>'+rad+'</b>\n'+
+      'background_color = <b>#202124 '+al+'</b>\n'+
+      'strut_policy = <b>none</b>   <span class="c"># fenêtres sous la barre</span>';
+    document.getElementById('out-plank').innerHTML=
+      'IconSize=<b>'+ic+'</b>\n'+
+      'ZoomEnabled=<b>'+(zm>100?'true':'false')+'</b>\n'+
+      'ZoomPercent=<b>'+zm+'</b>\n'+
+      'Position=<b>3</b>  Alignment=<b>3</b>   <span class="c"># bas, centré</span>';
   }
+  ids.forEach(function(k){ R[k].addEventListener('input',render); });
 
-  Object.keys(R).forEach(function(k){ R[k].addEventListener('input', render); });
+  function view(w){
+    screen.setAttribute('data-view',w);
+    [['desk','v-desk'],['note','v-note'],['chrome','v-chrome']].forEach(function(p){
+      document.getElementById(p[1]).setAttribute('aria-pressed', p[0]===w?'true':'false');
+    });
+  }
+  document.getElementById('v-desk').addEventListener('click',function(){view('desk');});
+  document.getElementById('v-note').addEventListener('click',function(){view('note');});
+  document.getElementById('v-chrome').addEventListener('click',function(){view('chrome');});
 
-  var bb = document.getElementById('b-blur');
-  bb.addEventListener('click', function(){
-    blurOn = !blurOn;
-    bb.setAttribute('aria-pressed', blurOn ? 'true' : 'false');
-    bb.textContent = blurOn ? 'Activé' : 'Désactivé';
-    render();
+  var kl=document.getElementById('k-loupe');
+  kl.addEventListener('click',function(){
+    shelf=!shelf;
+    screen.setAttribute('data-shelf', shelf?'on':'off');
+    kl.setAttribute('aria-pressed', shelf?'false':'true');
   });
-
-  var vd = document.getElementById('v-desk'), va = document.getElementById('v-app');
-  function view(which){
-    screen.setAttribute('data-view', which);
-    vd.setAttribute('aria-pressed', which === 'desk' ? 'true' : 'false');
-    va.setAttribute('aria-pressed', which === 'app' ? 'true' : 'false');
-  }
-  vd.addEventListener('click', function(){ view('desk'); });
-  va.addEventListener('click', function(){ view('app'); });
 
   render();
 })();
