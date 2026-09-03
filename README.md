@@ -67,6 +67,7 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`tools/probe-hardware.sh`](tools/probe-hardware.sh) | Relevé matériel en lecture seule, 13 sections. À lancer depuis ChromeOS **avant** tout effacement. |
 | [`tools/verify-firmware-backup.sh`](tools/verify-firmware-backup.sh) | Valide une sauvegarde de firmware avant de flasher : taille, dump vide, signature `__FMAP__`, régions, et comparaison de deux lectures. Retourne `2` si la sauvegarde est inutilisable. |
 | [`tools/validate-install.sh`](tools/validate-install.sh) | Passe en revue l'installation poste par poste — Wi-Fi, Bluetooth, **audio**, VA-API, énergie, session, empreinte mémoire — et rend un verdict. À lancer après `provision.sh`. |
+| [`tools/essayer-shell.sh`](tools/essayer-shell.sh) | Installe, **à côté** de la session actuelle, le shell GTK4 de la branche `custom-linux-usb-debian` : dock, barre d'état, réglages, écrits en C sous labwc. Réversible, rien dans `/usr` ni dans l'amorçage. |
 | [`tools/probe-keys.sh`](tools/probe-keys.sh) | Relève ce qu'émettent réellement la rangée supérieure et la touche Loupe du clavier Chromebook, pour en déduire les liaisons Openbox. |
 
 ---
