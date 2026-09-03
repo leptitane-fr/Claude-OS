@@ -140,6 +140,43 @@ if [ "$WITH_CLAUDE" -eq 1 ]; then
 	info "Cowork non installé (QEMU/KVM volontairement écartés — voir docs/04)"
 fi
 
+# ---------------------------------------------------------------- réseau
+
+say "Bascule du Wi-Fi vers NetworkManager"
+
+# L'installateur Debian configure le Wi-Fi dans /etc/network/interfaces, géré
+# par ifupdown. NetworkManager, qui vient d'être installé, ignore par défaut
+# les interfaces qui y figurent : sans intervention, plus personne ne gère la
+# carte après redémarrage et la machine se retrouve sans réseau — juste au
+# moment où l'on en a le plus besoin.
+#
+# On reprend donc les identifiants pour en faire un profil NetworkManager,
+# PUIS seulement on neutralise la strophe ifupdown. Si les identifiants sont
+# introuvables, on ne touche à rien : deux gestionnaires qui coexistent valent
+# mieux qu'une machine muette.
+
+IFACES=/etc/network/interfaces
+if [ -f "$IFACES" ] && grep -qE '^[[:space:]]*(auto|allow-hotplug|iface)[[:space:]]+wl' "$IFACES"; then
+	SSID="$(awk '/wpa-ssid/{$1=""; sub(/^ /,""); print; exit}' "$IFACES" 2>/dev/null | tr -d '"')"
+	PSK="$(awk  '/wpa-psk/ {$1=""; sub(/^ /,""); print; exit}' "$IFACES" 2>/dev/null | tr -d '"')"
+
+	if [ -n "$SSID" ] && [ -n "$PSK" ]; then
+		info "réseau « $SSID » repris depuis ifupdown"
+		run "nmcli connection add type wifi con-name '$SSID' ssid '$SSID' wifi-sec.key-mgmt wpa-psk wifi-sec.psk '$PSK' connection.autoconnect yes >/dev/null 2>&1 || true"
+
+		info "neutralisation de la strophe ifupdown (sauvegarde conservée)"
+		run "cp -a '$IFACES' '$IFACES.avant-claude-os'"
+		run "awk '/^[[:space:]]*(auto|allow-hotplug)[[:space:]]+wl/ { print \"# \" \$0; next } /^[[:space:]]*iface[[:space:]]+wl/ { blk=1; print \"# \" \$0; next } blk && /^[[:space:]]+[^[:space:]]/ { print \"# \" \$0; next } blk && /^[^[:space:]#]/ { blk=0 } { print }' '$IFACES.avant-claude-os' > '$IFACES'"
+	else
+		warn "identifiants Wi-Fi introuvables dans $IFACES"
+		info "ifupdown reste en place : le réseau continuera de fonctionner, mais"
+		info "l'icône Wi-Fi de la barre d'état ne le pilotera pas. Pour basculer"
+		info "plus tard, commenter la strophe « wl » puis se reconnecter par l'icône."
+	fi
+else
+	info "aucune configuration Wi-Fi ifupdown — NetworkManager gère seul"
+fi
+
 # ------------------------------------------------------- fichiers du système
 
 say "Déploiement de l'environnement"
