@@ -44,6 +44,59 @@ voisin de la puce SPI.
 
 ---
 
+## 3.1 bis Candidats identifiés sur la carte
+
+### Ce que dit la communauté
+
+Un fil du forum chrultrabook porte exactement sur cette question :
+[« Identifying WP Jumper on HP MADOO board »](https://forum.chrultrabook.com/t/identifying-wp-jumper-on-hp-madoo-board/6520).
+
+Enseignements, à prendre pour ce qu'ils valent :
+
+- Le cavalier **n'a jamais été identifié avec certitude**. L'auteur du fil
+  écrit lui-même qu'il n'est « pas sûr à 100 % ».
+- Le candidat retenu est **`J1`, près du lecteur microSD**.
+- **Aucun marquage `H_WP`** n'existe sur cette carte, contrairement à DRAWCIA.
+- Ponter `J1` a permis d'exécuter `ccd open` alors que la machine ne répondait
+  plus — donc `J1` fait *quelque chose*, sans qu'on sache quoi exactement.
+- **`wpsw_cur` n'a jamais été vérifié** après pontage. C'est précisément la
+  vérification qui manque, et qu'il nous revient de faire.
+
+### ⚠️ Incident documenté dans ce fil
+
+L'auteur a tenté `gsctool -a -o` (ouverture CCD) : **la machine s'est éteinte
+en cours d'opération et n'a plus démarré**. Elle n'a été récupérée que grâce à
+un câble SuzyQ.
+
+**Conséquence directe pour nous : ne pas exécuter `gsctool -a -o`.** Sans
+SuzyQ ni programmateur SPI, un tel incident serait terminal. Cette commande
+est écartée tant que le câble n'est pas en notre possession.
+
+### Repérage sur notre exemplaire
+
+Les photos de la carte confirment la zone décrite par le forum. Sur la partie
+de carte mère située **juste sous le lecteur microSD**, deux paires de trous
+métallisés traversants sont alignées verticalement, chacune dans un cadre
+sérigraphié blanc :
+
+| Repère | Position | Voisinage immédiat |
+|---|---|---|
+| **`J2`** | Paire du **haut** | Sous le repère `J9`, à gauche du bloc `CR1`/`CR6`/`CR7` |
+| **`J1`** | Paire du **bas** | À gauche de la diode `D25`, au-dessus de `D58`, marquage `Q1018` à droite |
+
+Le marquage `J1` est sérigraphié immédiatement à droite de la paire basse,
+`J2` immédiatement à droite de la paire haute. Repère de situation
+supplémentaire : le grand marquage `M2x2.5` et un QR code de carte se trouvent
+à gauche des deux paires.
+
+Ce sont des **trous traversants**, pas des pastilles de surface : un fil
+peut y être passé, ce qui rend le pontage temporaire plus simple et plus sûr
+qu'une soudure.
+
+**`J1` est le candidat n° 1** (celui du forum), **`J2` le candidat n° 2**.
+
+---
+
 ## 3.2 Méthode d'identification
 
 ### Étape 1 — Trouver la puce SPI, pas le cavalier
@@ -130,6 +183,9 @@ Un `1` persistant n'abîme rien : c'est un essai infructueux, pas une erreur.
 - **Insister.** Si aucun candidat ne donne `0`, la voie cavalier est un échec
   pour cette carte : on repart sur le câble SuzyQ, qui reste la seule méthode
   officiellement documentée pour MADOO.
+- **Exécuter `gsctool -a -o`.** Écarté tant que nous n'avons pas de SuzyQ :
+  un incident documenté sur cette carte exacte a rendu la machine non
+  démarrable en cours d'opération, et seul un SuzyQ a permis de la récupérer.
 
 ---
 
