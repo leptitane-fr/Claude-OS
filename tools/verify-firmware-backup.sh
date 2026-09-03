@@ -27,7 +27,7 @@
 
 set -uo pipefail
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 RC=0
 
 red()   { printf '\033[31m%s\033[0m\n' "$*"; }
@@ -183,10 +183,26 @@ if [ -n "$D2" ]; then
 	if cmp -s "$D1" "$D2"; then
 		ok "les deux lectures sont identiques — sauvegarde fiable"
 	else
-		fail "les deux lectures DIFFÈRENT : au moins une est corrompue."
-		info "Relire la puce jusqu'à obtenir deux dumps identiques."
-		if command -v cmp >/dev/null 2>&1; then
-			info "première différence : $(cmp "$D1" "$D2" 2>&1 | head -1)"
+		# Toute différence n'est pas une corruption : le firmware écrit en
+		# fonctionnement dans certaines régions (journal d'événements RW_ELOG,
+		# VPD, NVRAM). Deux lectures espacées peuvent donc différer légèrement
+		# sans que le dump soit mauvais. On distingue par le volume.
+		ndiff=""; capped=""
+		ndiff="$(cmp -l "$D1" "$D2" 2>/dev/null | head -200001 | wc -l | tr -d ' ')"
+		[ "$ndiff" -gt 200000 ] && capped=" (au moins)"
+		info "octets différents :$capped $ndiff"
+		info "première différence : $(cmp "$D1" "$D2" 2>&1 | head -1)"
+
+		if [ "$ndiff" -le 16384 ]; then
+			warn "différences localisées ($ndiff octets)."
+			info "Compatible avec une région écrite en fonctionnement"
+			info "(journal d'événements, VPD, NVRAM) plutôt qu'avec une lecture"
+			info "corrompue. La sauvegarde est probablement exploitable, mais"
+			info "une troisième lecture permettrait de trancher."
+		else
+			fail "les deux lectures divergent massivement ($ndiff octets)."
+			info "Ce volume n'est pas explicable par les régions d'exécution :"
+			info "au moins une lecture est corrompue. Relire la puce."
 		fi
 	fi
 else

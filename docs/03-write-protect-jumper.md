@@ -1,4 +1,29 @@
-# 3. Identifier le cavalier de write-protect sur MADOO
+# 3. Le cavalier de write-protect sur MADOO
+
+> ## ✅ RÉSOLU — `J1` est le cavalier de write-protect
+>
+> **Mesuré sur la machine**, cavalier `J1` ponté, machine redémarrée :
+>
+> ```
+> $ sudo crossystem wpsw_cur
+> 0
+> ```
+>
+> `J1` est la **paire basse** de trous métallisés traversants, située sous le
+> lecteur microSD, à gauche de la diode `D25`, au-dessus de `D58`, avec
+> `Q1018` à sa droite. Son marquage `J1` est sérigraphié immédiatement à
+> droite de la paire.
+>
+> **C'est une information neuve.** Le fil chrultrabook consacré à cette carte
+> désignait `J1` comme candidat mais n'a jamais vérifié `wpsw_cur` ; MrChromebox
+> note encore `jumper?` pour MADOO. La vérification manquante est faite.
+>
+> Le pont doit rester en place pendant la sauvegarde **et** pendant le flash :
+> l'état du write-protect est relu à chaque démarrage.
+
+---
+
+## 3.0 Historique de l'identification
 
 > **Contexte.** `sudo crossystem wpsw_cur` renvoie `1` batterie débranchée :
 > MADOO ne lie pas le write-protect à la ligne batterie (cf. `docs/01` §1.2).

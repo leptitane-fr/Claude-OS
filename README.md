@@ -35,7 +35,7 @@ comme environnement de travail principal, doté de privilèges étendus sur le s
 | Système de fichiers | **btrfs + compression zstd** | Gain d'espace notable sur un eMMC de faible capacité, et surtout **snapshots instantanés** — le mécanisme qui rend les privilèges étendus de Claude réversibles. |
 | Mémoire | **zram (zstd)** | Indispensable si la machine est en 4 Go, une fois Electron chargé. |
 | Machine cible | **`MADOO`** — N6000, 4 Go | Board confirmé sur trois sources indépendantes. 4 Go de LPDDR4x **soudée** : plafond définitif, non extensible. |
-| Levée du write-protect | **SuzyQ requis** ⚠️ | Mesuré : `wpsw_cur` = `1` batterie débranchée. MADOO ne suit pas la ligne batterie (la table MrChromebox ne liste pas `battery` pour cette carte). **Point de blocage matériel actuel.** |
+| Levée du write-protect | **Cavalier `J1`** ✅ | Résolu. La déconnexion de batterie est sans effet sur MADOO (`wpsw_cur` = `1`), mais le pontage de `J1` — paire basse sous le lecteur microSD — donne `wpsw_cur` = `0`. Information neuve : ni MrChromebox ni le forum ne l'avaient confirmée. |
 | Filet de récupération | **Sauvegarde USB seule** | Pas de programmateur SPI externe. La sauvegarde du firmware devient donc le seul recours, d'où un protocole de vérification strict. |
 
 Le détail et les sources de chaque point sont dans [`docs/`](docs/).
@@ -48,7 +48,7 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 |---|---|
 | [`docs/01-materiel-firmware.md`](docs/01-materiel-firmware.md) | Le matériel, le déverrouillage du firmware, les points de non-retour et la procédure de sauvegarde. **À lire avant toute manipulation de la machine.** |
 | [`docs/02-architecture.md`](docs/02-architecture.md) | Le socle logiciel, le budget mémoire, et le modèle de privilèges de Claude sur le système. |
-| [`docs/03-write-protect-jumper.md`](docs/03-write-protect-jumper.md) | **Blocage en cours.** Identifier le cavalier de write-protect sur MADOO par comparaison avec les cartes Dedede voisines, et le protocole de pontage réversible. |
+| [`docs/03-write-protect-jumper.md`](docs/03-write-protect-jumper.md) | **Résolu.** Le cavalier de write-protect de MADOO est `J1`, confirmé par mesure (`wpsw_cur` = `0`). Méthode d'identification et protocole de pontage. |
 
 ### Outils
 
