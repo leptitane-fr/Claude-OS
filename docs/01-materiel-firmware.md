@@ -109,32 +109,68 @@ en amont.
 
 ## 1.2 Le verrou : write-protect
 
-Un Chromebook refuse d'écrire dans sa mémoire flash de démarrage tant que le
-**write-protect matériel** est actif. Il faut le lever pour flasher un firmware
-UEFI.
-
 Sur Jasper Lake / Dedede, il **n'y a pas de vis de write-protect** : la
-protection est pilotée par la puce de sécurité **CR50** (Google Security Chip).
-La documentation MrChromebox indique pour les modèles HP de cette génération une
-levée par `CR50 (SuzyQ, battery)`, soit deux voies :
+protection est pilotée par la puce **CR50**. Sur la plupart des plateformes
+CR50, le CR50 aligne l'état du WP sur la ligne de détection de la batterie —
+**débrancher le connecteur de batterie de la carte mère lève donc la
+protection**.
 
-- **Déconnexion de la batterie** — ouvrir le châssis, débrancher le connecteur de
-  batterie, travailler sur secteur. Voie la plus courante, sans matériel spécifique.
-- **Câble SuzyQ (CCD)** — câble USB-C de débogage permettant d'ouvrir le *Closed
-  Case Debugging* du CR50 sans démontage. Nécessite d'acheter ou fabriquer le câble.
+Attention : ce n'est pas universel. Sur certaines plateformes plus récentes, le
+WP ne se lève pas par la batterie mais par un cavalier non peuplé à ponter.
+D'où la règle : **ne jamais supposer, toujours vérifier.**
 
-> Les commandes exactes (`gsctool`, ouverture CCD, présence physique par
-> pressions répétées sur le bouton d'alimentation) **ne doivent pas être
-> recopiées de mémoire** : elles varient selon la version du CR50 embarquée. Il
-> faut les prendre dans la documentation MrChromebox au moment de l'opération,
-> après avoir relevé la version du CR50 (`gsctool -a -f`, inclus dans le relevé).
+### Vérification (impérative avant toute écriture)
 
-Prérequis dans tous les cas : **mode développeur activé** sur ChromeOS.
-L'activation du mode développeur **efface les données locales** de la machine.
+```sh
+crossystem wpsw_cur
+```
+
+| Valeur | Signification |
+|---|---|
+| `0` | Write-protect **levé** — le flash est possible. |
+| `1` | Write-protect **toujours actif** — la déconnexion de batterie n'a pas suffi sur cette carte. Ne rien flasher ; il faut la voie CCD (SuzyQ) ou le cavalier. |
+
+### Accès au terminal : VT2, pas crosh
+
+Depuis **ChromeOS R117**, le script MrChromebox ne fonctionne plus depuis le
+shell de `crosh`. Il faut un vrai terminal virtuel :
+
+- **Ctrl + Alt + F2** (la touche `→` de la rangée du haut) pour basculer sur VT2 ;
+- se connecter en `chronos` (aucun mot de passe en mode développeur) ;
+- **Ctrl + Alt + F1** pour revenir à l'interface graphique.
+
+Le script se lance en utilisateur normal, pas en root — il appelle `sudo`
+lui-même :
+
+```sh
+cd; curl -LOf https://mrchromebox.tech/firmware-util.sh && sudo bash firmware-util.sh
+```
+
+### Après le flash
+
+Séquence de remontage imposée par la procédure : éteindre la machine,
+**débrancher l'alimentation externe**, puis rebrancher délicatement le
+connecteur de batterie. La batterie reste débranchée pendant toute la durée du
+flash.
 
 ---
 
-## 1.3 Décisions arrêtées
+## 1.3 Le risque propre à cette configuration
+
+Batterie débranchée, la machine n'a **aucune réserve d'énergie** : une coupure
+secteur, une prise mal enfoncée ou une multiprise à interrupteur coupe le
+courant instantanément. Si cela survient pendant l'écriture de la puce, la
+machine est brickée — et, sans programmateur SPI externe (arbitrage acté en
+§1.4), irrécupérable.
+
+Ce risque est inhérent à la procédure : le WP ne peut pas être levé autrement
+sur cette carte. Il se réduit, il ne s'élimine pas :
+
+- alimentation branchée **directement au mur**, pas sur une multiprise commutée ;
+- câble et connecteur vérifiés, machine immobile pendant l'écriture ;
+- ne rien flasher tant que la sauvegarde n'est pas faite **et vérifiée**.
+
+## 1.4 Décisions arrêtées
 
 Deux arbitrages ont été tranchés en amont ; ils conditionnent la procédure.
 
@@ -162,7 +198,7 @@ de la sauvegarde. D'où le protocole ci-dessous, qui n'est pas optionnel.
 
 ---
 
-## 1.4 Protocole de sauvegarde
+## 1.5 Protocole de sauvegarde
 
 Une sauvegarde de firmware peut avoir la bonne taille et un contenu faux : une
 lecture SPI échoue parfois silencieusement. Le protocole retenu :
@@ -183,6 +219,23 @@ lecture SPI échoue parfois silencieusement. Le protocole retenu :
 
    Codes de retour : `0` exploitable, `1` réserves, `2` **ne pas flasher**.
 
+   **Depuis VT2, le dépôt est privé donc `tools/verify-firmware-backup.sh`
+   n'est pas téléchargeable.** Contrôle équivalent à coller directement dans
+   le terminal, une fois placé dans le dossier des sauvegardes :
+
+   ```sh
+   for f in *.rom; do
+     printf '%-28s %10s octets  ' "$f" "$(stat -c%s "$f")"
+     LC_ALL=C grep -aq __FMAP__ "$f" && printf 'FMAP:ok  ' || printf 'FMAP:ABSENT  '
+     printf 'sha256:%s\n' "$(sha256sum "$f" | cut -c1-16)"
+   done
+   cmp bak1.rom bak2.rom && echo "IDENTIQUES — sauvegarde fiable" \
+                         || echo "DIFFERENTES — relire la puce"
+   ```
+
+   Attendu : deux fichiers de taille identique et conforme (4/8/16/32 Mio),
+   `FMAP:ok` sur les deux, et `IDENTIQUES`.
+
 3. **Copier le `.rom` sur deux supports distincts** — la clé USB de travail
    n'est pas une sauvegarde à elle seule.
 4. **Committer le manifeste**, pas le firmware. Le script produit
@@ -195,7 +248,7 @@ lecture SPI échoue parfois silencieusement. Le protocole retenu :
 
 ---
 
-## 1.5 Règles pendant le flash
+## 1.6 Règles pendant le flash
 
 **1. Ne pas interrompre l'alimentation.**
 Sur secteur, batterie rebranchée si elle avait été déconnectée pour le
@@ -209,9 +262,24 @@ restaurer la sauvegarde.
 
 **3. Ne pas flasher si la vérification renvoie 2.**
 Sans programmateur externe, ce serait un pari sans issue de secours.
+
+**4. Avoir la clé Debian prête AVANT de flasher.**
+Le flash supprime ChromeOS. Sans support d'installation sous la main, la
+machine se retrouve à démarrer sur rien. La clé Debian 13 se prépare pendant
+que la sauvegarde se fait, pas après.
+
+### Liste de contrôle avant l'écriture
+
+Les quatre points doivent être vrais simultanément :
+
+- [ ] `crossystem wpsw_cur` renvoie **`0`**
+- [ ] Deux sauvegardes du firmware faites, **vérifiées identiques**, copiées
+      hors de la machine
+- [ ] Clé USB d'installation **Debian 13 prête et testée**
+- [ ] Alimentation branchée au mur, machine immobile
 ---
 
-## 1.6 Risques logiciels identifiés
+## 1.7 Risques logiciels identifiés
 
 À valider en live USB **après** le flash, avant de construire l'image finale.
 
@@ -225,7 +293,7 @@ Sans programmateur externe, ce serait un pari sans issue de secours.
 
 ---
 
-## 1.7 Sources
+## 1.8 Sources
 
 - Base de données des périphériques MrChromebox — `MrChromebox/scripts`, fichier
   `device-db.sh` (entrée `MADOO`, lue et vérifiée).
