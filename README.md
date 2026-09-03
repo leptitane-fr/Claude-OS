@@ -66,6 +66,7 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 |---|---|
 | [`tools/probe-hardware.sh`](tools/probe-hardware.sh) | Relevé matériel en lecture seule, 13 sections. À lancer depuis ChromeOS **avant** tout effacement. |
 | [`tools/verify-firmware-backup.sh`](tools/verify-firmware-backup.sh) | Valide une sauvegarde de firmware avant de flasher : taille, dump vide, signature `__FMAP__`, régions, et comparaison de deux lectures. Retourne `2` si la sauvegarde est inutilisable. |
+| [`tools/validate-install.sh`](tools/validate-install.sh) | Passe en revue l'installation poste par poste — Wi-Fi, Bluetooth, **audio**, VA-API, énergie, session, empreinte mémoire — et rend un verdict. À lancer après `provision.sh`. |
 | [`tools/probe-keys.sh`](tools/probe-keys.sh) | Relève ce qu'émettent réellement la rangée supérieure et la touche Loupe du clavier Chromebook, pour en déduire les liaisons Openbox. |
 
 ---
@@ -128,14 +129,18 @@ firmware associé, état du write-protect et version du CR50.
 
 ## Étapes suivantes
 
-2. **Analyse du relevé** — gel des specs réelles (RAM, eMMC, CPU, audio, Wi-Fi)
-   et choix de la méthode de levée du write-protect, sur faits.
-3. **Sauvegarde du firmware d'origine** — double lecture, validation par
-   `tools/verify-firmware-backup.sh`, copie sur deux supports.
-   *Sans programmateur externe, cette étape est le seul filet : elle ne se
-   bâcle pas.*
-4. **Levée du write-protect et flash UEFI Full ROM.**
-5. **Validation matérielle sous live USB Debian 13** — audio en premier
-   (risque n°1), puis Wi-Fi, tactile, veille, autonomie.
-6. **Construction de l'image Claude OS** reproductible.
-7. **Intégration de Claude Desktop et du courtier de privilèges** (`claude-osd`).
+Le firmware UEFI est flashé, le cavalier retiré, la machine remontée.
+
+1. **Terminer l'installateur Debian 13.** Le choix décisif est l'écran de
+   sélection des logiciels : **tout décocher sauf « Utilitaires usuels du
+   système »**. « Environnement de bureau Debian » et « GNOME » y sont cochés
+   par défaut — les laisser installerait plusieurs gigaoctets dont Claude OS
+   n'a que faire.
+2. **Récupérer le dépôt** sur la machine, puis lancer
+   `sudo bash install/provision.sh`.
+3. **Valider** avec `bash tools/validate-install.sh` — l'audio en premier.
+4. **Relever les touches** avec `bash tools/probe-keys.sh`, pour en tirer les
+   liaisons Openbox définitives.
+
+Puis les reports : rclone pour Drive et OneDrive, réglage fin du tactile, et
+les couleurs des boutons si une voie apparaît.
