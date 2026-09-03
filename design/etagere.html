@@ -62,12 +62,12 @@
   .di span{font-size:calc(11.5*var(--u)); color:#e8eaed; text-shadow:0 1px 3px rgba(0,0,0,.8); line-height:1.3}
 
   /* fenêtre */
-  /* Aucun contour. Seuls les deux coins hauts sont adoucis, et seule l'ombre
-     détache la fenêtre du fond. Deux couches : une diffuse qui pose le relief,
-     une courte qui marque le contact. */
+  /* Aucun contour : seule l'ombre détache la fenêtre du fond. Deux couches,
+     une diffuse qui pose le relief et une courte qui marque le contact.
+     Quatre coins arrondis - picom ne sait pas n'en arrondir que deux. */
   .win{
     position:absolute; overflow:hidden; display:none; flex-direction:column; border:0;
-    border-radius:calc(var(--radius-w)*var(--u)) calc(var(--radius-w)*var(--u)) 0 0;
+    border-radius:calc(var(--radius-w)*var(--u));
     box-shadow:
       0 calc(var(--sr)*0.6*var(--u))  calc(var(--sr)*2.3*var(--u)) rgba(0,0,0,var(--so)),
       0 calc(var(--sr)*0.15*var(--u)) calc(var(--sr)*0.6*var(--u)) rgba(0,0,0,calc(var(--so)*0.72));
@@ -94,7 +94,7 @@
     display:flex; align-items:center; justify-content:center; transition:background .12s;
   }
   .wb:hover{background:#33415a}
-  .wb svg{width:calc(11*var(--u)); height:calc(11*var(--u)); stroke:#e8eaed; stroke-width:1.7; fill:none}
+  .wb svg{width:calc(13*var(--u)); height:calc(13*var(--u)); stroke:#e8eaed; stroke-width:1.5; stroke-linecap:round; fill:none}
   .menubar{
     height:calc(30*var(--u)); background:#26282d; display:flex; align-items:center; gap:calc(18*var(--u));
     padding:0 calc(14*var(--u)); flex:none; border-bottom:1px solid rgba(255,255,255,.05);
@@ -225,9 +225,9 @@
         <div class="titlebar">
           <div class="t">notes.txt — Bloc-notes</div>
           <div class="wbtns">
-            <div class="wb"><svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg></div>
-            <div class="wb"><svg viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" rx="1"/></svg></div>
-            <div class="wb"><svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg></div>
+            <div class="wb" title="Réduire"><svg viewBox="0 0 12 12"><path d="M6 1.6 Q6.35 5.2 6 8.9"/><path d="M2.6 6.1 Q4.2 8.2 6 9.9"/><path d="M9.4 6.0 Q7.9 8.3 6 9.9"/></svg></div>
+            <div class="wb" title="Agrandir"><svg viewBox="0 0 12 12"><path d="M6 10.4 Q5.7 6.8 6 3.1"/><path d="M2.6 5.9 Q4.3 3.8 6 2.1"/><path d="M9.4 6.0 Q7.8 3.7 6 2.1"/></svg></div>
+            <div class="wb" title="Fermer"><svg viewBox="0 0 12 12"><path d="M2.6 2.5 Q6.3 6.0 9.5 9.5"/><path d="M9.5 2.5 Q5.8 6.2 2.6 9.5"/></svg></div>
           </div>
         </div>
         <div class="menubar"><span>Fichier</span><span>Édition</span><span>Affichage</span><span>Aide</span></div>
@@ -245,9 +245,9 @@
             <div class="ctab"><svg viewBox="0 0 24 24" style="width:calc(13*var(--u));height:calc(13*var(--u));flex:none"><circle cx="12" cy="12" r="10" fill="none" stroke="#9aa0a6" stroke-width="2"/><circle cx="12" cy="12" r="3.6" fill="#8ab4f8"/></svg><span>Claude</span></div>
             <div class="ctab dim"><span>Recherche</span></div>
             <div class="cwin">
-              <div class="wb"><svg viewBox="0 0 12 12"><path d="M2 6h8"/></svg></div>
-              <div class="wb"><svg viewBox="0 0 12 12"><rect x="2" y="2" width="8" height="8" rx="1"/></svg></div>
-              <div class="wb"><svg viewBox="0 0 12 12"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg></div>
+              <div class="wb" title="Réduire"><svg viewBox="0 0 12 12"><path d="M6 1.6 Q6.35 5.2 6 8.9"/><path d="M2.6 6.1 Q4.2 8.2 6 9.9"/><path d="M9.4 6.0 Q7.9 8.3 6 9.9"/></svg></div>
+              <div class="wb" title="Agrandir"><svg viewBox="0 0 12 12"><path d="M6 10.4 Q5.7 6.8 6 3.1"/><path d="M2.6 5.9 Q4.3 3.8 6 2.1"/><path d="M9.4 6.0 Q7.8 3.7 6 2.1"/></svg></div>
+              <div class="wb" title="Fermer"><svg viewBox="0 0 12 12"><path d="M2.6 2.5 Q6.3 6.0 9.5 9.5"/><path d="M9.5 2.5 Q5.8 6.2 2.6 9.5"/></svg></div>
             </div>
           </div>
         </div>
@@ -316,9 +316,9 @@
         <small>Plus la valeur monte, plus l'ombre est douce et étalée.</small>
       </div>
       <div class="ctrl">
-        <div class="ctrl-head"><label for="r-rw">Coins hauts des fenêtres</label><span class="val" id="o-rw"></span></div>
+        <div class="ctrl-head"><label for="r-rw">Coins des fenêtres</label><span class="val" id="o-rw"></span></div>
         <input type="range" id="r-rw" min="0" max="24" step="1" value="14">
-        <small>Les coins du bas restent droits. Voir la réserve ci-contre : picom ne sait pas arrondir des coins choisis.</small>
+        <small>Les quatre coins : picom n’expose aucune option par coin.</small>
       </div>
       <div class="ctrl">
         <div class="ctrl-head"><label for="r-alpha">Opacité des panneaux</label><span class="val" id="o-alpha"></span></div>
@@ -349,7 +349,7 @@
       <pre id="out-tint2"></pre>
       <div class="file">~/.config/plank/dock1/settings</div>
       <pre id="out-plank"></pre>
-      <div class="callout"><div><b>L'arrondi haut ne vient pas du compositeur.</b> picom arrondit les quatre coins ou aucun : il n'expose aucune option par coin. Il est donc réglé sur <span style="font-family:var(--mono);font-size:.92em">0</span>, et l'arrondi supérieur est dessiné par ceux qui savent le faire — Chromium et Claude Desktop pour leur propre cadre, plank et tint2 pour les panneaux. Les fenêtres décorées par Openbox (bloc-notes, gestionnaire de fichiers, boîtes de dialogue) restent donc à coins droits.</div></div>
+      <div class="callout"><div><b>Boutons : formes oui, couleurs non.</b> Les masques XBM d’Openbox sont en 1 bit, et <span style="font-family:var(--mono);font-size:.92em">window.active.button.*.image.color</span> s’applique à tous les boutons à la fois. Les trois formes tracées à main levée sont donc fidèles, mais elles partagent une couleur : un rouge pour fermer et un vert pour agrandir n’est pas exprimable dans un thème Openbox.</div></div>
       <div class="callout"><div><b>Ce que la maquette ne rend pas.</b> Le zoom de plank agrandit ses voisines en cascade ; ici seule l'icône survolée bouge. Les icônes définitives viendront du thème Papirus et du paquet <span style="font-family:var(--mono);font-size:.92em">claude-desktop</span>.</div></div>
     </section>
   </div>

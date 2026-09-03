@@ -70,27 +70,37 @@ et ses trois boutons, barre d'outils, contenu — dont **seuls les deux coins
 hauts sont adoucis**. Aucun contour : c'est l'ombre, et elle seule, qui détache
 la fenêtre du fond.
 
-**Cet arrondi ne peut pas venir du compositeur.** picom arrondit les quatre
-coins ou aucun : `corner-radius`, `corner-radius-rules` et
-`rounded-corners-exclude` agissent tous sur la fenêtre entière, aucune option
-ne vise un coin en particulier. Un arrondi global produirait deux coins bas
-arrondis, contraires à l'intention.
+**L'arrondi haut seul n'est pas exprimable.** picom arrondit les quatre coins
+ou aucun : `corner-radius`, `corner-radius-rules` et `rounded-corners-exclude`
+agissent tous sur la fenêtre entière, aucune option ne vise un coin.
 
-`corner-radius` est donc à **0**, et l'arrondi supérieur est laissé à ceux qui
-savent le dessiner :
+Arbitrage retenu : **quatre coins arrondis**, ce qui vaut mieux que des
+fenêtres entièrement carrées. À rouvrir si une autre voie apparaît.
 
-| Élément | Coins hauts arrondis ? | Par quoi |
-|---|---|---|
-| Chromium | Oui | Son propre cadre |
-| Claude Desktop | Oui | Son propre cadre (Electron) |
-| Dock | Oui | `TopRoundness` du thème plank |
-| Barre d'état | Oui | `rounded` de tint2 |
-| Bloc-notes, gestionnaire de fichiers, boîtes de dialogue | **Non** | Décorées par Openbox, qui ne sait pas arrondir |
+### Les boutons de la barre de titre
 
-Autrement dit : les deux applications réellement utilisées au quotidien ont
-l'aspect voulu, les utilitaires restent à coins droits. Le curseur « Coins
-hauts des fenêtres » du panneau de réglages permet de trancher autrement — à
-une valeur non nulle, tous les coins sont arrondis, y compris ceux du bas.
+Tracés à main levée, en masques XBM 16 × 16 déposés dans le thème :
+
+| Bouton | Forme |
+|---|---|
+| Réduire | Flèche vers le bas |
+| Agrandir | Flèche vers le haut |
+| Fermer | Croix |
+
+Le tremblement du trait est obtenu par un écart aléatoire perpendiculaire à la
+ligne, maximal au milieu et nul aux extrémités — sans quoi un segment de 16 px
+reste parfaitement rectiligne et ne donne rien.
+
+**Ils ne peuvent pas être colorés séparément.** La documentation Openbox est
+formelle : `window.active.button.*.image.color` « s'applique à tous les boutons
+à la fois ». Un rouge pour fermer et un vert pour agrandir n'est pas exprimable
+dans un thème Openbox, et les masques XBM sont en 1 bit — un masque, pas une
+image. Les trois boutons partagent donc une couleur, avec une pastille bleue au
+survol.
+
+Portée réelle limitée : Chromium et Claude Desktop dessinant leur propre barre
+de titre, ces boutons n'apparaissent que sur le bloc-notes, le gestionnaire de
+fichiers et les boîtes de dialogue.
 
 **Le flou a été retiré** : coûteux sur un GPU 32 EU à 6 W, et sans apport réel
 une fois les ombres en place. Ce sont elles qui font la lisibilité, en

@@ -31,7 +31,7 @@ DEFAULTS = {
     "shadow_radius": 16,       # px
     "blur": False,
     "blur_strength": 4,
-    "corner_radius": 0,        # px, fenêtres — voir la note du curseur
+    "corner_radius": 14,       # px, fenêtres — les quatre coins
     "fading": True,
     "panel_radius": 18,        # px, panneaux
     "panel_opacity": 90,       # %
@@ -205,8 +205,8 @@ class Window(Gtk.Window):
         self._switch(box, "fading", "Fondus d'apparition",
                      "Le premier réglage à couper si l'affichage accroche.")
         self._scale(box, "corner_radius", "Coins des fenêtres", 0, 24, 1, "px",
-                    "picom arrondit les quatre coins ou aucun. Au-dessus de 0, "
-                    "les coins du bas le sont aussi.")
+                    "picom arrondit les quatre coins ou aucun : il n'existe pas "
+                    "d'option par coin. 0 rend les fenêtres entièrement carrées.")
 
         box.pack_start(self._section("Dock"), False, False, 0)
         self._scale(box, "dock_icon_size", "Taille des icônes", 24, 64, 2, "px")
