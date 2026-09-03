@@ -4,38 +4,107 @@
 
 **HP Chromebook x360 14b-cb0000sf** — convertible 14", SKU française.
 
-Identification dans la base de données officielle des scripts MrChromebox
-(`device-db.sh`, source de vérité pour la compatibilité firmware) :
+### Le piège du nom commercial
+
+« HP Chromebook x360 14b » recouvre **cinq plateformes matérielles
+incompatibles entre elles**. Le suffixe de deux lettres est le seul
+discriminant, et il détermine entièrement le firmware applicable :
+
+| Modèle | Board name | Plateforme |
+|---|---|---|
+| 14b-**ca0** | `BLOOGUARD` | Intel Gemini Lake |
+| 14b-**cb0** ← **la nôtre** | **`MADOO`** | **Intel Jasper Lake** |
+| 14b-**cc0** / **cd0** | `JOXER` | Intel Alder Lake-N |
+| 14b-**ce0** | `KALADIN` | Intel Alder Lake-N |
+| 14b-**na0** | `BERKNIP` | AMD (famille Zork) |
+
+Se tromper de deux lettres, c'est flasher un firmware conçu pour une autre
+puce. C'est le risque le plus bête et le plus coûteux du projet.
+
+### Trois confirmations indépendantes
+
+**1. Base de données MrChromebox** (`device-db.sh`, référence pour la
+compatibilité firmware) :
 
 ```
 ["MADOO*"]="HP Chromebook x360 14b-cb0|JSL|||"
 ```
 
-Décodage, selon le format déclaré en tête de ce fichier
-(`[HWID]="deviceDescription|CPU|device override|flags|"`) :
+Format déclaré en tête du fichier : `[HWID]="description|CPU|override|flags|"`.
 
 | Champ | Valeur | Conséquence |
 |---|---|---|
-| Board name | `MADOO` | C'est l'identifiant qui compte. Le nom commercial ne sert à rien pour le firmware. |
-| Plateforme | `JSL` — Intel **Jasper Lake** | Famille ChromeOS « Dedede ». |
-| Device override | *(vide)* | Firmware propre à la carte, pas d'emprunt à une autre. |
-| Flags | *(vide)* | **Absence du drapeau `noUEFI` → le firmware UEFI Full ROM est disponible.** |
+| Board name | `MADOO` | L'identifiant qui compte pour le firmware. |
+| Plateforme | `JSL` — Jasper Lake | Famille ChromeOS « dedede ». |
+| Override | *(vide)* | Firmware propre à la carte. |
+| Flags | *(vide)* | **Pas de drapeau `noUEFI` → UEFI Full ROM disponible.** |
 
-C'est le point qui rend le projet viable : `MADOO` peut recevoir un firmware UEFI
-complet et démarrer un Linux standard, sans `RW_LEGACY` ni contournement du
-bootloader ChromeOS.
+**2. Index officiel des images de récupération ChromeOS** publié par Google
+(`dl.google.com/dl/edgedl/chromeos/recovery/recovery.json`) :
 
-> **À confirmer par le relevé.** Le HWID réel de *cette* machine doit être lu
-> avec `crossystem hwid` avant toute manipulation. Si le board n'est pas `MADOO`,
-> toute la cible firmware change. Voir `tools/probe-hardware.sh`.
+```json
+{
+  "hwidmatch": "^MADOO.*",
+  "model":     "Chromebook x360 14b-cb0",
+  "file":      "chromeos_16733.57.0_dedede_recovery_..."
+}
+```
 
-### Spécifications attendues (à valider, non vérifiées à ce stade)
+Point notable : le motif est `^MADOO.*`, **sans suffixe à quatre lettres**,
+contrairement à la quasi-totalité des autres entrées (`^DRAWCIA-CFUL.*`,
+`^JOXER-MEZV.*`…). Autrement dit, **tous** les `14b-cb0` sont des MADOO : il
+n'existe pas de sous-variante régionale susceptible d'échapper à la règle. Le
+SKU `sf` est couvert. Le nom de fichier confirme par ailleurs la famille
+`dedede`, donc Jasper Lake.
 
-Les variantes `14b-cb0xxx` circulent en Celeron N4500, N5100 ou Pentium Silver
-N6000, avec 4 ou 8 Go de LPDDR4x et 64 ou 128 Go d'eMMC. **La configuration
-exacte de cette machine n'est pas connue** et conditionne directement le budget
-mémoire du chapitre 2. Le relevé tranche.
+**3. Cohérence du processeur.** Le Pentium Silver **N6000** relevé sur la
+machine est un Jasper Lake (4 cœurs / 4 threads, 1,1–3,3 GHz, UHD Graphics
+32 EU, 6 W, LPDDR4x). Il ne peut pas équiper un BLOOGUARD (Gemini Lake) ni un
+JOXER (Alder Lake-N). La cohérence CPU ↔ board ↔ famille est totale.
 
+### Vérifier sur la machine, sans mode développeur
+
+Les confirmations ci-dessus portent sur le *modèle*. Il reste à vérifier
+l'exemplaire. Les deux méthodes suivantes **n'exigent ni mode développeur ni
+effacement** — à faire dès maintenant, depuis ChromeOS :
+
+1. **Contrôle en dix secondes** — ouvrir `chrome://version`. La ligne
+   `Platform` se termine par le board name en minuscules :
+
+   ```
+   Platform   16733.57.0 (Official Build) stable-channel madoo
+                                                        ^^^^^
+   ```
+
+2. **Contrôle formel** — ouvrir `chrome://system`, chercher le champ `hwid`
+   (ou la section `crossystem`). Il donne le HWID complet, qui doit commencer
+   par `MADOO` :
+
+   ```
+   hwid    MADOO A6B-C7D-E8F
+   ```
+
+Si l'un de ces deux affichages ne commence pas par `madoo` / `MADOO`,
+**s'arrêter** : toute la cible firmware du projet est à revoir.
+
+Le script `tools/probe-hardware.sh` effectue automatiquement cette
+comparaison et rend un verdict explicite (`[OK]`, `[ALERTE]`), mais il
+suppose le mode développeur — d'où l'intérêt des deux contrôles navigateur
+en amont.
+
+### Spécifications
+
+| Élément | Valeur | Statut |
+|---|---|---|
+| Board name | `MADOO` | Confirmé sur trois sources ; **à valider sur l'exemplaire** via `chrome://version`. |
+| Plateforme | Jasper Lake (famille `dedede`) | Confirmé. |
+| Processeur | Pentium Silver **N6000** — 4C/4T, 1,1–3,3 GHz, 6 W | Relevé utilisateur. |
+| Graphiques | Intel UHD (Jasper Lake), 32 EU | Déduit du CPU. |
+| Mémoire | **4 Go** LPDDR4x, soudée | Relevé utilisateur. **Contrainte dimensionnante n°1.** |
+| Stockage | eMMC, capacité à confirmer | À relever. |
+
+> La mémoire n'est pas extensible : elle est soudée. Les 4 Go sont donc un
+> plafond définitif, et non un point de départ améliorable.
 ---
 
 ## 1.2 Le verrou : write-protect
@@ -161,3 +230,10 @@ Sans programmateur externe, ce serait un pari sans issue de secours.
 - Base de données des périphériques MrChromebox — `MrChromebox/scripts`, fichier
   `device-db.sh` (entrée `MADOO`, lue et vérifiée).
 - Table des périphériques supportés — <https://docs.mrchromebox.tech/docs/supported-devices.html>
+- Index officiel des images de récupération ChromeOS, publié par Google —
+  <https://dl.google.com/dl/edgedl/chromeos/recovery/recovery.json>
+  (713 entrées ; `^MADOO.*` → « Chromebook x360 14b-cb0 », famille `dedede`).
+- Fiche processeur Intel Pentium Silver N6000 —
+  <https://www.intel.com/content/www/us/en/products/sku/212330/intel-pentium-silver-n6000-processor-4m-cache-up-to-3-30-ghz/specifications.html>
+- Capacités de décodage vidéo Jasper Lake (absence d'AV1) — Intel EDS Vol. 1,
+  « Hardware Accelerated Video Decode and Encode ».

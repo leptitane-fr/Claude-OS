@@ -22,8 +22,15 @@
 
 set -uo pipefail
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 OUT=""
+
+# Attentes à confronter au matériel réel. Un écart ici invalide la cible
+# firmware : MADOO (Jasper Lake) et BLOOGUARD (Gemini Lake) sont deux
+# plateformes différentes derrière le même nom commercial « 14b ».
+EXPECT_BOARD="MADOO"
+EXPECT_CPU="N6000"
+EXPECT_RAM_GB=4
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -106,6 +113,66 @@ capfile() {
 	w ""
 }
 
+# ------------------------------------------------- vérification des attentes
+
+# Confronte le matériel réel aux attentes du projet et rend un verdict lisible,
+# plutôt que de laisser l'utilisateur comparer des chaînes à l'œil.
+check_expectations() {
+	local hwid board ram_kb ram_gb cpu
+
+	# HWID : via crossystem sous ChromeOS, via le VPD sinon.
+	hwid=""
+	if have crossystem; then
+		hwid="$(crossystem hwid 2>/dev/null)"
+	fi
+	if [ -z "$hwid" ] && [ -r /sys/firmware/vpd/ro/hwid ]; then
+		hwid="$(cat /sys/firmware/vpd/ro/hwid 2>/dev/null)"
+	fi
+
+	if [ -n "$hwid" ]; then
+		# Format « MADOO-XXXX A6B-C7D-E8F » ou « MADOO A6B-C7D » :
+		# le board est le premier mot, avant un éventuel tiret.
+		board="${hwid%% *}"
+		board="${board%%-*}"
+		board="$(printf '%s' "$board" | tr '[:lower:]' '[:upper:]')"
+		if [ "$board" = "$EXPECT_BOARD" ]; then
+			echo "[OK]     board = $board, conforme à l'attendu"
+		else
+			echo "[ALERTE] board = $board mais $EXPECT_BOARD était attendu."
+			echo "         La cible firmware du projet est FAUSSE pour cette machine."
+			echo "         NE PAS FLASHER avant d'avoir revu docs/01."
+		fi
+		echo "         HWID complet : $hwid"
+	else
+		echo "[?]      HWID illisible ici — normal hors ChromeOS et sans VPD exposé."
+		echo "         Vérifier autrement : chrome://version, ligne « Platform »."
+	fi
+
+	# Processeur
+	cpu="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//')"
+	if [ -n "$cpu" ]; then
+		case "$cpu" in
+			*"$EXPECT_CPU"*) echo "[OK]     CPU = $cpu" ;;
+			*) echo "[!]      CPU = $cpu, or $EXPECT_CPU était attendu — à confirmer" ;;
+		esac
+	fi
+
+	# Mémoire : MemTotal est toujours inférieur à la capacité physique
+	# (le firmware en réserve), d'où l'arrondi au Go le plus proche.
+	ram_kb="$(awk '/^MemTotal/{print $2}' /proc/meminfo 2>/dev/null)"
+	if [ -n "$ram_kb" ]; then
+		ram_gb=$(( (ram_kb + 524288) / 1048576 ))
+		if [ "$ram_gb" -eq "$EXPECT_RAM_GB" ]; then
+			echo "[OK]     RAM = ${ram_gb} Go (MemTotal ${ram_kb} kB)"
+		else
+			echo "[!]      RAM = ${ram_gb} Go, or ${EXPECT_RAM_GB} Go étaient attendus."
+			echo "         Le budget mémoire de docs/02 est à revoir."
+		fi
+	fi
+}
+
+EXPECT_OUT="$(check_expectations)"
+
 # ------------------------------------------------------------------- en-tête
 
 IS_ROOT=0
@@ -120,6 +187,15 @@ w "| Date | $(date -Is 2>/dev/null || date) |"
 w "| Contexte | \`${CTX}\` |"
 w "| Privilèges | $( [ "$IS_ROOT" -eq 1 ] && echo 'root' || echo 'utilisateur non privilégié (rapport partiel)' ) |"
 w "| Noyau | $(uname -srmo 2>/dev/null || uname -a) |"
+w ""
+
+section "0. Vérification des attentes"
+
+note "Confrontation immédiate du matériel réel aux hypothèses du projet. Une alerte ici invalide la suite."
+
+w '```'
+printf '%s\n' "$EXPECT_OUT" >&3
+w '```'
 w ""
 
 if [ "$IS_ROOT" -eq 0 ]; then
@@ -339,5 +415,8 @@ have crossystem && printf "%-14s %s\n" "HWID" "$(crossystem hwid 2>/dev/null || 
 have crossystem && printf "%-14s %s\n" "WP matériel" "$(crossystem wpsw_cur 2>/dev/null || echo '?') (1 = actif, 0 = levé)"
 printf "%-14s %s\n" "CPU" "$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | sed 's/^ *//')"
 printf "%-14s %s\n" "RAM" "$(awk '/MemTotal/{printf "%.1f Go", $2/1048576}' /proc/meminfo 2>/dev/null)"
+echo
+echo "----- Vérification des attentes -----"
+printf '%s\n' "$EXPECT_OUT"
 echo
 echo "Relire le rapport, puis le committer ou le coller dans la conversation."

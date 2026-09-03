@@ -34,6 +34,7 @@ comme environnement de travail principal, doté de privilèges étendus sur le s
 | Session graphique v1 | **X11 léger** | Anthropic indique que le raccourci global *Quick Entry* de Claude Desktop exige X11 **ou** le portail Wayland `GlobalShortcuts` — que les compositeurs wlroots légers n'implémentent pas de façon fiable. X11 garantit la fonctionnalité complète dès la v1. Wayland sera réévalué en v2. |
 | Système de fichiers | **btrfs + compression zstd** | Gain d'espace notable sur un eMMC de faible capacité, et surtout **snapshots instantanés** — le mécanisme qui rend les privilèges étendus de Claude réversibles. |
 | Mémoire | **zram (zstd)** | Indispensable si la machine est en 4 Go, une fois Electron chargé. |
+| Machine cible | **`MADOO`** — N6000, 4 Go | Board confirmé sur trois sources indépendantes. 4 Go de LPDDR4x **soudée** : plafond définitif, non extensible. |
 | Levée du write-protect | **Décidée après le relevé** | La procédure CCD dépend de la version du CR50, que seul le relevé donne. |
 | Filet de récupération | **Sauvegarde USB seule** | Pas de programmateur SPI externe. La sauvegarde du firmware devient donc le seul recours, d'où un protocole de vérification strict. |
 
@@ -57,19 +58,38 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 
 ---
 
-## Étape 1 — Relever le matériel (à faire maintenant)
+## Étape 0 — Vérifier le board (2 minutes, sans rien casser)
 
-Toute la suite (choix du noyau, pilotes, firmwares à embarquer) dépend de faits
-que seule la machine cible peut donner. Le script de relevé doit être lancé
-**depuis ChromeOS, avant tout effacement** : c'est le seul moment où le HWID,
-l'état du write-protect et la version du CR50 sont lisibles.
+« HP Chromebook x360 14b » recouvre **cinq plateformes matérielles
+différentes** ; seul le suffixe de deux lettres les distingue. Flasher le
+firmware d'un `14b-ca0` (Gemini Lake) sur un `14b-cb0` (Jasper Lake) est le
+risque le plus bête du projet.
+
+Ce contrôle **n'exige ni mode développeur ni effacement**. Depuis ChromeOS :
+
+1. Ouvrir `chrome://version` → la ligne `Platform` doit se terminer par
+   **`madoo`**.
+2. Pour confirmation, ouvrir `chrome://system` → le champ `hwid` doit
+   commencer par **`MADOO`**.
+
+Si ce n'est pas le cas, s'arrêter et me le dire : toute la cible firmware
+change. Détails et sources dans
+[`docs/01`](docs/01-materiel-firmware.md#vérifier-sur-la-machine-sans-mode-développeur).
+
+---
+
+## Étape 1 — Relever le matériel
+
+Le reste (noyau, pilotes, firmwares à embarquer) dépend de faits que seule la
+machine peut donner. Le relevé doit être lancé **depuis ChromeOS, avant tout
+effacement** : c'est le seul moment où le HWID, l'état du write-protect et la
+version du CR50 sont lisibles.
 
 Le dépôt étant **privé**, `curl` ne peut pas récupérer le script sans jeton.
 La voie fiable passe par le navigateur, déjà authentifié sur GitHub :
 
-1. Sur le Chromebook, ouvrir le fichier [`tools/probe-hardware.sh`](tools/probe-hardware.sh)
-   dans GitHub, cliquer sur **Raw**, puis enregistrer la page
-   (Ctrl+S) sous le nom `probe.sh`.
+1. Ouvrir [`tools/probe-hardware.sh`](tools/probe-hardware.sh) dans GitHub,
+   cliquer sur **Raw**, enregistrer (Ctrl+S) sous le nom `probe.sh`.
 2. Passer en mode développeur si ce n'est pas déjà fait
    (⚠️ **cela efface les données locales de la machine**).
 3. Ouvrir `crosh` avec Ctrl+Alt+T, puis taper `shell` :
@@ -79,16 +99,20 @@ cd /home/chronos/user/MyFiles/Downloads
 sudo bash probe.sh
 ```
 
-Le script est en **lecture seule** : il ne modifie rien. Il produit un rapport
-Markdown (`hardware-report-chromeos-<date>.md`) à me transmettre.
+Le script est en **lecture seule**. Il compare automatiquement le matériel
+aux attentes du projet et rend un verdict :
 
-Il répond notamment à :
+```
+[OK]     board = MADOO, conforme à l'attendu
+         HWID complet : MADOO A6B-C7D-E8F
+[OK]     CPU = Intel(R) Pentium(R) Silver N6000 @ 1.10GHz
+[OK]     RAM = 4 Go
+```
 
-- le board name est-il bien `MADOO` ? (sinon la cible firmware change) ;
-- 4 Go ou 8 Go de RAM ? (détermine l'agressivité du budget mémoire) ;
-- quelle chaîne audio exacte ? (**principal risque de non-fonctionnement sous Linux**) ;
-- quel contrôleur Wi-Fi, donc quel firmware embarquer pour avoir du réseau
-  dès la première installation.
+Puis il produit un rapport Markdown à me transmettre, qui répond aux
+questions encore ouvertes : capacité exacte de l'eMMC, **chaîne audio**
+(principal risque de non-fonctionnement sous Linux), contrôleur Wi-Fi et
+firmware associé, état du write-protect et version du CR50.
 
 ## Étapes suivantes
 

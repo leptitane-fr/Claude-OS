@@ -28,8 +28,8 @@ ajoute, on ne retire pas.
 
 ## 2.2 Budget mémoire
 
-L'hypothèse dimensionnante est **4 Go** (à confirmer par le relevé ; si la
-machine est en 8 Go, ce budget devient confortable au lieu d'être serré).
+**4 Go de LPDDR4x soudée.** Ce n'est plus une hypothèse : c'est un plafond
+définitif, non extensible. Tout le reste du document en découle.
 
 | Poste | Cible | Remarque |
 |---|---|---|
@@ -45,9 +45,42 @@ Mesures de compensation :
 - Pas de swap sur eMMC en usage normal : lent, et usure inutile de la mémoire flash.
 - `systemd-oomd` réglé pour préserver la session en cas de pression mémoire.
 
+À dire clairement : **4 Go avec une application Electron, c'est jouable mais
+sans marge.** Claude Desktop plus quelques onglets de navigateur tiendront ; la
+même chose plus une machine virtuelle ou un conteneur de compilation, non. Le
+budget ci-dessus n'est pas une coquetterie d'optimisation, c'est ce qui sépare
+un système fluide d'un système qui « swappe » en permanence.
+
 ---
 
-## 2.3 Session graphique : X11 en v1
+## 2.3 Conséquences du processeur
+
+Pentium Silver **N6000** : 4 cœurs, 4 threads, 1,1–3,3 GHz, 6 W, UHD Graphics
+32 EU. Deux conséquences structurantes :
+
+- **Ne rien compiler sur la machine.** Un noyau ou un paquet volumineux
+  compilé localement mobiliserait la machine des heures et saturerait les
+  4 Go. Le système s'en tiendra aux **paquets binaires Debian**, et toute
+  construction d'image se fera **hors machine**.
+- **Le décodage vidéo doit passer par le GPU — et l'AV1 doit être évité.**
+  L'UHD Jasper Lake décode en matériel H.264, HEVC (jusqu'au Main10) et VP9,
+  mais **pas l'AV1** : cette accélération n'arrive qu'avec Tiger Lake (Gen12).
+
+  Ce n'est pas un détail théorique. YouTube et Netflix servent de l'AV1 par
+  défaut aux clients qui l'annoncent : sur cette machine, le flux retomberait
+  en décodage **logiciel**, sur quatre cœurs à 6 W. Résultat : saccades,
+  ventilateur, autonomie effondrée — sur une vidéo que la même machine lit
+  sans effort en VP9.
+
+  Deux mesures dans l'image finale :
+  1. `intel-media-va-driver` + VA-API installés **et vérifiés** (`vainfo`),
+     jamais supposés ;
+  2. AV1 désactivé côté navigateur, pour forcer la négociation vers VP9
+     ou H.264, tous deux accélérés.
+
+---
+
+## 2.4 Session graphique : X11 en v1
 
 **Contre-intuitif, et assumé.** Wayland serait le choix moderne, mais la
 documentation d'Anthropic est explicite : le raccourci global *Quick Entry* de
@@ -73,7 +106,7 @@ validation matérielle.
 
 ---
 
-## 2.4 Stockage
+## 2.5 Stockage
 
 Disposition sur eMMC (capacité à confirmer, 64 Go supposés) :
 
@@ -94,7 +127,7 @@ Options de montage : `noatime`, `ssd`, `discard=async`.
 
 ---
 
-## 2.5 Claude Desktop et le modèle de privilèges
+## 2.6 Claude Desktop et le modèle de privilèges
 
 ### Ce que l'application fournit
 
@@ -156,7 +189,7 @@ peut être automatique ; une action définitive mérite une seconde paire d'yeux
 
 ---
 
-## 2.6 Ce qui reste à trancher
+## 2.7 Ce qui reste à trancher
 
 - Gestionnaire de fenêtres exact (après mesure réelle de l'empreinte mémoire sur
   la machine, pas sur la base de suppositions).
