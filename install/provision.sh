@@ -48,7 +48,12 @@ run() {
 
 say "Vérification des préalables"
 
-[ "$(id -u)" -eq 0 ] || die "à lancer avec sudo."
+# Message explicite : « lancer avec sudo » induisait en erreur quand sudo
+# n'est pas installé, ou quand un « su - » a échoué sans qu'on le remarque.
+[ "$(id -u)" -eq 0 ] || die "ce script doit tourner en root (identité actuelle : $(id -un)).
+      Avec sudo   :  sudo bash install/provision.sh
+      Sans sudo   :  su -   puis   bash install/provision.sh --user $(id -un)
+      Si « su - » a échoué plus haut, vous êtes resté sur votre compte."
 
 if [ -r /etc/os-release ]; then
 	. /etc/os-release
