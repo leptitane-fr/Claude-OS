@@ -53,7 +53,7 @@ Codes visuels communs aux deux panneaux, pour l'unité :
 |---|---|
 | Fond des panneaux | `#202124` à 90 % d'opacité |
 | Bordure | `#ffffff` à 10 % |
-| Rayon des coins | 18 px (panneaux), 12 px (pastilles) |
+| Rayon des coins | 18 px (panneaux), 12 px (pastilles), 0 côté compositeur |
 | Accent au survol | `#8ab4f8` (bleu ChromeOS) à 18 % |
 | Texte principal | `#e8eaed` |
 | Texte secondaire | `#9aa0a6` |
@@ -62,6 +62,35 @@ Codes visuels communs aux deux panneaux, pour l'unité :
 
 Fond d'écran : dégradé indigo profond avec deux halos radiaux, généré par
 script donc reproductible et versionnable, jamais téléchargé.
+
+### Les fenêtres : un empilement, pas un cadre
+
+Une fenêtre n'est pas un cadre mais trois bandes superposées — barre de titre
+et ses trois boutons, barre d'outils, contenu — dont **seuls les deux coins
+hauts sont adoucis**. Aucun contour : c'est l'ombre, et elle seule, qui détache
+la fenêtre du fond.
+
+**Cet arrondi ne peut pas venir du compositeur.** picom arrondit les quatre
+coins ou aucun : `corner-radius`, `corner-radius-rules` et
+`rounded-corners-exclude` agissent tous sur la fenêtre entière, aucune option
+ne vise un coin en particulier. Un arrondi global produirait deux coins bas
+arrondis, contraires à l'intention.
+
+`corner-radius` est donc à **0**, et l'arrondi supérieur est laissé à ceux qui
+savent le dessiner :
+
+| Élément | Coins hauts arrondis ? | Par quoi |
+|---|---|---|
+| Chromium | Oui | Son propre cadre |
+| Claude Desktop | Oui | Son propre cadre (Electron) |
+| Dock | Oui | `TopRoundness` du thème plank |
+| Barre d'état | Oui | `rounded` de tint2 |
+| Bloc-notes, gestionnaire de fichiers, boîtes de dialogue | **Non** | Décorées par Openbox, qui ne sait pas arrondir |
+
+Autrement dit : les deux applications réellement utilisées au quotidien ont
+l'aspect voulu, les utilitaires restent à coins droits. Le curseur « Coins
+hauts des fenêtres » du panneau de réglages permet de trancher autrement — à
+une valeur non nulle, tous les coins sont arrondis, y compris ceux du bas.
 
 **Le flou a été retiré** : coûteux sur un GPU 32 EU à 6 W, et sans apport réel
 une fois les ombres en place. Ce sont elles qui font la lisibilité, en

@@ -27,11 +27,11 @@ PREFS = os.path.join(USR, "settings.json")
 
 DEFAULTS = {
     "shadow": True,
-    "shadow_opacity": 30,      # %
-    "shadow_radius": 15,       # px
+    "shadow_opacity": 32,      # %
+    "shadow_radius": 16,       # px
     "blur": False,
     "blur_strength": 4,
-    "corner_radius": 14,       # px, fenêtres
+    "corner_radius": 0,        # px, fenêtres — voir la note du curseur
     "fading": True,
     "panel_radius": 18,        # px, panneaux
     "panel_opacity": 90,       # %
@@ -204,7 +204,9 @@ class Window(Gtk.Window):
         self._scale(box, "blur_strength", "Force du flou", 1, 10, 1, "")
         self._switch(box, "fading", "Fondus d'apparition",
                      "Le premier réglage à couper si l'affichage accroche.")
-        self._scale(box, "corner_radius", "Coins des fenêtres", 0, 24, 1, "px")
+        self._scale(box, "corner_radius", "Coins des fenêtres", 0, 24, 1, "px",
+                    "picom arrondit les quatre coins ou aucun. Au-dessus de 0, "
+                    "les coins du bas le sont aussi.")
 
         box.pack_start(self._section("Dock"), False, False, 0)
         self._scale(box, "dock_icon_size", "Taille des icônes", 24, 64, 2, "px")
@@ -253,7 +255,7 @@ class Window(Gtk.Window):
         self.rows[key] = sw
         parent.pack_start(row, False, False, 4)
 
-    def _scale(self, parent, key, title, lo, hi, step, unit):
+    def _scale(self, parent, key, title, lo, hi, step, unit, hint=None):
         row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         lab = Gtk.Label(label=title, xalign=0)
@@ -275,6 +277,11 @@ class Window(Gtk.Window):
         show()
 
         row.pack_start(sc, False, False, 0)
+        if hint:
+            sub = Gtk.Label(label=hint, xalign=0)
+            sub.get_style_context().add_class("dim-label")
+            sub.set_line_wrap(True)
+            row.pack_start(sub, False, False, 0)
         self.rows[key] = adj
         parent.pack_start(row, False, False, 4)
 

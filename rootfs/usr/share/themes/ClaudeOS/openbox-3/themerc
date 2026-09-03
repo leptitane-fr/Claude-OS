@@ -43,7 +43,6 @@ window.inactive.button.hover.bg.color: #2a2d33
 window.active.button.pressed.bg: flat solid
 window.active.button.pressed.bg.color: #3c4d6b
 
-window.button.hover.bg.corner-radius: 6
 window.active.button.unpressed.bg: parentrelative
 window.inactive.button.unpressed.bg: parentrelative
 
