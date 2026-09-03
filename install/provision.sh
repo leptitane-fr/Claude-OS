@@ -191,6 +191,23 @@ gtk-enable-animations=1
 EOF"
 run "chown -R '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.config'"
 
+# -------------------------------------------------------------------- énergie
+
+say "Gestion d'énergie"
+
+info "activation de TLP"
+run "systemctl enable tlp.service >/dev/null 2>&1 || true"
+# TLP et rfkill de systemd se disputent la gestion radio : la documentation TLP
+# demande de masquer ces deux unités.
+run "systemctl mask systemd-rfkill.service systemd-rfkill.socket >/dev/null 2>&1 || true"
+
+info "paramètres noyau (compression du tampon d'affichage, veille s2idle)"
+if [ "$DRY" -eq 0 ] && command -v update-grub >/dev/null 2>&1; then
+	run "update-grub >/dev/null 2>&1 || true"
+else
+	info "update-grub à lancer manuellement si absent ici"
+fi
+
 # ------------------------------------------------------------------- mémoire
 
 say "Réglages mémoire (4 Go)"
@@ -246,6 +263,12 @@ for svc in ModemManager.service; do
 	fi
 done
 
+# Trois familles de firmware Wi-Fi sont embarquées faute de certitude sur le
+# module. Une fois la machine démarrée, celles qui ne servent pas peuvent
+# partir : c'est quelques dizaines de Mo sur un eMMC déjà petit.
+info "firmware Wi-Fi : purger les familles inutilisées après validation"
+info "  lspci -nnk | grep -A3 -i network    puis  apt purge firmware-<inutile>"
+
 info "nettoyage des paquets orphelins"
 run "apt-get autoremove -y --purge >/dev/null 2>&1 || true"
 run "apt-get clean"
@@ -275,6 +298,9 @@ info "  nmcli device wifi list            Wi-Fi"
 info "  bluetoothctl show                 Bluetooth"
 info "  aplay -l && wpctl status          audio (haut-parleurs internes !)"
 info "  free -h                           empreinte mémoire au repos"
+info "  tlp-stat -s -c                    gestion d'énergie active"
+info "  powertop --auto-tune=false        consommation par poste"
+info "  bash tools/probe-keys.sh          codes des touches Chromebook"
 echo
 warn "L'audio est le point de risque n°1 sur cette machine : casque"
 warn "fonctionnel mais haut-parleurs muets est le symptôme classique."

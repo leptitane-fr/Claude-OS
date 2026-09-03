@@ -35,7 +35,17 @@ papirus-icon-theme             # icônes du dock
 #--- Réseau -----------------------------------------------------------------
 network-manager                # gestion Wi-Fi
 network-manager-gnome          # nm-applet, dans la zone de notification
-firmware-iwlwifi               # firmware Wi-Fi Intel — SANS LUI, PAS DE RÉSEAU
+#
+# Firmware Wi-Fi et Bluetooth. SANS LE BON, PAS DE RÉSEAU À L'INSTALLATION.
+# Le module de la machine porte le SPS HP L44796-005, décrit « WLAN RT 11AC
+# 2X2 +BT5 » : « RT » est la notation HP pour Realtek, ce qui pointe vers un
+# RTL8822CE (pilote rtw88, présent en standard dans le noyau 6.12).
+# On embarque néanmoins les trois familles plausibles plutôt que de parier :
+# une erreur ici se paie par une installation sans réseau, donc sans recours.
+# Le relevé matériel tranchera, et provision.sh signalera lesquels purger.
+firmware-realtek               # candidat principal — RTL8822CE, et btrtl
+firmware-iwlwifi               # au cas où le module serait un Intel
+firmware-misc-nonfree          # divers, dont plusieurs contrôleurs Wi-Fi
 
 #--- Bluetooth --------------------------------------------------------------
 bluez                          # pile Bluetooth
@@ -55,8 +65,13 @@ xdg-desktop-portal-gtk         # sélecteurs de fichiers
 chromium                       # navigateur — usage principal
 mousepad                       # bloc-notes (~20 Mo, GTK3)
 
+#--- Énergie ----------------------------------------------------------------
+tlp                            # gestion d'énergie : gouverneurs, PM périphériques
+powertop                       # mesure de la consommation (diagnostic, pas d'auto-réglage)
+
 #--- Matériel et système ----------------------------------------------------
 brightnessctl                  # luminosité (rangée supérieure du clavier)
+x11-utils                      # xev, pour relever les codes des touches Chromebook
 python3-gi                     # panneau de réglages d'affichage (GTK3)
 gir1.2-gtk-3.0                 # liaisons GTK3 pour ce panneau
 systemd-zram-generator         # swap compressé en RAM — indispensable à 4 Go
