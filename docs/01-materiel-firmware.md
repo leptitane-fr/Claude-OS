@@ -122,7 +122,24 @@ D'où la règle : **ne jamais supposer, toujours vérifier.**
 ### Vérification (impérative avant toute écriture)
 
 ```sh
-crossystem wpsw_cur
+sudo crossystem wpsw_cur
+```
+
+**`sudo` est indispensable.** `wpsw_cur` lit l'état d'une broche GPIO, ce qui
+exige root. Sans `sudo`, la commande échoue ainsi — et cette erreur ne dit
+rien de l'état du write-protect :
+
+```
+Unable to open /dev/gpiochip0
+open: Permission denied
+```
+
+Relevé plus complet, également utile pour la suite :
+
+```sh
+for k in wpsw_cur mainfw_type devsw_boot cros_debug; do
+  printf '%-14s %s\n' "$k" "$(sudo crossystem $k)"
+done
 ```
 
 | Valeur | Signification |
