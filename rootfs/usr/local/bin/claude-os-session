@@ -57,7 +57,12 @@ have xcape && xcape -e 'Super_L=F13' 2>/dev/null &
 # Applets de la zone de notification. Temporisés : la zone doit exister avant
 # qu'ils tentent de s'y insérer, sinon leurs icônes n'apparaissent pas.
 ( sleep 2
-  have nm-applet      && nm-applet --indicator &
+  # SANS « --indicator » : cette option bascule nm-applet sur AppIndicator
+  # (StatusNotifier), protocole que tint2 ne sait pas héberger — il ne gère que
+  # XEmbed. Avec elle, l'icône se réduit à une fenêtre de 1x1 pixel hors du
+  # panneau, ce que montrent les journaux (« add_icon ... width 1, height 1 »
+  # et « systray: error code 9 »).
+  have nm-applet      && nm-applet &
   have blueman-applet && blueman-applet &
 ) &
 
