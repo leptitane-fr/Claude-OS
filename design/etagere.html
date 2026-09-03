@@ -72,12 +72,12 @@
       0 calc(var(--sr)*0.6*var(--u))  calc(var(--sr)*2.3*var(--u)) rgba(0,0,0,var(--so)),
       0 calc(var(--sr)*0.15*var(--u)) calc(var(--sr)*0.6*var(--u)) rgba(0,0,0,calc(var(--so)*0.72));
   }
-  .screen[data-view="note"] .win.note{display:flex}
-  .screen[data-view="chrome"] .win.chrome{display:flex}
+  .screen[data-view="note"] .win.w-note{display:flex}
+  .screen[data-view="chrome"] .win.w-chrome{display:flex}
   /* fenêtre flottante */
-  .win.note{left:calc(360*var(--u)); top:calc(170*var(--u)); width:calc(1060*var(--u)); height:calc(660*var(--u))}
+  .win.w-note{left:calc(360*var(--u)); top:calc(170*var(--u)); width:calc(1060*var(--u)); height:calc(660*var(--u))}
   /* maximisée : occupe tout l'écran, donc PASSE SOUS les panneaux */
-  .win.chrome{inset:0; border-radius:0}
+  .win.w-chrome{inset:0; border-radius:0}
 
   .titlebar{
     height:calc(34*var(--u)); background:#202124; display:flex; align-items:center;
@@ -173,8 +173,8 @@
   pre .c{color:var(--ink-3)} pre b{color:var(--accent); font-weight:500}
   .file{font-family:var(--mono); font-size:11.5px; color:var(--ink-3); margin:15px 0 6px}
   .file:first-child{margin-top:0}
-  .note{display:flex; gap:11px; border-left:2px solid var(--warn); padding:2px 0 2px 13px; color:var(--ink-2); font-size:13px; margin-top:16px}
-  .note b{color:var(--ink); font-weight:600}
+  .callout{display:flex; gap:11px; border-left:2px solid var(--warn); padding:2px 0 2px 13px; color:var(--ink-2); font-size:13px; margin-top:16px}
+  .callout b{color:var(--ink); font-weight:600}
   footer{color:var(--ink-3); font-size:12.5px; border-top:1px solid var(--line); padding-top:18px}
   @media (prefers-reduced-motion:reduce){*{transition:none !important}}
 </style>
@@ -221,7 +221,7 @@
       </div>
 
       <!-- Bloc-notes : cadre Openbox — barre de titre seule -->
-      <div class="win note">
+      <div class="win w-note">
         <div class="titlebar">
           <div class="t">notes.txt — Bloc-notes</div>
           <div class="wbtns">
@@ -239,7 +239,7 @@
       </div>
 
       <!-- Chromium maximisé : cadre applicatif, et il passe SOUS les panneaux -->
-      <div class="win chrome">
+      <div class="win w-chrome">
         <div class="ctop">
           <div class="ctabs">
             <div class="ctab"><svg viewBox="0 0 24 24" style="width:calc(13*var(--u));height:calc(13*var(--u));flex:none"><circle cx="12" cy="12" r="10" fill="none" stroke="#9aa0a6" stroke-width="2"/><circle cx="12" cy="12" r="3.6" fill="#8ab4f8"/></svg><span>Claude</span></div>
@@ -349,8 +349,8 @@
       <pre id="out-tint2"></pre>
       <div class="file">~/.config/plank/dock1/settings</div>
       <pre id="out-plank"></pre>
-      <div class="note"><div><b>L'arrondi haut ne vient pas du compositeur.</b> picom arrondit les quatre coins ou aucun : il n'expose aucune option par coin. Il est donc réglé sur <span style="font-family:var(--mono);font-size:.92em">0</span>, et l'arrondi supérieur est dessiné par ceux qui savent le faire — Chromium et Claude Desktop pour leur propre cadre, plank et tint2 pour les panneaux. Les fenêtres décorées par Openbox (bloc-notes, gestionnaire de fichiers, boîtes de dialogue) restent donc à coins droits.</div></div>
-      <div class="note"><div><b>Ce que la maquette ne rend pas.</b> Le zoom de plank agrandit ses voisines en cascade ; ici seule l'icône survolée bouge. Les icônes définitives viendront du thème Papirus et du paquet <span style="font-family:var(--mono);font-size:.92em">claude-desktop</span>.</div></div>
+      <div class="callout"><div><b>L'arrondi haut ne vient pas du compositeur.</b> picom arrondit les quatre coins ou aucun : il n'expose aucune option par coin. Il est donc réglé sur <span style="font-family:var(--mono);font-size:.92em">0</span>, et l'arrondi supérieur est dessiné par ceux qui savent le faire — Chromium et Claude Desktop pour leur propre cadre, plank et tint2 pour les panneaux. Les fenêtres décorées par Openbox (bloc-notes, gestionnaire de fichiers, boîtes de dialogue) restent donc à coins droits.</div></div>
+      <div class="callout"><div><b>Ce que la maquette ne rend pas.</b> Le zoom de plank agrandit ses voisines en cascade ; ici seule l'icône survolée bouge. Les icônes définitives viendront du thème Papirus et du paquet <span style="font-family:var(--mono);font-size:.92em">claude-desktop</span>.</div></div>
     </section>
   </div>
 
