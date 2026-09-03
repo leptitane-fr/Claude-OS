@@ -1,0 +1,58 @@
+# Claude OS — jeu de paquets
+#
+# Tout est installé avec --no-install-recommends. Chaque ligne est justifiée :
+# un paquet sans justification est un paquet à retirer.
+#
+# Lignes vides et commentaires ignorés par provision.sh.
+
+#--- Serveur graphique ------------------------------------------------------
+xserver-xorg-core              # X11 : requis par Claude Desktop (Quick Entry)
+xserver-xorg-input-libinput    # clavier, pavé tactile, écran tactile
+x11-xserver-utils              # xset, xsetroot, xrdb
+xinit                          # démarrage de session
+
+#--- Interface --------------------------------------------------------------
+openbox                        # gestionnaire de fenêtres (~10 Mo)
+tint2                          # dock centré + barre d'état (~12 Mo par panneau)
+picom                          # compositeur : coins arrondis, flou, ombres
+dunst                          # notifications
+xwallpaper                     # fond d'écran (plus léger que feh)
+libnotify-bin                  # notify-send, utilisé par la barre d'état
+lightdm                        # gestionnaire de session
+lightdm-gtk-greeter            # écran de connexion, thémable
+
+#--- Apparence --------------------------------------------------------------
+fonts-inter                    # police d'interface
+fonts-dejavu-core              # repli
+fonts-noto-color-emoji         # émojis dans les pages web
+papirus-icon-theme             # icônes du dock
+
+#--- Réseau -----------------------------------------------------------------
+network-manager                # gestion Wi-Fi
+network-manager-gnome          # nm-applet, dans la zone de notification
+firmware-iwlwifi               # firmware Wi-Fi Intel — SANS LUI, PAS DE RÉSEAU
+
+#--- Bluetooth --------------------------------------------------------------
+bluez                          # pile Bluetooth
+blueman                        # applet et fenêtre d'appairage
+libspa-0.2-bluetooth           # audio Bluetooth (A2DP) pour PipeWire
+
+#--- Audio ------------------------------------------------------------------
+pipewire                       # serveur audio
+pipewire-pulse                 # compatibilité PulseAudio (Chromium, Electron)
+wireplumber                    # gestionnaire de sessions audio
+
+#--- Portails XDG -----------------------------------------------------------
+xdg-desktop-portal             # requis par Electron
+xdg-desktop-portal-gtk         # sélecteurs de fichiers
+
+#--- Applications -----------------------------------------------------------
+chromium                       # navigateur — usage principal
+mousepad                       # bloc-notes (~20 Mo, GTK3)
+
+#--- Matériel et système ----------------------------------------------------
+brightnessctl                  # luminosité (rangée supérieure du clavier)
+systemd-zram-generator         # swap compressé en RAM — indispensable à 4 Go
+intel-media-va-driver          # décodage vidéo matériel (VA-API)
+va-driver-all                  # pilotes VA-API complémentaires
+vainfo                         # vérification du décodage matériel

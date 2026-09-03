@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Claude OS — Gestionnaire de fenêtres
+
+  Openbox tient ici un rôle volontairement effacé : pas de décorations, pas de
+  bureaux multiples, pas de menu. L'usage étant à 100 % web, une fenêtre occupe
+  l'écran et le dock sert de commutateur. Openbox place les fenêtres et gère les
+  raccourcis, rien de plus. Empreinte ~10 Mo.
+-->
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+
+  <resistance>
+    <strength>10</strength>
+    <screen_edge_strength>20</screen_edge_strength>
+  </resistance>
+
+  <focus>
+    <focusNew>yes</focusNew>
+    <followMouse>no</followMouse>
+    <focusLast>yes</focusLast>
+    <underMouse>no</underMouse>
+    <raiseOnFocus>yes</raiseOnFocus>
+  </focus>
+
+  <placement>
+    <policy>Smart</policy>
+    <center>yes</center>
+    <monitor>Primary</monitor>
+  </placement>
+
+  <theme>
+    <name>Clearlooks</name>
+    <titleLayout>NLIMC</titleLayout>
+    <keepBorder>no</keepBorder>
+    <animateIconify>yes</animateIconify>
+    <font place="ActiveWindow">
+      <name>Inter</name><size>10</size><weight>bold</weight><slant>normal</slant>
+    </font>
+    <font place="InactiveWindow">
+      <name>Inter</name><size>10</size><weight>normal</weight><slant>normal</slant>
+    </font>
+  </theme>
+
+  <!-- Un seul bureau : le multi-bureaux n'a pas de sens dans cet usage -->
+  <desktops>
+    <number>1</number>
+    <firstdesk>1</firstdesk>
+    <names><name>Bureau</name></names>
+    <popupTime>0</popupTime>
+  </desktops>
+
+  <!-- Marge basse réservée au dock et à la barre d'état -->
+  <margins>
+    <top>0</top><bottom>72</bottom><left>0</left><right>0</right>
+  </margins>
+
+  <resize>
+    <drawContents>yes</drawContents>
+    <popupShow>Never</popupShow>
+  </resize>
+
+  <applications>
+    <!-- Les applications s'ouvrent sans décoration et maximisées :
+         c'est le comportement attendu d'un appareil orienté web. -->
+    <application class="*">
+      <decor>no</decor>
+      <maximized>yes</maximized>
+    </application>
+    <!-- Les boîtes de dialogue gardent leur cadre et restent centrées -->
+    <application type="dialog">
+      <decor>yes</decor>
+      <maximized>no</maximized>
+      <position force="no"><x>center</x><y>center</y></position>
+    </application>
+    <application class="Blueman-manager">
+      <decor>yes</decor><maximized>no</maximized>
+    </application>
+    <application class="Nm-connection-editor">
+      <decor>yes</decor><maximized>no</maximized>
+    </application>
+  </applications>
+
+  <keyboard>
+    <chainQuitKey>C-g</chainQuitKey>
+
+    <!-- Lancement rapide -->
+    <keybind key="W-Return">
+      <action name="Execute"><command>chromium</command></action>
+    </keybind>
+    <keybind key="W-c">
+      <action name="Execute"><command>claude-desktop</command></action>
+    </keybind>
+    <keybind key="W-e">
+      <action name="Execute"><command>mousepad</command></action>
+    </keybind>
+
+    <!-- Fenêtres -->
+    <keybind key="A-Tab">
+      <action name="NextWindow"><finalactions><action name="Focus"/><action name="Raise"/></finalactions></action>
+    </keybind>
+    <keybind key="A-S-Tab">
+      <action name="PreviousWindow"><finalactions><action name="Focus"/><action name="Raise"/></finalactions></action>
+    </keybind>
+    <keybind key="A-F4">
+      <action name="Close"/>
+    </keybind>
+    <keybind key="W-d">
+      <action name="ToggleShowDesktop"/>
+    </keybind>
+    <keybind key="F11">
+      <action name="ToggleFullscreen"/>
+    </keybind>
+
+    <!-- Rangée supérieure du clavier Chromebook : volume et luminosité -->
+    <keybind key="XF86AudioRaiseVolume">
+      <action name="Execute"><command>wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+ -l 1.0</command></action>
+    </keybind>
+    <keybind key="XF86AudioLowerVolume">
+      <action name="Execute"><command>wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-</command></action>
+    </keybind>
+    <keybind key="XF86AudioMute">
+      <action name="Execute"><command>wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle</command></action>
+    </keybind>
+    <keybind key="XF86MonBrightnessUp">
+      <action name="Execute"><command>brightnessctl set +10%</command></action>
+    </keybind>
+    <keybind key="XF86MonBrightnessDown">
+      <action name="Execute"><command>brightnessctl set 10%-</command></action>
+    </keybind>
+  </keyboard>
+
+  <mouse>
+    <dragThreshold>8</dragThreshold>
+    <doubleClickTime>250</doubleClickTime>
+    <screenEdgeWarpTime>0</screenEdgeWarpTime>
+    <context name="Desktop">
+      <mousebind button="Left" action="Press"><action name="Focus"/></mousebind>
+    </context>
+    <context name="Client">
+      <mousebind button="Left" action="Press">
+        <action name="Focus"/><action name="Raise"/>
+      </mousebind>
+    </context>
+  </mouse>
+
+  <menu>
+    <file>/usr/share/claude-os/openbox/menu.xml</file>
+    <hideDelay>200</hideDelay>
+  </menu>
+
+</openbox_config>

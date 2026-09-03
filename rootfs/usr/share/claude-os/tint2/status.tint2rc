@@ -1,0 +1,77 @@
+#-------------------------------------------------------------------------------
+# Claude OS — Barre d'état
+#
+# Ancrée en bas à droite, façon ChromeOS : zone de notification (Wi-Fi,
+# Bluetooth, volume), batterie, puis horloge à l'extrême droite.
+# L'ordre de « panel_items » fixe la disposition de gauche à droite.
+#-------------------------------------------------------------------------------
+
+#---- Panneau
+panel_items = SBC
+panel_monitor = primary
+panel_position = bottom right horizontal
+panel_size = 0 60
+panel_margin = 10 10
+panel_padding = 10 6 8
+panel_background_id = 1
+panel_layer = top
+panel_dock = 0
+wm_menu = 0
+strut_policy = none
+panel_window_name = claude-os-status
+disable_transparency = 0
+mouse_effects = 1
+
+#---- Arrière-plans
+# 1 : la barre — mêmes codes visuels que le dock, pour l'unité
+rounded = 18
+border_width = 1
+border_sides = TBLR
+background_color = #202124 90
+border_color = #ffffff 10
+
+# 2 : survol des éléments cliquables
+rounded = 12
+border_width = 0
+background_color = #ffffff 0
+background_color_hover = #8ab4f8 18
+background_color_pressed = #8ab4f8 28
+
+#---- Zone de notification (nm-applet, blueman-applet, volume)
+systray_padding = 6 0 8
+systray_background_id = 0
+systray_icon_size = 20
+systray_icon_asb = 100 0 0
+systray_monitor = primary
+systray_name_filter =
+
+#---- Batterie
+battery_padding = 8 0
+battery_background_id = 2
+battery_hide = 101
+bat1_font_color = #e8eaed 100
+bat2_font_color = #9aa0a6 100
+bat1_format = %p
+bat2_format = %t
+battery_tooltip = 1
+battery_low_status = 15
+battery_low_cmd = notify-send -u critical "Batterie faible" "Moins de 15 % restants"
+ac_connected_cmd = notify-send -t 2000 "Secteur branché"
+ac_disconnected_cmd = notify-send -t 2000 "Sur batterie"
+
+#---- Horloge
+time1_format = %H:%M
+time1_font_color = #e8eaed 100
+time2_format = %a %d %b
+time2_font_color = #9aa0a6 100
+clock_padding = 10 0
+clock_background_id = 2
+clock_tooltip = %A %d %B %Y
+clock_lclick_command = notify-send "$(date '+%A %d %B %Y')" "$(date '+%H:%M:%S')"
+
+#---- Infobulles
+tooltip_show_timeout = 0.4
+tooltip_hide_timeout = 0.1
+tooltip_padding = 10 6
+tooltip_background_id = 1
+tooltip_font_color = #e8eaed 100

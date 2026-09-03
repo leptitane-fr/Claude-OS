@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Claude
+Comment=Claude Desktop
+Exec=claude-desktop %U
+Icon=claude-desktop
+Terminal=false
+Categories=Utility;
+StartupWMClass=Claude

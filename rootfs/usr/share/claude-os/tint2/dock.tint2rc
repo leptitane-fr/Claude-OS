@@ -1,0 +1,71 @@
+#-------------------------------------------------------------------------------
+# Claude OS — Dock
+#
+# Panneau centré en bas, façon macOS, ne contenant que des lanceurs.
+# Le second panneau (status.tint2rc) occupe le coin bas-droit, façon ChromeOS.
+# Deux instances tint2 séparées plutôt qu'un panneau unique : c'est la seule
+# manière d'obtenir un centrage réel du dock ET un ancrage à droite de la barre
+# d'état, tint2 disposant ses éléments de gauche à droite dans un même panneau.
+#
+# Empreinte mesurée attendue : ~12 Mo par instance.
+#-------------------------------------------------------------------------------
+
+#---- Panneau
+panel_items = L
+panel_monitor = primary
+panel_position = bottom center horizontal
+panel_size = 0 60
+panel_margin = 0 10
+panel_padding = 10 6 10
+panel_background_id = 1
+panel_layer = top
+panel_dock = 0
+wm_menu = 0
+strut_policy = follow_size
+panel_window_name = claude-os-dock
+disable_transparency = 0
+mouse_effects = 1
+font_shadow = 0
+mouse_hover_icon_asb = 100 5 10
+mouse_pressed_icon_asb = 100 0 -10
+
+#---- Arrière-plans
+# 1 : le dock lui-même — sombre translucide, coins très arrondis
+rounded = 18
+border_width = 1
+border_sides = TBLR
+background_color = #202124 90
+border_color = #ffffff 10
+background_color_hover = #202124 90
+border_color_hover = #ffffff 10
+background_color_pressed = #202124 90
+border_color_pressed = #ffffff 10
+
+# 2 : pastille sous l'icône survolée
+rounded = 12
+border_width = 0
+background_color = #ffffff 0
+background_color_hover = #8ab4f8 18
+background_color_pressed = #8ab4f8 28
+
+#---- Lanceurs
+launcher_padding = 6 4 8
+launcher_background_id = 0
+launcher_icon_background_id = 2
+launcher_icon_size = 40
+launcher_icon_asb = 100 0 0
+launcher_icon_theme = Papirus-Dark
+launcher_icon_theme_override = 1
+startup_notifications = 1
+launcher_tooltip = 1
+
+launcher_item_app = /usr/local/share/applications/claude-os-chromium.desktop
+launcher_item_app = /usr/local/share/applications/claude-os-claude.desktop
+launcher_item_app = /usr/local/share/applications/claude-os-notes.desktop
+
+#---- Infobulles
+tooltip_show_timeout = 0.4
+tooltip_hide_timeout = 0.1
+tooltip_padding = 10 6
+tooltip_background_id = 1
+tooltip_font_color = #e8eaed 100

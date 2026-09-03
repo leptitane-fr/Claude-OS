@@ -49,6 +49,15 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`docs/01-materiel-firmware.md`](docs/01-materiel-firmware.md) | Le matériel, le déverrouillage du firmware, les points de non-retour et la procédure de sauvegarde. **À lire avant toute manipulation de la machine.** |
 | [`docs/02-architecture.md`](docs/02-architecture.md) | Le socle logiciel, le budget mémoire, et le modèle de privilèges de Claude sur le système. |
 | [`docs/03-write-protect-jumper.md`](docs/03-write-protect-jumper.md) | **Résolu.** Le cavalier de write-protect de MADOO est `J1`, confirmé par mesure (`wpsw_cur` = `0`). Méthode d'identification et protocole de pontage. |
+| [`docs/04-environnement-bureau.md`](docs/04-environnement-bureau.md) | La pile graphique, le rendu visuel, ce qui est volontairement absent, et les points à valider sur la machine. |
+
+### Installation
+
+| Fichier | Rôle |
+|---|---|
+| [`install/provision.sh`](install/provision.sh) | Transforme une Debian 13 minimale en Claude OS. Idempotent, `--dry-run` disponible. |
+| [`install/packages.list`](install/packages.list) | Les 34 paquets, chacun justifié en commentaire. |
+| [`rootfs/`](rootfs/) | Les fichiers déployés tels quels : configurations tint2, picom, openbox, session, fond d'écran. |
 
 ### Outils
 

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+  <menu id="root-menu" label="Claude OS">
+    <item label="Chromium">
+      <action name="Execute"><command>chromium</command></action>
+    </item>
+    <item label="Claude">
+      <action name="Execute"><command>claude-desktop</command></action>
+    </item>
+    <item label="Bloc-notes">
+      <action name="Execute"><command>mousepad</command></action>
+    </item>
+    <separator/>
+    <item label="Réseau">
+      <action name="Execute"><command>nm-connection-editor</command></action>
+    </item>
+    <item label="Bluetooth">
+      <action name="Execute"><command>blueman-manager</command></action>
+    </item>
+    <separator/>
+    <item label="Redémarrer l'interface">
+      <action name="Restart"/>
+    </item>
+  </menu>
+</openbox_menu>
