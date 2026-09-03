@@ -61,43 +61,71 @@
     <popupShow>Never</popupShow>
   </resize>
 
+  <!--
+    ATTENTION À L'ORDRE : Openbox applique la PREMIÈRE règle qui correspond.
+    Une règle « class="*" » placée en tête attrape tout — y compris le bureau,
+    le dock et les panneaux — et rend inatteignables les règles suivantes.
+    C'est ce qui rendait la session insensible aux clics : le panneau d'état,
+    maximisé en plein écran, interceptait tout.
+
+    On va donc du plus spécifique au plus général, et l'on ne maximise que ce
+    qui doit l'être, nommément.
+  -->
   <applications>
-    <!-- Décorations activées : le thème ClaudeOS ne dessine QUE la barre de
-         titre (cadre et poignée ramenés à zéro dans themerc). Les fenêtres
-         s'ouvrent maximisées, sous les panneaux. -->
-    <application class="*">
-      <decor>yes</decor>
-      <maximized>yes</maximized>
-    </application>
-    <!-- Chromium et Claude Desktop dessinent leur propre barre supérieure :
-         une barre de titre Openbox en plus ferait double emploi. -->
-    <application class="Chromium">
+
+    <!-- Le bureau reste au fond, sans cadre, jamais maximisé -->
+    <application type="desktop">
       <decor>no</decor>
-      <maximized>yes</maximized>
-    </application>
-    <application class="Claude">
-      <decor>no</decor>
-      <maximized>yes</maximized>
-    </application>
-    <!-- Le bureau de PCManFM doit rester au fond, sans décoration -->
-    <application class="Pcmanfm" role="desktop">
-      <decor>no</decor>
+      <maximized>no</maximized>
       <layer>below</layer>
-      <maximized>yes</maximized>
+      <skip_taskbar>yes</skip_taskbar>
+      <skip_pager>yes</skip_pager>
+    </application>
+
+    <!-- Dock et panneaux se placent eux-mêmes : Openbox n'y touche pas -->
+    <application type="dock">
+      <decor>no</decor>
+      <maximized>no</maximized>
       <skip_taskbar>yes</skip_taskbar>
     </application>
-    <!-- Les boîtes de dialogue gardent leur cadre et restent centrées -->
+
+    <!-- Boîtes de dialogue : cadre, centrées, jamais maximisées -->
     <application type="dialog">
       <decor>yes</decor>
       <maximized>no</maximized>
       <position force="no"><x>center</x><y>center</y></position>
     </application>
-    <application class="Blueman-manager">
+
+    <!-- Chromium et Claude Desktop dessinent leur propre barre supérieure :
+         une barre de titre Openbox en plus ferait double emploi. -->
+    <application class="Chromium" type="normal">
+      <decor>no</decor><maximized>yes</maximized>
+    </application>
+    <application class="chromium" type="normal">
+      <decor>no</decor><maximized>yes</maximized>
+    </application>
+    <application class="Claude" type="normal">
+      <decor>no</decor><maximized>yes</maximized>
+    </application>
+    <application class="claude-desktop" type="normal">
+      <decor>no</decor><maximized>yes</maximized>
+    </application>
+
+    <!-- Les utilitaires gardent la barre de titre du thème ClaudeOS -->
+    <application class="Mousepad" type="normal">
+      <decor>yes</decor><maximized>yes</maximized>
+    </application>
+    <application class="Pcmanfm" type="normal">
       <decor>yes</decor><maximized>no</maximized>
     </application>
-    <application class="Nm-connection-editor">
-      <decor>yes</decor><maximized>no</maximized>
+
+    <!-- Filet de sécurité : une fenêtre ordinaire non listée reçoit un cadre,
+         mais N'EST PAS maximisée d'office. Ne jamais remettre ici un joker
+         qui maximise : il reprendrait tout ce qui précède. -->
+    <application type="normal">
+      <decor>yes</decor>
     </application>
+
   </applications>
 
   <keyboard>
