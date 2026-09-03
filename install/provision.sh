@@ -164,6 +164,20 @@ run "printf '#!/bin/sh\nexec /usr/local/bin/claude-os-session\n' > '$TARGET_HOME
 run "chmod +x '$TARGET_HOME/.xsession'"
 run "chown '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.xsession'"
 
+info "dock plank : réglages et icônes épinglées"
+# Ces fichiers appartiennent à l'utilisateur : plank les réécrit lui-même dès
+# qu'on réorganise le dock à la souris. On ne les écrase donc que s'ils
+# n'existent pas déjà, sous peine de perdre l'ordre choisi à chaque
+# relancement du provisionnement.
+run "mkdir -p '$TARGET_HOME/.config/plank/dock1/launchers'"
+if [ "$DRY" -eq 1 ] || [ ! -f "$TARGET_HOME/.config/plank/dock1/settings" ]; then
+	run "cp '$REPO_DIR/rootfs/usr/share/claude-os/plank/settings' '$TARGET_HOME/.config/plank/dock1/settings'"
+	run "cp '$REPO_DIR/rootfs/usr/share/claude-os/plank/launchers/'*.dockitem '$TARGET_HOME/.config/plank/dock1/launchers/'"
+else
+	info "réglages plank déjà présents — conservés (ordre des icônes préservé)"
+fi
+run "chown -R '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.config/plank'"
+
 info "thème GTK sombre"
 run "mkdir -p '$TARGET_HOME/.config/gtk-3.0'"
 run "cat > '$TARGET_HOME/.config/gtk-3.0/settings.ini' <<'EOF'
@@ -248,6 +262,12 @@ fi
 
 echo
 info "Redémarrer, puis se connecter à la session « Claude OS »."
+echo
+info "À essayer une fois la session ouverte :"
+info "  touche Loupe                      masque / affiche dock et barre d'état"
+info "  Super + Espace                    lanceur d'applications"
+info "  clic droit sur le bureau          menu, dont « Réglages d'affichage »"
+info "  glisser une icône du dock         réorganisation, enregistrée par plank"
 echo
 info "Vérifications à faire à la première ouverture de session :"
 info "  vainfo | head -5                  décodage vidéo matériel"

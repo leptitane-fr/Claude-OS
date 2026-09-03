@@ -13,7 +13,12 @@ xinit                          # démarrage de session
 
 #--- Interface --------------------------------------------------------------
 openbox                        # gestionnaire de fenêtres (~10 Mo)
-tint2                          # dock centré + barre d'état (~12 Mo par panneau)
+plank                          # dock : glisser-déposer des icônes, zoom, ombres
+tint2                          # barre d'état uniquement (~12 Mo)
+rofi                           # lanceur d'applications (non résident)
+pcmanfm                        # bureau (icônes, fond d'écran) + gestionnaire de fichiers
+xcape                          # touche Loupe : Super seul -> F13
+xdotool                        # bascule d'affichage de l'étagère
 picom                          # compositeur : coins arrondis, flou, ombres
 dunst                          # notifications
 xwallpaper                     # fond d'écran (plus léger que feh)
@@ -52,6 +57,8 @@ mousepad                       # bloc-notes (~20 Mo, GTK3)
 
 #--- Matériel et système ----------------------------------------------------
 brightnessctl                  # luminosité (rangée supérieure du clavier)
+python3-gi                     # panneau de réglages d'affichage (GTK3)
+gir1.2-gtk-3.0                 # liaisons GTK3 pour ce panneau
 systemd-zram-generator         # swap compressé en RAM — indispensable à 4 Go
 intel-media-va-driver          # décodage vidéo matériel (VA-API)
 va-driver-all                  # pilotes VA-API complémentaires

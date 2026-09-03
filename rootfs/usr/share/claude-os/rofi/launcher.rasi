@@ -1,0 +1,45 @@
+/* Claude OS — lanceur d'applications
+   Mêmes couleurs et rayons que le dock et la barre d'état. */
+
+* {
+    bg:        #202124f2;
+    bg-alt:    #2a2d33ff;
+    fg:        #e8eaedff;
+    fg-dim:    #9aa0a6ff;
+    accent:    #8ab4f8ff;
+    accent-bg: #33415aff;
+    border-c:  #ffffff1a;
+    font:      "Inter 11";
+}
+
+window {
+    width:            620px;
+    border-radius:    18px;
+    background-color: @bg;
+    border:           1px;
+    border-color:     @border-c;
+    padding:          0px;
+    location:         center;
+    anchor:           center;
+}
+
+mainbox { children: [ inputbar, listview ]; padding: 10px; spacing: 8px; }
+
+inputbar {
+    background-color: @bg-alt;
+    border-radius:    12px;
+    padding:          11px 14px;
+    spacing:          10px;
+    children:         [ prompt, entry ];
+}
+prompt  { text-color: @fg-dim; }
+entry   { text-color: @fg; placeholder: "Rechercher une application"; placeholder-color: @fg-dim; cursor: text; }
+
+listview { lines: 7; columns: 1; scrollbar: false; spacing: 2px; fixed-height: false; }
+
+element         { padding: 9px 12px; border-radius: 12px; spacing: 12px; }
+element normal.normal   { background-color: transparent; text-color: @fg; }
+element alternate.normal{ background-color: transparent; text-color: @fg; }
+element selected.normal { background-color: @accent-bg; text-color: #ffffffff; }
+element-icon    { size: 26px; vertical-align: 0.5; }
+element-text    { vertical-align: 0.5; }

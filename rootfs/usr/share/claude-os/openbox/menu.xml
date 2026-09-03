@@ -10,7 +10,13 @@
     <item label="Bloc-notes">
       <action name="Execute"><command>mousepad</command></action>
     </item>
+    <item label="Fichiers">
+      <action name="Execute"><command>pcmanfm</command></action>
+    </item>
     <separator/>
+    <item label="Réglages d'affichage">
+      <action name="Execute"><command>claude-os-settings</command></action>
+    </item>
     <item label="Réseau">
       <action name="Execute"><command>nm-connection-editor</command></action>
     </item>

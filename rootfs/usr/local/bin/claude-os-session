@@ -2,49 +2,63 @@
 #-------------------------------------------------------------------------------
 # Claude OS — Session graphique
 #
-# Lancé par ~/.xsession. Démarre les composants dans l'ordre qui évite les
-# clignotements : fond d'écran, puis compositeur, puis panneaux, puis applets.
-# Openbox est exécuté en dernier avec « exec » : c'est lui qui tient la session,
-# sa fin termine la session.
+# Ordre voulu : bureau, puis compositeur, puis panneaux, puis applets. Openbox
+# passe en dernier avec « exec » : c'est lui qui tient la session.
+#
+# Tout fichier de configuration peut être surchargé en déposant son homologue
+# dans ~/.config/claude-os/ — c'est ce que fait le panneau de réglages
+# (claude-os-settings), qui n'écrit jamais dans /usr.
 #-------------------------------------------------------------------------------
 set -u
 
 CONF=/usr/share/claude-os
-
-# Un utilisateur peut surcharger n'importe quel fichier de configuration en
-# déposant son propre exemplaire dans ~/.config/claude-os/.
 USERCONF="${XDG_CONFIG_HOME:-$HOME/.config}/claude-os"
 pick() { [ -f "$USERCONF/$1" ] && echo "$USERCONF/$1" || echo "$CONF/$1"; }
+have() { command -v "$1" >/dev/null 2>&1; }
 
-# Fond d'écran avant tout le reste : évite le damier noir au démarrage
-if command -v xwallpaper >/dev/null 2>&1; then
-	xwallpaper --zoom "$(pick wallpaper/default.png)" 2>/dev/null || true
-fi
-
-# Réglages X : pas d'économiseur, pas de mise en veille de l'écran par X
-# (c'est logind qui gère la veille), curseur standard
+# Réglages X : pas d'économiseur ni de mise en veille par X — c'est logind qui
+# gère la veille.
 xset s off -dpms 2>/dev/null || true
 xsetroot -cursor_name left_ptr 2>/dev/null || true
 
-# Compositeur — coins arrondis, translucidité, ombres
-picom --config "$(pick picom/picom.conf)" -b 2>/dev/null || true
+# Bureau : fond d'écran ET icônes déposées par l'utilisateur. C'est PCManFM qui
+# dessine le bureau ; sans lui, Openbox n'affiche aucune icône.
+WP="$(pick wallpaper/default.png)"
+if have pcmanfm; then
+	pcmanfm --set-wallpaper="$WP" --wallpaper-mode=crop 2>/dev/null || true
+	pcmanfm --desktop &
+elif have xwallpaper; then
+	xwallpaper --zoom "$WP" 2>/dev/null || true
+fi
+
+# Compositeur — coins arrondis et ombres. Pas de flou : voir docs/04.
+have picom && picom --config "$(pick picom/picom.conf)" -b 2>/dev/null || true
 
 # Notifications
-dunst &
+have dunst && dunst &
 
-# Panneaux : dock centré, barre d'état à droite
-tint2 -c "$(pick tint2/dock.tint2rc)" &
-tint2 -c "$(pick tint2/status.tint2rc)" &
+# Dock : plank. Choisi pour le glisser-déposer des icônes, que tint2 ne sait
+# pas faire. Ses réglages vivent dans ~/.config/plank/ et il les enregistre
+# lui-même quand on réorganise le dock à la souris.
+have plank && plank &
+
+# Barre d'état, ancrée à droite
+have tint2 && tint2 -c "$(pick tint2/status.tint2rc)" &
+
+# Touche Loupe du Chromebook : xcape convertit un appui bref sur Super SEUL en
+# F13, qu'Openbox lie à claude-os-toggle-shelf. Super combiné à une autre
+# touche conserve son rôle.
+have xcape && xcape -e 'Super_L=F13' 2>/dev/null &
 
 # Applets de la zone de notification. Temporisés : la zone doit exister avant
-# qu'ils tentent de s'y insérer, sans quoi leurs icônes n'apparaissent pas.
+# qu'ils tentent de s'y insérer, sinon leurs icônes n'apparaissent pas.
 ( sleep 2
-  command -v nm-applet       >/dev/null 2>&1 && nm-applet --indicator &
-  command -v blueman-applet  >/dev/null 2>&1 && blueman-applet &
+  have nm-applet      && nm-applet --indicator &
+  have blueman-applet && blueman-applet &
 ) &
 
 # Portail XDG : requis par Electron (Claude Desktop) pour les sélecteurs de
 # fichiers et l'ouverture de liens
-command -v /usr/libexec/xdg-desktop-portal >/dev/null 2>&1 && /usr/libexec/xdg-desktop-portal &
+[ -x /usr/libexec/xdg-desktop-portal ] && /usr/libexec/xdg-desktop-portal &
 
 exec openbox --config-file "$(pick openbox/rc.xml)"

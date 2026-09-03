@@ -4,6 +4,10 @@
 # Ancrée en bas à droite, façon ChromeOS : zone de notification (Wi-Fi,
 # Bluetooth, volume), batterie, puis horloge à l'extrême droite.
 # L'ordre de « panel_items » fixe la disposition de gauche à droite.
+#
+# « strut_policy = none » est délibéré : la barre ne réserve aucun espace, si
+# bien que les fenêtres maximisées et plein écran occupent tout l'écran et
+# passent SOUS elle. La touche Loupe la masque pour dégager le bas.
 #-------------------------------------------------------------------------------
 
 #---- Panneau

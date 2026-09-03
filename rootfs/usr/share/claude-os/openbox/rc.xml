@@ -29,7 +29,7 @@
   </placement>
 
   <theme>
-    <name>Clearlooks</name>
+    <name>ClaudeOS</name>
     <titleLayout>NLIMC</titleLayout>
     <keepBorder>no</keepBorder>
     <animateIconify>yes</animateIconify>
@@ -49,9 +49,11 @@
     <popupTime>0</popupTime>
   </desktops>
 
-  <!-- Marge basse réservée au dock et à la barre d'état -->
+  <!-- Aucune marge : les fenêtres maximisées et plein écran occupent tout
+       l'écran et passent SOUS le dock et la barre d'état, qui flottent au
+       dessus. La touche Loupe les masque pour dégager le bas de l'écran. -->
   <margins>
-    <top>0</top><bottom>72</bottom><left>0</left><right>0</right>
+    <top>0</top><bottom>0</bottom><left>0</left><right>0</right>
   </margins>
 
   <resize>
@@ -60,11 +62,29 @@
   </resize>
 
   <applications>
-    <!-- Les applications s'ouvrent sans décoration et maximisées :
-         c'est le comportement attendu d'un appareil orienté web. -->
+    <!-- Décorations activées : le thème ClaudeOS ne dessine QUE la barre de
+         titre (cadre et poignée ramenés à zéro dans themerc). Les fenêtres
+         s'ouvrent maximisées, sous les panneaux. -->
     <application class="*">
+      <decor>yes</decor>
+      <maximized>yes</maximized>
+    </application>
+    <!-- Chromium et Claude Desktop dessinent leur propre barre supérieure :
+         une barre de titre Openbox en plus ferait double emploi. -->
+    <application class="Chromium">
       <decor>no</decor>
       <maximized>yes</maximized>
+    </application>
+    <application class="Claude">
+      <decor>no</decor>
+      <maximized>yes</maximized>
+    </application>
+    <!-- Le bureau de PCManFM doit rester au fond, sans décoration -->
+    <application class="Pcmanfm" role="desktop">
+      <decor>no</decor>
+      <layer>below</layer>
+      <maximized>yes</maximized>
+      <skip_taskbar>yes</skip_taskbar>
     </application>
     <!-- Les boîtes de dialogue gardent leur cadre et restent centrées -->
     <application type="dialog">
@@ -92,6 +112,18 @@
     </keybind>
     <keybind key="W-e">
       <action name="Execute"><command>mousepad</command></action>
+    </keybind>
+
+    <!-- Lanceur d'applications -->
+    <keybind key="W-space">
+      <action name="Execute"><command>claude-os-launcher</command></action>
+    </keybind>
+
+    <!-- Touche Loupe du clavier Chromebook. xcape convertit un appui bref sur
+         Super, seul, en F13 : c'est ce F13 que l'on intercepte ici. Super
+         combiné à une autre touche garde son rôle habituel. -->
+    <keybind key="F13">
+      <action name="Execute"><command>claude-os-toggle-shelf</command></action>
     </keybind>
 
     <!-- Fenêtres -->

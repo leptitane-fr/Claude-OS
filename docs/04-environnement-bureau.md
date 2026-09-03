@@ -16,23 +16,34 @@ cible est donc cohérente, et c'est celle qui est mise en œuvre.
 
 | Rôle | Choix | Empreinte | Pourquoi |
 |---|---|---|---|
-| Serveur d'affichage | **Xorg** | ~70 Mo | Imposé : le raccourci *Quick Entry* de Claude Desktop exige X11 ou le portail Wayland `GlobalShortcuts`, absent des compositeurs légers. |
-| Gestionnaire de fenêtres | **Openbox** | ~10 Mo | Rôle volontairement effacé : place les fenêtres, gère les raccourcis. Sans décorations ni bureaux multiples. |
-| Dock + barre d'état | **tint2 ×2** | ~24 Mo | Deux instances : c'est la seule façon d'obtenir un dock réellement centré **et** une barre ancrée à droite, tint2 disposant ses éléments de gauche à droite dans un même panneau. |
-| Compositeur | **picom** | ~25 Mo | C'est lui qui produit l'aspect : coins arrondis, translucidité, flou, ombres. |
+| Serveur d'affichage | **Xorg** | ~70 Mo | Imposé : *Quick Entry* exige X11 ou un portail Wayland absent des compositeurs légers. |
+| Gestionnaire de fenêtres | **Openbox** | ~10 Mo | Thème sur mesure : barre de titre seule, aucun cadre. |
+| Dock | **plank** | ~35 Mo | Glisser-déposer des icônes, zoom au survol, ombres d'icônes. |
+| Barre d'état | **tint2** | ~12 Mo | Zone de notification, batterie, horloge. Ancrée à droite. |
+| Bureau et fichiers | **PCManFM** | ~25 Mo | Icônes déposées sur le bureau, fond d'écran, gestionnaire de fichiers. |
+| Lanceur | **rofi** | 0 au repos | Non résident : ne consomme que le temps de son affichage. |
+| Compositeur | **picom** | ~25 Mo | Coins arrondis et ombres. Sans flou. |
 | Notifications | **dunst** | ~8 Mo | |
-| Session | **LightDM** + greeter GTK | ~40 Mo | |
+| Session | **LightDM** | ~40 Mo | |
 
-Total au repos visé : **~300 Mo**, services système compris. Le budget de
-`docs/02` (session graphique sous 250 Mo) est tenu.
+Total au repos visé : **~330 Mo**. Le budget de 400 Mo tient.
+
+### Le dock : pourquoi plank et non tint2
+
+Le premier jet utilisait tint2 pour le dock comme pour la barre d'état. **tint2
+ne sait pas réorganiser ses lanceurs au glisser-déposer** : leur ordre est figé
+dans le fichier de configuration. plank le fait nativement, comme le dock de
+macOS, et enregistre lui-même le nouvel ordre. Il apporte au passage le zoom au
+survol et les ombres d'icônes.
+
+Coût : ~23 Mo de plus que tint2. tint2 reste pour la barre d'état, où ses
+lanceurs ne servaient pas.
 
 ### Pourquoi pas un shell écrit sur mesure
 
-Une interface entièrement développée — Electron ou GTK — était l'autre voie.
-Écartée : un second processus Electron coûterait 200 à 400 Mo sur une machine
-qui n'en a que 4 Go, dont Claude Desktop consomme déjà une bonne part. tint2
-est configurable au pixel près, ce qui suffit largement à obtenir le rendu
-voulu pour un vingtième du coût mémoire.
+Un second processus Electron coûterait 200 à 400 Mo sur une machine qui n'en a
+que 4, dont Claude Desktop consomme déjà une bonne part. L'assemblage retenu
+obtient le même résultat pour un dixième de ce coût.
 
 ## 4.3 Le rendu
 
@@ -52,12 +63,66 @@ Codes visuels communs aux deux panneaux, pour l'unité :
 Fond d'écran : dégradé indigo profond avec deux halos radiaux, généré par
 script donc reproductible et versionnable, jamais téléchargé.
 
-Le flou (`dual_kawase`, force 4) n'est appliqué qu'aux fenêtres translucides,
-c'est-à-dire aux deux panneaux seulement. Un flou plein écran serait hors
-budget sur un GPU 32 EU à 6 W. **C'est le premier réglage à sacrifier** si
-l'affichage saccade : `blur-method = "none"` dans `picom.conf`.
+**Le flou a été retiré** : coûteux sur un GPU 32 EU à 6 W, et sans apport réel
+une fois les ombres en place. Ce sont elles qui font la lisibilité, en
+détachant chaque surface de ce qu'il y a derrière. Le panneau de réglages
+permet de le réactiver pour juger sur pièce.
 
-## 4.4 Ce qui est volontairement absent
+## 4.4 Le cahier des charges, point par point
+
+| # | Demande | État | Comment |
+|---|---|---|---|
+| 1 | Esthétique validée | ✅ | Palette, typographie et disposition figées. |
+| 2 | Fenêtres sans cadre, barre de titre seule | ✅ | Thème Openbox `ClaudeOS` : `border.width: 0` supprime le contour, `window.handle.width: 0` la poignée du bas. Restent la barre de titre et ses trois boutons. |
+| 3 | Pas de flou | ✅ | `blur-method = "none"`. Réactivable depuis le panneau de réglages. |
+| 4 | Ombrage léger | ✅ | picom pour les fenêtres et les panneaux (rayon 15, opacité 30 %), `IconShadowSize=2` pour les icônes du dock. |
+| 5 | Bouton lanceur sur le dock | ✅ | Première icône du dock, ou `Super + Espace`. rofi, thémé aux mêmes codes. |
+| 6 | Icônes réorganisables au glisser-déposer | ✅ | Natif dans plank. C'est ce point qui a fait abandonner tint2 pour le dock. |
+| 7 | Touche Loupe masque l'étagère | ⚠️ | `xcape` convertit un appui bref sur Super **seul** en F13, lié à `claude-os-toggle-shelf`. **À vérifier sur la machine** que la touche Loupe émet bien `Super_L`. |
+| 8 | Fenêtres maximisées sous l'étagère | ✅ | Aucun *strut* réservé, marge Openbox à zéro, panneaux au-dessus. |
+| 9 | Panneau de réglages d'affichage | ✅ | `claude-os-settings` : ombres, flou, fondus, arrondis, dock, barre d'état. Écrit dans `~/.config/claude-os/`, jamais dans `/usr`, et « Tout réinitialiser » revient à l'origine. |
+| 10 | Icônes et dossiers sur le bureau | ✅ | `pcmanfm --desktop`. |
+| 11 | Google Drive et OneDrive | 📋 | Plus tard. Voir ci-dessous. |
+| 12 | Écran tactile | 📋 | Plus tard. Voir ci-dessous. |
+
+### Deux réserves sur ce tableau
+
+**Point 2 et les applications qui dessinent leur propre cadre.** Chromium et
+Claude Desktop (Electron) tracent eux-mêmes leur barre supérieure. Leur
+appliquer en plus une barre de titre Openbox ferait double emploi : elles sont
+donc déclarées sans décoration, et c'est leur propre barre — qui porte déjà les
+trois boutons — qui s'affiche. Le thème Openbox vaut pour tout le reste :
+bloc-notes, gestionnaire de fichiers, boîtes de dialogue.
+
+**Point 4 et les icônes de la barre d'état.** plank ombre ses icônes, tint2
+non : il n'expose aucun réglage d'ombre par icône. Les trois icônes de la zone
+de notification n'auront donc que l'ombre du panneau qui les porte. L'écart
+sera peu visible à 20 px, mais il existe.
+
+## 4.5 Les deux demandes reportées
+
+### Google Drive et OneDrive dans le gestionnaire de fichiers
+
+La voie retenue est **rclone**, qui gère les deux services et se monte comme un
+dossier ordinaire — donc visible dans PCManFM sans qu'il ait à en savoir quoi
+que ce soit. L'alternative, GNOME Online Accounts avec gvfs, tirerait une bonne
+partie de GNOME : hors de question ici.
+
+Montage par unités systemd utilisateur, avec cache limité pour ménager l'eMMC.
+C'est effectivement pertinent vu la capacité du disque : les fichiers restent
+en ligne et ne descendent qu'à la demande.
+
+### Écran tactile
+
+`xserver-xorg-input-libinput` est déjà installé et gère le tactile sans
+configuration dans la majorité des cas. Le travail réel consistera à vérifier
+la détection, l'étalonnage, et le défilement tactile dans Chromium. La rotation
+automatique dépend d'un accéléromètre exposé via IIO — c'est le relevé matériel
+qui le dira.
+
+Coût attendu : faible. À traiter après la validation matérielle.
+
+## 4.6 Ce qui est volontairement absent
 
 - **Cowork.** La documentation Anthropic est explicite : sous Linux, Cowork
   lance ses tâches dans une machine virtuelle QEMU/KVM, installée via les
@@ -72,7 +137,7 @@ l'affichage saccade : `blur-method = "none"` dans `picom.conf`.
   pour un usage où une application occupe l'écran.
 - **ModemManager**, masqué : pas de modem cellulaire sur cette machine.
 
-## 4.5 Points à valider sur la machine
+## 4.7 Points à valider sur la machine
 
 Aucun de ces points ne peut être tranché avant installation.
 
@@ -97,7 +162,7 @@ accéléré. **À valider en mesurant** : lecture d'une vidéo 1080p, puis
 `chrome://media-internals` pour confirmer le codec réellement utilisé, et
 observation de la charge CPU.
 
-## 4.6 Sources
+## 4.8 Sources
 
 - Claude Desktop sous Linux (dépôt apt, empreinte de clé, limites de la bêta,
   prérequis Cowork) — <https://code.claude.com/docs/en/desktop-linux>

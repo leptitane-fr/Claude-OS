@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Applications
+Comment=Lanceur d'applications
+Exec=claude-os-launcher
+Icon=view-grid-symbolic
+Terminal=false
+Categories=System;
+NoDisplay=false

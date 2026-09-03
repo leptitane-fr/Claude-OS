@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""Claude OS — Réglages d'affichage.
+
+Ajuste les effets visuels sans éditer un seul fichier de configuration, et
+surtout : permet de les désactiver un par un si l'affichage n'est pas fluide.
+Sur un GPU 32 EU à 6 W, c'est le réglage le plus utile de la machine.
+
+Les préférences sont écrites dans ~/.config/claude-os/, que la session
+privilégie sur les fichiers système : rien n'est jamais écrasé dans /usr, et
+« Tout réinitialiser » suffit à revenir à l'état d'origine.
+"""
+
+import json
+import os
+import re
+import shutil
+import signal
+import subprocess
+
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, GLib  # noqa: E402
+
+SYS = "/usr/share/claude-os"
+USR = os.path.join(GLib.get_user_config_dir(), "claude-os")
+PREFS = os.path.join(USR, "settings.json")
+
+DEFAULTS = {
+    "shadow": True,
+    "shadow_opacity": 30,      # %
+    "shadow_radius": 15,       # px
+    "blur": False,
+    "blur_strength": 4,
+    "corner_radius": 14,       # px, fenêtres
+    "fading": True,
+    "panel_radius": 18,        # px, panneaux
+    "panel_opacity": 90,       # %
+    "panel_height": 60,        # px
+    "dock_icon_size": 40,      # px
+    "dock_zoom": True,
+    "dock_zoom_percent": 120,
+}
+
+
+def load():
+    values = dict(DEFAULTS)
+    try:
+        with open(PREFS, encoding="utf-8") as handle:
+            values.update(json.load(handle))
+    except (OSError, ValueError):
+        pass
+    return values
+
+
+# --------------------------------------------------------------- génération
+
+def write_picom(v):
+    path = os.path.join(USR, "picom")
+    os.makedirs(path, exist_ok=True)
+    blur = (
+        'blur-method = "dual_kawase";\nblur-strength = %d;' % v["blur_strength"]
+        if v["blur"] else 'blur-method = "none";'
+    )
+    shadow = "true" if v["shadow"] else "false"
+    body = f"""# Engendré par claude-os-settings. Modifications manuelles écrasées.
+backend = "glx";
+vsync = true;
+use-damage = true;
+
+corner-radius = {v['corner_radius']};
+rounded-corners-exclude = [
+  "window_type = 'desktop'",
+  "class_g = 'Pcmanfm' && window_type = 'desktop'"
+];
+
+shadow = {shadow};
+shadow-radius = {v['shadow_radius']};
+shadow-opacity = {v['shadow_opacity'] / 100:.2f};
+shadow-offset-x = -{v['shadow_radius']};
+shadow-offset-y = -{max(1, v['shadow_radius'] - 3)};
+shadow-color = "#000000";
+shadow-exclude = [
+  "window_type = 'desktop'",
+  "class_g = 'Pcmanfm' && window_type = 'desktop'",
+  "_GTK_FRAME_EXTENTS@"
+];
+
+{blur}
+
+fading = {"true" if v["fading"] else "false"};
+fade-in-step = 0.09;
+fade-out-step = 0.09;
+fade-delta = 8;
+
+inactive-opacity = 1.0;
+active-opacity = 1.0;
+frame-opacity = 1.0;
+detect-rounded-corners = true;
+detect-client-opacity = true;
+detect-transient = true;
+"""
+    with open(os.path.join(path, "picom.conf"), "w", encoding="utf-8") as handle:
+        handle.write(body)
+
+
+def write_tint2(v):
+    src = os.path.join(SYS, "tint2", "status.tint2rc")
+    if not os.path.exists(src):
+        return
+    path = os.path.join(USR, "tint2")
+    os.makedirs(path, exist_ok=True)
+    with open(src, encoding="utf-8") as handle:
+        text = handle.read()
+
+    text = re.sub(r"^panel_size = 0 \d+", "panel_size = 0 %d" % v["panel_height"],
+                  text, count=1, flags=re.M)
+    # Le premier « rounded » est celui du panneau ; le second, la pastille de
+    # survol, qu'on garde proportionnelle.
+    text = re.sub(r"^rounded = \d+", "rounded = %d" % v["panel_radius"],
+                  text, count=1, flags=re.M)
+    text = re.sub(r"^background_color = #202124 \d+",
+                  "background_color = #202124 %d" % v["panel_opacity"],
+                  text, count=1, flags=re.M)
+    with open(os.path.join(path, "status.tint2rc"), "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def write_plank(v):
+    path = os.path.join(GLib.get_user_config_dir(), "plank", "dock1")
+    settings = os.path.join(path, "settings")
+    if not os.path.exists(settings):
+        return
+    with open(settings, encoding="utf-8") as handle:
+        text = handle.read()
+    text = re.sub(r"^IconSize=\d+", "IconSize=%d" % v["dock_icon_size"], text, flags=re.M)
+    text = re.sub(r"^ZoomEnabled=\w+",
+                  "ZoomEnabled=%s" % ("true" if v["dock_zoom"] else "false"), text, flags=re.M)
+    text = re.sub(r"^ZoomPercent=\d+", "ZoomPercent=%d" % v["dock_zoom_percent"], text, flags=re.M)
+    with open(settings, "w", encoding="utf-8") as handle:
+        handle.write(text)
+
+
+def restart():
+    """Relance les composants. Aucune erreur ne doit interrompre l'application."""
+    conf = os.path.join(USR, "picom", "picom.conf")
+    try:
+        subprocess.run(["pkill", "-x", "picom"], check=False)
+        if shutil.which("picom"):
+            subprocess.Popen(["picom", "--config", conf, "-b"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+    tconf = os.path.join(USR, "tint2", "status.tint2rc")
+    try:
+        subprocess.run(["pkill", "-f", "tint2 -c .*status"], check=False)
+        if shutil.which("tint2") and os.path.exists(tconf):
+            subprocess.Popen(["tint2", "-c", tconf],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+    try:
+        subprocess.run(["pkill", "-x", "plank"], check=False)
+        if shutil.which("plank"):
+            subprocess.Popen(["plank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        pass
+
+
+# ---------------------------------------------------------------- interface
+
+class Window(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Réglages d'affichage")
+        self.set_default_size(520, -1)
+        self.set_border_width(0)
+        self.v = load()
+        self.rows = {}
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.add(outer)
+
+        head = Gtk.HeaderBar(title="Réglages d'affichage",
+                             subtitle="Claude OS", show_close_button=True)
+        self.set_titlebar(head)
+
+        scroll = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroll.set_propagate_natural_height(True)
+        scroll.set_max_content_height(620)
+        outer.pack_start(scroll, True, True, 0)
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_border_width(16)
+        scroll.add(box)
+
+        box.pack_start(self._section("Effets"), False, False, 0)
+        self._switch(box, "shadow", "Ombres portées",
+                     "Détachent les fenêtres et les panneaux du fond.")
+        self._scale(box, "shadow_opacity", "Intensité des ombres", 5, 60, 5, "%")
+        self._scale(box, "shadow_radius", "Diffusion des ombres", 4, 40, 1, "px")
+        self._switch(box, "blur", "Flou d'arrière-plan",
+                     "Coûteux sur ce GPU. Désactivé par défaut.")
+        self._scale(box, "blur_strength", "Force du flou", 1, 10, 1, "")
+        self._switch(box, "fading", "Fondus d'apparition",
+                     "Le premier réglage à couper si l'affichage accroche.")
+        self._scale(box, "corner_radius", "Coins des fenêtres", 0, 24, 1, "px")
+
+        box.pack_start(self._section("Dock"), False, False, 0)
+        self._scale(box, "dock_icon_size", "Taille des icônes", 24, 64, 2, "px")
+        self._switch(box, "dock_zoom", "Agrandissement au survol",
+                     "L'effet loupe façon macOS.")
+        self._scale(box, "dock_zoom_percent", "Amplitude de l'agrandissement", 100, 180, 5, "%")
+
+        box.pack_start(self._section("Barre d'état"), False, False, 0)
+        self._scale(box, "panel_opacity", "Opacité", 50, 100, 1, "%")
+        self._scale(box, "panel_radius", "Rayon des coins", 0, 30, 1, "px")
+        self._scale(box, "panel_height", "Hauteur", 40, 80, 2, "px")
+
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        bar.set_border_width(12)
+        reset = Gtk.Button(label="Tout réinitialiser")
+        reset.connect("clicked", self.on_reset)
+        bar.pack_start(reset, False, False, 0)
+        self.status = Gtk.Label(label="", xalign=0)
+        self.status.get_style_context().add_class("dim-label")
+        bar.pack_start(self.status, True, True, 0)
+        apply_btn = Gtk.Button(label="Appliquer")
+        apply_btn.get_style_context().add_class("suggested-action")
+        apply_btn.connect("clicked", self.on_apply)
+        bar.pack_end(apply_btn, False, False, 0)
+        outer.pack_start(bar, False, False, 0)
+
+    def _section(self, text):
+        label = Gtk.Label(xalign=0)
+        label.set_markup("<b>%s</b>" % GLib.markup_escape_text(text))
+        label.set_margin_top(14)
+        label.set_margin_bottom(2)
+        return label
+
+    def _switch(self, parent, key, title, hint):
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        texts = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        lab = Gtk.Label(label=title, xalign=0)
+        sub = Gtk.Label(label=hint, xalign=0)
+        sub.get_style_context().add_class("dim-label")
+        sub.set_line_wrap(True)
+        texts.pack_start(lab, False, False, 0)
+        texts.pack_start(sub, False, False, 0)
+        row.pack_start(texts, True, True, 0)
+        sw = Gtk.Switch(active=bool(self.v[key]), valign=Gtk.Align.CENTER)
+        row.pack_end(sw, False, False, 0)
+        self.rows[key] = sw
+        parent.pack_start(row, False, False, 4)
+
+    def _scale(self, parent, key, title, lo, hi, step, unit):
+        row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        lab = Gtk.Label(label=title, xalign=0)
+        val = Gtk.Label(xalign=1)
+        val.get_style_context().add_class("dim-label")
+        head.pack_start(lab, True, True, 0)
+        head.pack_end(val, False, False, 0)
+        row.pack_start(head, False, False, 0)
+
+        adj = Gtk.Adjustment(value=self.v[key], lower=lo, upper=hi,
+                             step_increment=step, page_increment=step)
+        sc = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=adj)
+        sc.set_draw_value(False)
+        sc.set_round_digits(0)
+
+        def show(_w=None):
+            val.set_text("%d %s" % (int(adj.get_value()), unit))
+        adj.connect("value-changed", show)
+        show()
+
+        row.pack_start(sc, False, False, 0)
+        self.rows[key] = adj
+        parent.pack_start(row, False, False, 4)
+
+    def collect(self):
+        out = {}
+        for key, widget in self.rows.items():
+            out[key] = (widget.get_active() if isinstance(widget, Gtk.Switch)
+                        else int(widget.get_value()))
+        return out
+
+    def on_apply(self, _btn):
+        self.v = self.collect()
+        os.makedirs(USR, exist_ok=True)
+        with open(PREFS, "w", encoding="utf-8") as handle:
+            json.dump(self.v, handle, indent=2)
+        write_picom(self.v)
+        write_tint2(self.v)
+        write_plank(self.v)
+        restart()
+        self.status.set_text("Appliqué.")
+        GLib.timeout_add_seconds(4, lambda: (self.status.set_text(""), False)[1])
+
+    def on_reset(self, _btn):
+        dialog = Gtk.MessageDialog(
+            transient_for=self, modal=True, message_type=Gtk.MessageType.QUESTION,
+            buttons=Gtk.ButtonsType.OK_CANCEL,
+            text="Revenir aux réglages d'origine ?")
+        dialog.format_secondary_text(
+            "Vos préférences personnelles seront supprimées et la session "
+            "reprendra les fichiers du système.")
+        if dialog.run() == Gtk.ResponseType.OK:
+            dialog.destroy()
+            for sub in ("picom", "tint2"):
+                shutil.rmtree(os.path.join(USR, sub), ignore_errors=True)
+            try:
+                os.remove(PREFS)
+            except OSError:
+                pass
+            self.v = dict(DEFAULTS)
+            for key, widget in self.rows.items():
+                if isinstance(widget, Gtk.Switch):
+                    widget.set_active(bool(DEFAULTS[key]))
+                else:
+                    widget.set_value(DEFAULTS[key])
+            restart()
+            self.status.set_text("Réinitialisé.")
+        else:
+            dialog.destroy()
+
+
+def main():
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    win = Window()
+    win.connect("destroy", Gtk.main_quit)
+    win.show_all()
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()
