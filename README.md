@@ -48,6 +48,7 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 |---|---|
 | [`docs/01-materiel-firmware.md`](docs/01-materiel-firmware.md) | Le matériel, le déverrouillage du firmware, les points de non-retour et la procédure de sauvegarde. **À lire avant toute manipulation de la machine.** |
 | [`docs/02-architecture.md`](docs/02-architecture.md) | Le socle logiciel, le budget mémoire, et le modèle de privilèges de Claude sur le système. |
+| [`docs/03-write-protect-jumper.md`](docs/03-write-protect-jumper.md) | **Blocage en cours.** Identifier le cavalier de write-protect sur MADOO par comparaison avec les cartes Dedede voisines, et le protocole de pontage réversible. |
 
 ### Outils
 
