@@ -42,8 +42,14 @@ have picom && picom --config "$(pick picom/picom.conf)" -b 2>/dev/null || true
 have dunst && dunst &
 
 # Dock : plank. Choisi pour le glisser-déposer des icônes, que tint2 ne sait
-# pas faire. Ses réglages vivent dans ~/.config/plank/ et il les enregistre
-# lui-même quand on réorganise le dock à la souris.
+# pas faire.
+#
+# Sa configuration passe par GSettings, pas par un fichier : le fichier
+# ~/.config/plank/dock1/settings est obsolète depuis la version 0.11 et
+# totalement ignoré. D'où ce script, appliqué avant le lancement — et une seule
+# fois, pour ne pas écraser l'ordre des icônes que l'utilisateur aura choisi au
+# glisser-déposer.
+have claude-os-plank-setup && claude-os-plank-setup
 have plank && plank &
 
 # Barre d'état, ancrée à droite

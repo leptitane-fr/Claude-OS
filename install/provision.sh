@@ -213,18 +213,14 @@ run "printf '#!/bin/sh\nexec /usr/local/bin/claude-os-session\n' > '$TARGET_HOME
 run "chmod +x '$TARGET_HOME/.xsession'"
 run "chown '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.xsession'"
 
-info "dock plank : réglages et icônes épinglées"
-# Ces fichiers appartiennent à l'utilisateur : plank les réécrit lui-même dès
-# qu'on réorganise le dock à la souris. On ne les écrase donc que s'ils
-# n'existent pas déjà, sous peine de perdre l'ordre choisi à chaque
-# relancement du provisionnement.
+info "dock plank : icônes épinglées"
+# Seuls les .dockitem se déposent ici. Les RÉGLAGES de plank (position, taille,
+# thème, contenu) passent par GSettings depuis la version 0.11 : le fichier
+# « settings » de ce répertoire est obsolète et ignoré. C'est claude-os-plank-setup,
+# lancé par la session, qui les applique — il a besoin de la session dbus de
+# l'utilisateur, impossible à atteindre depuis ce script lancé en root.
 run "mkdir -p '$TARGET_HOME/.config/plank/dock1/launchers'"
-if [ "$DRY" -eq 1 ] || [ ! -f "$TARGET_HOME/.config/plank/dock1/settings" ]; then
-	run "cp '$REPO_DIR/rootfs/usr/share/claude-os/plank/settings' '$TARGET_HOME/.config/plank/dock1/settings'"
-	run "cp '$REPO_DIR/rootfs/usr/share/claude-os/plank/launchers/'*.dockitem '$TARGET_HOME/.config/plank/dock1/launchers/'"
-else
-	info "réglages plank déjà présents — conservés (ordre des icônes préservé)"
-fi
+run "cp -n '$REPO_DIR/rootfs/usr/share/claude-os/plank/launchers/'*.dockitem '$TARGET_HOME/.config/plank/dock1/launchers/' 2>/dev/null || true"
 run "chown -R '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.config/plank'"
 
 info "bureau PCManFM : fond d'écran et apparence"
