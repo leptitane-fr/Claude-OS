@@ -255,6 +255,16 @@ info "      Mitigation à appliquer côté navigateur — voir docs/04."
 
 say "Retrait des fonctions inutiles"
 
+# La tâche « Utilitaires usuels du système » de l'installateur Debian tire un
+# agent de transport de courrier. Sur une machine orientée web, c'est un démon
+# résident qui n'enverra jamais rien : autant le retirer.
+for pkg in exim4-daemon-light exim4-base exim4-config; do
+	if dpkg -l "$pkg" 2>/dev/null | grep -q "^ii"; then
+		info "retrait de $pkg (agent de courrier inutile ici)"
+		run "DEBIAN_FRONTEND=noninteractive apt-get purge -y $pkg >/dev/null 2>&1 || true"
+	fi
+done
+
 for svc in ModemManager.service; do
 	if systemctl list-unit-files 2>/dev/null | grep -q "^$svc"; then
 		info "désactivation de $svc"
