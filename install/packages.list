@@ -36,16 +36,10 @@ papirus-icon-theme             # icônes du dock
 network-manager                # gestion Wi-Fi
 network-manager-gnome          # nm-applet, dans la zone de notification
 #
-# Firmware Wi-Fi et Bluetooth. SANS LE BON, PAS DE RÉSEAU À L'INSTALLATION.
-# Le module de la machine porte le SPS HP L44796-005, décrit « WLAN RT 11AC
-# 2X2 +BT5 » : « RT » est la notation HP pour Realtek, ce qui pointe vers un
-# RTL8822CE (pilote rtw88, présent en standard dans le noyau 6.12).
-# On embarque néanmoins les trois familles plausibles plutôt que de parier :
-# une erreur ici se paie par une installation sans réseau, donc sans recours.
-# Le relevé matériel tranchera, et provision.sh signalera lesquels purger.
-firmware-realtek               # candidat principal — RTL8822CE, et btrtl
-firmware-iwlwifi               # au cas où le module serait un Intel
-firmware-misc-nonfree          # divers, dont plusieurs contrôleurs Wi-Fi
+# Firmware. CONFIRMÉ SUR LA MACHINE : la carte est une Realtek RTL8822CE
+# (10ec:c822), pilote rtw_8822ce. Le firmware Intel a donc été retiré.
+firmware-realtek               # RTL8822CE (Wi-Fi) et btrtl (Bluetooth)
+firmware-misc-nonfree          # firmware GPU Intel i915 : gestion d'énergie de l'affichage
 
 #--- Bluetooth --------------------------------------------------------------
 bluez                          # pile Bluetooth
@@ -53,6 +47,12 @@ blueman                        # applet et fenêtre d'appairage
 libspa-0.2-bluetooth           # audio Bluetooth (A2DP) pour PipeWire
 
 #--- Audio ------------------------------------------------------------------
+#
+# SANS CE FIRMWARE, AUCUN SON. Les Chromebooks Jasper Lake confient l'audio à
+# un DSP (Sound Open Firmware) qui doit être chargé au démarrage : sans le
+# blob, le contrôleur ne s'initialise pas du tout. Son absence de cette liste
+# était une lacune — c'est précisément le risque n°1 identifié en conception.
+firmware-sof-signed            # firmware du DSP audio (Sound Open Firmware)
 pipewire                       # serveur audio
 pipewire-pulse                 # compatibilité PulseAudio (Chromium, Electron)
 wireplumber                    # gestionnaire de sessions audio
