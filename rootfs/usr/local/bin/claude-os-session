@@ -23,9 +23,13 @@ xsetroot -cursor_name left_ptr 2>/dev/null || true
 
 # Bureau : fond d'écran ET icônes déposées par l'utilisateur. C'est PCManFM qui
 # dessine le bureau ; sans lui, Openbox n'affiche aucune icône.
+#
+# Le fond d'écran est fixé par le fichier de configuration de PCManFM, jamais
+# par « --set-wallpaper » : cette option exige que le gestionnaire de bureau
+# tourne DÉJÀ, sans quoi elle ouvre une boîte modale « Le gestionnaire de
+# bureau est inactif » qui bloque le démarrage de la session.
 WP="$(pick wallpaper/default.png)"
 if have pcmanfm; then
-	pcmanfm --set-wallpaper="$WP" --wallpaper-mode=crop 2>/dev/null || true
 	pcmanfm --desktop &
 elif have xwallpaper; then
 	xwallpaper --zoom "$WP" 2>/dev/null || true

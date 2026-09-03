@@ -227,6 +227,24 @@ else
 fi
 run "chown -R '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.config/plank'"
 
+info "bureau PCManFM : fond d'écran et apparence"
+# Le fond d'écran passe par la configuration, pas par « pcmanfm --set-wallpaper »,
+# qui exige un gestionnaire de bureau déjà lancé et ouvre sinon une boîte modale
+# bloquant l'ouverture de session.
+run "mkdir -p '$TARGET_HOME/.config/pcmanfm/default'"
+run "cat > '$TARGET_HOME/.config/pcmanfm/default/desktop-items-0.conf' <<'EOF'
+[*]
+wallpaper_mode=crop
+wallpaper_common=1
+wallpaper=/usr/share/claude-os/wallpaper/default.png
+desktop_bg=#0a0c12
+desktop_fg=#e8eaed
+desktop_shadow=#000000
+desktop_font=Inter 10
+show_wm_menu=0
+sort=mtime;ascending;
+EOF"
+
 info "thème GTK sombre"
 run "mkdir -p '$TARGET_HOME/.config/gtk-3.0'"
 run "cat > '$TARGET_HOME/.config/gtk-3.0/settings.ini' <<'EOF'
