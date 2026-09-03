@@ -14,17 +14,20 @@
 #   sudo bash install/provision.sh              # installe
 #   sudo bash install/provision.sh --dry-run    # montre sans rien faire
 #   sudo bash install/provision.sh --no-claude  # sans Claude Desktop
+#   bash install/provision.sh --user stef       # en root direct, sans sudo
 #
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DRY=0
 WITH_CLAUDE=1
+USER_OPT=""
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--dry-run)   DRY=1 ;;
 		--no-claude) WITH_CLAUDE=0 ;;
+		--user)      USER_OPT="${2:-}"; shift ;;
 		-h|--help)   sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "Option inconnue : $1" >&2; exit 2 ;;
 	esac
@@ -60,11 +63,15 @@ fi
 [ "$(dpkg --print-architecture)" = "amd64" ] || \
 	die "architecture $(dpkg --print-architecture) : Claude Desktop n'existe qu'en amd64/arm64."
 
-# L'utilisateur cible est celui qui a appelé sudo, pas root : c'est sa session
-# graphique que l'on configure.
-TARGET_USER="${SUDO_USER:-}"
-[ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ] || \
-	die "impossible d'identifier l'utilisateur cible. Lancer via « sudo » depuis un compte normal."
+# L'utilisateur cible est celui dont on configure la session graphique — pas
+# root. Normalement celui qui a appelé sudo ; « --user » permet de s'en passer
+# quand on travaille directement en root, ce qui arrive sur une Debian fraîche
+# où sudo n'est pas installé (cas d'un mot de passe root défini à
+# l'installation).
+TARGET_USER="${USER_OPT:-${SUDO_USER:-}}"
+[ -n "$TARGET_USER" ] && [ "$TARGET_USER" != "root" ] || die "utilisateur cible non identifié.
+      Depuis un compte normal :  sudo bash install/provision.sh
+      Depuis root, sans sudo  :  bash install/provision.sh --user <compte>"
 # « set -e » combiné à « pipefail » avorterait le script sans message si getent
 # échouait dans la substitution : d'où le repli explicite, qui laisse le
 # diagnostic ci-dessous s'afficher.
