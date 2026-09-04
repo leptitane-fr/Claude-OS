@@ -176,9 +176,21 @@ sed -i 's|command="xfce4-terminal"|command="foot"|' "$HOME/.config/labwc/rc.xml"
 PINNED="chromium"
 command -v claude-desktop >/dev/null 2>&1 && PINNED="$PINNED;claude-desktop"
 command -v mousepad       >/dev/null 2>&1 && PINNED="$PINNED;mousepad"
-PINNED="$PINNED;claude-os-reglages"
+# Les réglages ne sont plus épinglés : ils s'ouvrent depuis le panneau de la
+# barre d'état. Le bouton du lanceur, à gauche du dock, donne accès au reste.
 
-cat > "$HOME/.config/claude-os/shell.conf" <<FIN
+# Écrit UNE SEULE FOIS, et jamais réécrit ensuite.
+#
+# Ce fichier appartient désormais à l'utilisateur : le dock y enregistre
+# l'ordre des icônes au glisser-déposer, le lanceur et le clic droit y
+# ajoutent et retirent des applications, le panneau de réglages y écrit le
+# thème. Le réécrire à chaque essai effacerait tout cela sans prévenir.
+CONF="$HOME/.config/claude-os/shell.conf"
+if [ -f "$CONF" ]; then
+	info "configuration existante conservée : $CONF"
+	info "  (la supprimer et relancer pour repartir des valeurs d'origine)"
+else
+	cat > "$CONF" <<FIN
 [dock]
 pinned=$PINNED
 reserve_space=false
@@ -192,7 +204,8 @@ theme=claude-sombre
 image=/usr/share/claude-os/wallpaper/default.png
 fill=true
 FIN
-info "dock épinglé sur : $PINNED"
+	info "dock épinglé sur : $PINNED"
+fi
 
 # Claude Desktop : Electron tente X11 par défaut et échoue sous Wayland sur
 # « Missing X server ». La variable ELECTRON_OZONE_PLATFORM_HINT ne suffit pas,
@@ -250,11 +263,24 @@ cat <<FIN
   Ce qui doit fonctionner :
 
      touche Loupe (Super)   masque et affiche dock + barre d'état
+     bouton rond à gauche   ouvre le lanceur d'applications
+     Super + A              idem, au clavier
      Super + Entrée         terminal
      Super + B              Chromium
-     clic sur la barre      Wi-Fi, Bluetooth, batterie
+     clic sur la barre      Wi-Fi, Bluetooth, batterie, Réglages
      glisser une icône      réorganise le dock, ordre enregistré
      Super + Maj + Q        quitter la session d'essai
+
+  Dans le lanceur :
+
+     Rechercher             ignore la casse ET les accents
+     Trier par / Afficher   nom, catégorie · icônes, liste, détails
+     clic droit             ouvrir, épingler au dock, en retirer
+     glisser vers le dock   épingle à l'endroit du dépôt
+     Échap                  ferme
+
+  Sur une icône du dock, le clic droit ouvre le même menu : nouvelle
+  fenêtre, épingler ou retirer, fermer les fenêtres ouvertes.
 
   Si rien ne s'affiche :   tail -40 ~/essai-shell.log
   Pour tout retirer   :   bash tools/essayer-shell.sh --desinstaller

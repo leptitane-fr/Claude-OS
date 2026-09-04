@@ -44,3 +44,32 @@ Le correctif remplace la règle sur le séparateur par une liste fermée de
 suffixes (`-browser`, `-desktop`, `-esr`, `-bin`, `-stable`, `-nightly`) : le
 reste de l'identifiant doit être *exactement* l'un d'eux. Le cas Chromium est
 conservé, `-os-reglages` est écarté.
+
+### `0002-lanceur-applications.patch`
+
+Ajoute `claude-os-lanceur` : une fenêtre centrale qui liste les applications
+installées, avec recherche, tri et trois présentations (icônes, liste,
+détails). Nouveau fichier `shell/src/launcher.c`, plus l'entrée `meson.build`,
+les règles CSS et un raccourci `Super+A` dans `rc.xml`.
+
+Le dock gagne trois choses au passage :
+
+- un **bouton rond à gauche** qui ouvre le lanceur ;
+- un **menu au clic droit** sur chaque icône — nouvelle fenêtre, épingler ou
+  retirer, fermer les fenêtres ouvertes ;
+- l'acceptation des **dépôts venus du lanceur** : glisser une application sur
+  une icône l'épingle à cet endroit, sur le fond du dock l'ajoute à la fin.
+
+`shell_toplevel_close()` est ajouté à `toplevels.c` pour l'entrée « Fermer ».
+
+Le lanceur n'est démarré par personne au lancement de la session : le bouton
+du dock le lance à la première utilisation, et comme il n'admet qu'une
+instance, les appels suivants se contentent de le faire basculer.
+
+### `0003-reglages-vers-barre-etat.patch`
+
+Sort « Réglages » du dock et le place dans le panneau des réglages rapides,
+sous la carte batterie — au même endroit que le Wi-Fi et la batterie, comme
+sur ChromeOS. `claude-os-reglages` disparaît des applications épinglées par
+défaut ; le bouton du lanceur garantit qu'aucune application ne devient
+inatteignable.
