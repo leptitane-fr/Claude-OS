@@ -1,0 +1,61 @@
+diff --git a/shell/src/toplevels.c b/shell/src/toplevels.c
+index 3b3f27a..42d6bd6 100644
+--- a/shell/src/toplevels.c
++++ b/shell/src/toplevels.c
+@@ -38,6 +38,28 @@ normalise (const char *id)
+     return g_ascii_strdown (base, -1);
+ }
+ 
++/* Suffixes admis pour un rapprochement par prefixe.
++ *
++ * Une liste fermee, et non une regle generale sur le separateur. Celle-ci
++ * concluait que « claude » et « claude-os-reglages » designent la meme
++ * application : le premier prefixe le second, et un tiret suit. Consequence
++ * observee sur la machine -- des que Claude Desktop tournait, le dock
++ * marquait les Reglages comme lances, en affichait l'infobulle, et le clic
++ * n'ouvrait plus les reglages mais ramenait la fenetre de Claude.
++ *
++ * Enumerer les suffixes reellement rencontres conserve le cas qui avait
++ * motive la regle -- chromium / chromium-browser -- sans jamais confondre
++ * deux applications distinctes dont l'une prefixe l'autre. */
++static const char *const SUFFIXES_VARIANTES[] = {
++    "-browser",    /* chromium / chromium-browser */
++    "-desktop",    /* claude   / claude-desktop   */
++    "-esr",        /* firefox  / firefox-esr      */
++    "-bin",
++    "-stable",
++    "-nightly",
++    NULL
++};
++
+ gboolean
+ shell_app_id_matches (const char *desktop_id, const char *app_id)
+ {
+@@ -52,16 +74,21 @@ shell_app_id_matches (const char *desktop_id, const char *app_id)
+     if (g_strcmp0 (a, b) == 0)
+         return TRUE;
+ 
+-    /* Chromium s'annonce selon les versions « chromium » ou
+-     * « chromium-browser ». On accepte donc qu'un identifiant soit le prefixe
+-     * de l'autre, mais uniquement si la suite commence par un separateur :
+-     * sans cette condition, « file » et « filezilla » se confondraient. */
+     const char *court = strlen (a) < strlen (b) ? a : b;
+     const char *long_ = (court == a) ? b : a;
+     size_t n = strlen (court);
+ 
+-    return strncmp (court, long_, n) == 0
+-        && (long_[n] == '-' || long_[n] == '_' || long_[n] == '.');
++    if (strncmp (court, long_, n) != 0)
++        return FALSE;
++
++    /* Le reste doit etre EXACTEMENT un suffixe connu, pas seulement commencer
++     * par un separateur. C'est cette egalite stricte qui ecarte
++     * « -os-reglages ». */
++    for (int i = 0; SUFFIXES_VARIANTES[i] != NULL; i++)
++        if (g_strcmp0 (long_ + n, SUFFIXES_VARIANTES[i]) == 0)
++            return TRUE;
++
++    return FALSE;
+ }
+ 
+ /* -------------------------------------------------------------------------

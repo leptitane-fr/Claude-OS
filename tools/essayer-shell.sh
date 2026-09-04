@@ -85,13 +85,44 @@ git -C "$DEPOT" fetch origin "$BRANCHE" --quiet || die "impossible de récupére
 if [ -d "$ARBRE" ]; then
 	info "arbre de travail déjà présent, mise à jour"
 	git -C "$ARBRE" fetch origin "$BRANCHE" --quiet 2>/dev/null || true
-	git -C "$ARBRE" checkout --quiet "origin/$BRANCHE" 2>/dev/null || true
+	# --force puis reset : l'arbre porte les correctifs de la passe précédente,
+	# on repart de la branche nue pour les réappliquer proprement.
+	git -C "$ARBRE" checkout --quiet --force "origin/$BRANCHE" 2>/dev/null || true
+	git -C "$ARBRE" reset --hard --quiet "origin/$BRANCHE" 2>/dev/null || true
 else
 	git -C "$DEPOT" worktree add --detach "$ARBRE" "origin/$BRANCHE" --quiet \
 		|| die "création de l'arbre de travail impossible."
 fi
 [ -f "$ARBRE/shell/meson.build" ] || die "sources du shell introuvables dans $ARBRE/shell."
 info "sources dans $ARBRE"
+
+# ---------------------------------------------------------------- correctifs
+
+# Le shell vit dans sa propre branche, que ce dépôt n'a pas à réécrire. Les
+# corrections que nous y apportons sont donc portées comme des correctifs,
+# appliqués ici, juste avant la compilation.
+#
+# Un correctif qui ne s'applique plus arrête l'installation : mieux vaut un
+# échec net qu'un shell compilé en silence sans le correctif — c'est
+# exactement ce que l'on croirait avoir corrigé.
+CORRECTIFS="$DEPOT/patches"
+if [ -d "$CORRECTIFS" ]; then
+	for c in "$CORRECTIFS"/*.patch; do
+		[ -e "$c" ] || continue
+		nom="$(basename "$c")"
+		if git -C "$ARBRE" apply --check "$c" 2>/dev/null; then
+			git -C "$ARBRE" apply "$c" || die "application du correctif $nom impossible."
+			info "correctif appliqué : $nom"
+		elif git -C "$ARBRE" apply --reverse --check "$c" 2>/dev/null; then
+			# Déjà dans la branche : la correction a été reprise en amont.
+			info "correctif déjà en amont, ignoré : $nom"
+		else
+			die "le correctif $nom ne s'applique plus sur $BRANCHE.
+      Le code visé a changé. Vérifier patches/$nom avant de relancer :
+      cd $ARBRE && git apply --check -v $c"
+		fi
+	done
+fi
 
 # ------------------------------------------------------------- compilation
 
