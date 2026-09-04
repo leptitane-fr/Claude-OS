@@ -258,7 +258,12 @@ fi
 # Ses fichiers ne servent plus à rien et ses paquets pèsent une centaine de
 # mégaoctets sur un eMMC déjà petit.
 
-for f in session launcher settings toggle-shelf plank-setup; do
+# « session » n'est PAS dans cette liste : le nom est réutilisé par le
+# lanceur de session Wayland, déployé quelques lignes plus bas. Le supprimer
+# ici fonctionnerait par chance — le rootfs est copié après — mais compter sur
+# l'ordre des étapes pour ne pas effacer un fichier qu'on vient d'écrire est
+# le genre de fragilité qui se paie au premier remaniement.
+for f in launcher settings toggle-shelf plank-setup; do
 	run "rm -f '/usr/local/bin/claude-os-$f'"
 done
 run "rm -rf /usr/share/claude-os/openbox /usr/share/claude-os/picom"
@@ -314,7 +319,7 @@ say "Déploiement de l'environnement"
 
 info "copie de rootfs/ vers /"
 run "cp -a '$REPO_DIR/rootfs/.' /"
-run "chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer"
+run "chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer /usr/local/bin/claude-os-session"
 run "chmod +x /etc/xdg/labwc/autostart"
 
 # La session est WAYLAND. LightDM lit /usr/share/wayland-sessions ; l'ancienne

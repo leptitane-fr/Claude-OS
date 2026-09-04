@@ -12,6 +12,19 @@
 # fonctionnel sans configuration, et ce qui évite de payer un serveur X
 # entier en mémoire sur une machine de 4 Go.
 labwc                          # compositeur wlroots (~2 Mo)
+#
+# LE BUS DE SESSION. Sans lui, RIEN NE S'AFFICHE.
+#
+# Les six composants du shell sont des GtkApplication : sans bus de session,
+# g_application_register échoue et le processus quitte aussitôt, sans fenêtre
+# et sans message à l'écran. Le symptôme est un écran noir avec le curseur —
+# constaté sur la machine au premier démarrage de la session définitive.
+#
+# Ce paquet n'est qu'une SUGGESTION de « dbus », et provision.sh désactive les
+# suggestions : il doit donc être nommé ici. L'essai précédent ne l'avait pas
+# révélé parce qu'il lançait « dbus-run-session labwc » à la main, ce qui
+# fabriquait le bus au passage.
+dbus-user-session
 libgtk4-layer-shell0           # ancre le dock et la barre hors du flux des fenêtres
 libglib2.0-bin                 # gapplication : la bascule dock/barre l'appelle
 lightdm                        # gestionnaire de session

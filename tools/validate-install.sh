@@ -193,6 +193,15 @@ for p in labwc claude-os-fond claude-os-dock claude-os-status; do
 	pgrep -x "$p" >/dev/null 2>&1 && ok "$p en cours" || bad "$p absent"
 done
 
+# LE BUS DE SESSION. Sans lui, les composants du shell quittent au démarrage
+# sans un mot : écran noir, curseur, rien d'autre. C'est le premier point à
+# regarder devant un bureau vide.
+if [ -S "/run/user/$(id -u)/bus" ] || [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+	ok "bus de session présent"
+else
+	bad "AUCUN bus de session — les composants du shell ne peuvent pas démarrer"
+fi
+
 # La session doit être WAYLAND. Une session X11 signifierait que LightDM a
 # ouvert autre chose que « Claude OS » — l'ancienne interface, ou un repli.
 if [ -n "${WAYLAND_DISPLAY:-}" ]; then
@@ -211,6 +220,17 @@ for b in claude-os-fond claude-os-dock claude-os-status \
 done
 [ -z "$MANQUE" ] && ok "les six binaires du shell sont installés" \
 	|| bad "binaires manquants :$MANQUE"
+
+# Le journal du shell, écrit par l'autostart de labwc. C'est là que se
+# trouvent les messages que la session avale.
+JOURNAL="${XDG_STATE_HOME:-$HOME/.local/state}/claude-os/shell.log"
+if [ -f "$JOURNAL" ]; then
+	ERREURS="$(grep -iE 'error|fail|cannot|impossible|refus' "$JOURNAL" | head -8)"
+	[ -z "$ERREURS" ] && ok "journal du shell : aucune erreur" \
+		|| { warn "le journal du shell signale des erreurs"; raw "$ERREURS"; }
+else
+	note "pas de journal du shell ($JOURNAL)"
+fi
 
 [ -f "$HOME/.config/claude-os/shell.conf" ] \
 	&& ok "configuration du shell présente" \

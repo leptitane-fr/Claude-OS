@@ -1,7 +1,7 @@
 [Desktop Entry]
 Name=Claude OS
 Comment=Dock centré, barre d'état, lanceur — sur labwc
-Exec=labwc
-TryExec=labwc
+Exec=/usr/local/bin/claude-os-session
+TryExec=/usr/local/bin/claude-os-session
 Type=Application
 DesktopNames=labwc

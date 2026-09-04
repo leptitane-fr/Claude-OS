@@ -1,15 +1,35 @@
 #!/bin/sh
-# Composants du shell Claude-OS, lancés par labwc au démarrage de la session.
+# Composants du shell Claude OS, lancés par labwc à l'ouverture de session.
 #
-# Deux processus séparés et non un seul : un défaut dans la barre d'état ne
-# doit pas emporter le dock, et chacun peut être relancé isolément sans
-# fermer la session.
+# Trois processus séparés et non un seul : un défaut dans la barre d'état ne
+# doit pas emporter le dock, et chacun se relance isolément sans fermer la
+# session.
+#
+# Le fond d'écran en premier : il occupe la couche la plus basse, et le voir
+# apparaître après le dock donnerait un démarrage en deux temps.
+#
+# LA TRACE N'EST PAS UN LUXE
+#
+# Ces programmes n'ont pas de terminal. Quand l'un d'eux refuse de démarrer,
+# son message se perd et il ne reste qu'un écran noir — c'est exactement ce
+# qui est arrivé au premier démarrage de la session définitive, et il a fallu
+# relancer le dock à la main depuis SSH pour lire la cause. La sortie est
+# donc conservée.
 
-# Noms nus plutôt que chemins absolus : le même fichier sert pour l'image
-# construite (binaires dans /usr/bin) et pour un essai compilé à la main sur
-# une machine déjà installée (/usr/local/bin, qui vient en premier dans PATH).
-# Le fond d'ecran en premier : il occupe la couche la plus basse, et le
-# voir apparaitre apres le dock donnerait un demarrage en deux temps.
-claude-os-fond   &
-claude-os-dock   &
-claude-os-status &
+JOURNAL="${XDG_STATE_HOME:-$HOME/.local/state}/claude-os"
+mkdir -p "$JOURNAL"
+
+# Le journal est REMIS À ZÉRO à chaque ouverture de session : on veut savoir
+# ce qui s'est passé cette fois-ci, pas accumuler des mois de démarrages.
+: > "$JOURNAL/shell.log"
+
+lancer() {
+	printf '=== %s : %s ===\n' "$(date '+%H:%M:%S')" "$1" >> "$JOURNAL/shell.log"
+	"$@" >> "$JOURNAL/shell.log" 2>&1 &
+}
+
+# Noms nus plutôt que chemins absolus : le PATH décide, ce qui permet de
+# tester une version compilée à la main sans toucher à ce fichier.
+lancer claude-os-fond
+lancer claude-os-dock
+lancer claude-os-status

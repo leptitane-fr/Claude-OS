@@ -1,0 +1,32 @@
+#!/bin/sh
+# Claude OS — lancement de la session graphique.
+#
+# POURQUOI CE SCRIPT PLUTÔT QUE « Exec=labwc »
+#
+# Les composants du shell sont des GtkApplication. Sans bus de session,
+# g_application_register échoue et chacun quitte AUSSITÔT — sans fenêtre,
+# sans message à l'écran. On obtient un écran noir avec le curseur, et rien
+# n'indique pourquoi.
+#
+# Le paquet dbus-user-session fournit ce bus, et il est désormais demandé
+# explicitement. Mais dépendre d'un paquet pour que la session s'affiche du
+# tout est une dépendance trop fragile pour ce qu'elle porte : si le bus
+# manque, on le fabrique ici.
+set -u
+
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+export XDG_RUNTIME_DIR
+
+if [ -S "$XDG_RUNTIME_DIR/bus" ] || [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+	exec labwc "$@"
+fi
+
+# Pas de bus : on en ouvre un pour la durée de la session.
+if command -v dbus-run-session >/dev/null 2>&1; then
+	exec dbus-run-session -- labwc "$@"
+fi
+
+# Ni bus ni moyen d'en créer un. On démarre quand même : le compositeur
+# fonctionnera, et la trace dira pourquoi le bureau est vide.
+echo "claude-os-session : aucun bus de session, et dbus-run-session est absent." >&2
+exec labwc "$@"
