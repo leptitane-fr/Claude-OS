@@ -1,0 +1,29 @@
+#!/bin/sh
+#-------------------------------------------------------------------------------
+# Claude OS — Lancement de Claude Desktop
+#
+# POURQUOI CE LANCEUR
+# Claude Desktop est une application Electron qui tente X11 par défaut. Sous le
+# shell Wayland, elle échoue sur « Missing X server or $DISPLAY ».
+#
+# La variable ELECTRON_OZONE_PLATFORM_HINT ne suffit pas : mesuré sur la
+# machine, l'application l'ignore et cherche quand même un serveur X. Seul le
+# drapeau en ligne de commande fonctionne.
+#
+# Le drapeau n'est PAS codé en dur : il n'est ajouté que si une session Wayland
+# est effectivement là. Le même lanceur reste donc valable sous la session X11,
+# où le forcer empêcherait au contraire l'application de démarrer.
+#-------------------------------------------------------------------------------
+set -u
+
+BIN=/usr/bin/claude-desktop
+[ -x "$BIN" ] || BIN="$(command -v claude-desktop 2>/dev/null)"
+[ -n "${BIN:-}" ] && [ -x "$BIN" ] || {
+	echo "claude-desktop est introuvable." >&2
+	exit 127
+}
+
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+	exec "$BIN" --ozone-platform=wayland "$@"
+fi
+exec "$BIN" "$@"

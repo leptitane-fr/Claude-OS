@@ -163,6 +163,22 @@ fill=true
 FIN
 info "dock épinglé sur : $PINNED"
 
+# Claude Desktop : Electron tente X11 par défaut et échoue sous Wayland sur
+# « Missing X server ». La variable ELECTRON_OZONE_PLATFORM_HINT ne suffit pas,
+# mesuré sur la machine : seul le drapeau en ligne de commande fonctionne. On
+# passe donc par un lanceur qui ne l'ajoute que si Wayland est là, et par une
+# entrée de menu personnelle qui prime sur celle du paquet sans la remplacer.
+if command -v claude-desktop >/dev/null 2>&1; then
+	sudo install -m755 "$DEPOT/rootfs/usr/local/bin/claude-os-claude" /usr/local/bin/
+	mkdir -p "$HOME/.local/share/applications"
+	cp "$DEPOT/rootfs/usr/share/claude-os/applications/claude-desktop.desktop" \
+	   "$HOME/.local/share/applications/claude-desktop.desktop"
+	update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
+	info "Claude Desktop : lanceur Wayland en place"
+else
+	warn "claude-desktop absent — lanceur non installé"
+fi
+
 # Chromium tente X11 par défaut et refuserait de démarrer sans serveur X.
 # Fichier séparé : une seule chose à supprimer pour revenir en arrière.
 echo 'CHROMIUM_FLAGS="$CHROMIUM_FLAGS --ozone-platform-hint=auto"' \

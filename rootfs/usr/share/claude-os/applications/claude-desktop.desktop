@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Claude
+Comment=Claude Desktop
+Exec=/usr/local/bin/claude-os-claude %U
+Icon=claude-desktop
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=true
+StartupWMClass=Claude
