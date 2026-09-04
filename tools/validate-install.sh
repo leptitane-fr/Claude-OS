@@ -186,15 +186,44 @@ fi
 # ------------------------------------------------------------------ session
 sec "7. Session Claude OS"
 
-for p in openbox plank tint2 picom dunst pcmanfm; do
-	pgrep -x "$p" >/dev/null 2>&1 && ok "$p en cours" || warn "$p absent"
+# Le compositeur et les trois composants résidents du shell. Les autres —
+# lanceur, gestionnaire de fichiers, réglages — se lancent à la demande : leur
+# absence ici est normale.
+for p in labwc claude-os-fond claude-os-dock claude-os-status; do
+	pgrep -x "$p" >/dev/null 2>&1 && ok "$p en cours" || bad "$p absent"
 done
-# « pgrep -f » attraperait n'importe quelle ligne de commande contenant le nom,
-# y compris ce script lui-même : un faux positif dans un outil de validation
-# est pire qu'un faux négatif. On cible donc l'exécutable.
-applet_running() { pgrep -x "$1" >/dev/null 2>&1 || pgrep -f "/usr/bin/$1" >/dev/null 2>&1; }
-applet_running nm-applet      && ok "nm-applet dans la zone de notification" || warn "nm-applet absent"
-applet_running blueman-applet && ok "blueman-applet présent"                 || warn "blueman-applet absent"
+
+# La session doit être WAYLAND. Une session X11 signifierait que LightDM a
+# ouvert autre chose que « Claude OS » — l'ancienne interface, ou un repli.
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+	ok "session Wayland ($WAYLAND_DISPLAY)"
+else
+	bad "pas de session Wayland — WAYLAND_DISPLAY est vide"
+fi
+[ -z "${DISPLAY:-}" ] && note "aucun serveur X : Xwayland n'a pas été réveillé" \
+	|| note "Xwayland actif ($DISPLAY) — un client X11 tourne quelque part"
+
+# Les six binaires du shell doivent être installés, pas seulement compilés.
+MANQUE=""
+for b in claude-os-fond claude-os-dock claude-os-status \
+         claude-os-lanceur claude-os-fichiers claude-os-reglages; do
+	command -v "$b" >/dev/null 2>&1 || MANQUE="$MANQUE $b"
+done
+[ -z "$MANQUE" ] && ok "les six binaires du shell sont installés" \
+	|| bad "binaires manquants :$MANQUE"
+
+[ -f "$HOME/.config/claude-os/shell.conf" ] \
+	&& ok "configuration du shell présente" \
+	|| warn "~/.config/claude-os/shell.conf absent : les défauts s'appliquent"
+
+# L'ancienne interface ne doit plus traîner nulle part.
+RESTES=""
+for p in openbox plank tint2 picom rofi pcmanfm xcape; do
+	dpkg -l "$p" 2>/dev/null | grep -q "^ii" && RESTES="$RESTES $p"
+done
+[ -f /usr/share/xsessions/claude-os.desktop ] && RESTES="$RESTES session-X11"
+[ -z "$RESTES" ] && ok "aucun reste de l'ancienne interface X11" \
+	|| warn "restes à purger :$RESTES"
 
 USED="$(free -m | awk '/^Mem:/{print $3}')"
 if [ -n "$USED" ]; then

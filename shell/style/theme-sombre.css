@@ -1,0 +1,37 @@
+/* =========================================================================
+   Claude-OS — thème « Sombre »
+
+   Le pendant du thème clair : gris neutres et non bleutés, moins fatigants
+   à l'usage et plus proches du rendu ChromeOS sombre.
+   ========================================================================= */
+
+@define-color accent            #4285f4;
+@define-color accent-hover      #5a95f5;
+/* Texte posé sur l'accent : blanc dans les quatre thèmes, mais nommé pour
+   qu'un thème futur puisse en décider autrement. */
+@define-color on-accent         #ffffff;
+
+@define-color accent-press      #3574d4;
+
+@define-color surface           #202124;
+@define-color surface-alt       #292a2d;
+@define-color surface-sunk      #35363a;
+
+@define-color text              #e8eaed;
+@define-color text-dim          #9aa0a6;
+
+@define-color border            alpha(#ffffff, 0.10);
+@define-color shadow            alpha(#000000, 0.50);
+@define-color shadow-close      alpha(#000000, 0.30);
+
+@define-color ok                #34a853;
+@define-color warn              #fbbc05;
+@define-color danger            #ea4335;
+
+.fond-degrade {
+  background-color: #161a22;
+  background-image:
+    radial-gradient(ellipse 90% 70% at 22% 8%,  alpha(@accent, 0.28), transparent 62%),
+    radial-gradient(ellipse 80% 60% at 85% 92%, alpha(#1abc9c, 0.18), transparent 58%),
+    linear-gradient(165deg, #1c2129 0%, #141821 55%, #0f1218 100%);
+}

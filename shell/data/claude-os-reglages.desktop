@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Réglages
+Name[en]=Settings
+Comment=Apparence, fond d'écran et dock de Claude-OS
+Exec=claude-os-reglages
+Icon=preferences-system
+Terminal=false
+Categories=Settings;DesktopSettings;
+StartupNotify=true

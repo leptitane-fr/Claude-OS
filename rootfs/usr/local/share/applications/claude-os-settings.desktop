@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Réglages d'affichage
-Comment=Ajuster ou désactiver les effets visuels
-Exec=claude-os-settings
-Icon=preferences-desktop-display
-Terminal=false
-Categories=Settings;
-StartupWMClass=claude-os-settings

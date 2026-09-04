@@ -12,10 +12,15 @@
 #
 # Ce script écoute le clavier et affiche le nom de chaque touche pressée, une
 # seule fois, dans l'ordre. Il produit ensuite les lignes de configuration
-# Openbox correspondantes.
+# labwc correspondantes.
+#
+# SOUS WAYLAND, ET NON PLUS SOUS X11
+# La session ne comporte plus de serveur X : « xev » n'a rien à écouter. Son
+# équivalent Wayland est « wev », qui reçoit les événements du compositeur par
+# le protocole standard.
 #
 # USAGE
-#   bash probe-keys.sh
+#   bash probe-keys.sh [fichier-de-sortie]
 #
 # Une petite fenêtre s'ouvre : elle doit garder le focus pendant la saisie.
 # Presser les touches de la rangée du haut, de gauche à droite, puis la touche
@@ -23,12 +28,12 @@
 
 set -u
 
-command -v xev >/dev/null 2>&1 || {
-	echo "xev est absent. Installer le paquet « x11-utils »." >&2
+command -v wev >/dev/null 2>&1 || {
+	echo "wev est absent. L'installer :  sudo apt install wev" >&2
 	exit 1
 }
-[ -n "${DISPLAY:-}" ] || {
-	echo "Aucune session graphique détectée (DISPLAY vide)." >&2
+[ -n "${WAYLAND_DISPLAY:-}" ] || {
+	echo "Aucune session Wayland détectée (WAYLAND_DISPLAY est vide)." >&2
 	echo "Ce relevé doit se faire depuis la session Claude OS, pas depuis un TTY." >&2
 	exit 1
 }
@@ -40,7 +45,7 @@ cat <<'INTRO'
 
   Relevé des touches — Claude OS
   ─────────────────────────────────────────────────────────────────
-  Une fenêtre « Event Tester » va s'ouvrir. Elle doit RESTER AU PREMIER
+  Une petite fenêtre « wev » va s'ouvrir. Elle doit RESTER AU PREMIER
   PLAN pendant toute la saisie, sinon les touches ne sont pas captées.
 
   Presser, une par une :
@@ -49,26 +54,44 @@ cat <<'INTRO'
 
   Puis revenir ici et faire Ctrl+C.
 
+  Attention : la touche Loupe est déjà câblée sur la bascule du dock. Si
+  la pression la déclenche au lieu d'atteindre wev, c'est déjà la réponse
+  — et il faudra la relever depuis un autre compositeur.
+
 INTRO
 printf '  Démarrage dans 3 secondes'
 for _ in 1 2 3; do printf '.'; sleep 1; done
 echo; echo
 
-# xev n'émet le nom du symbole qu'à l'appui. On filtre les relâchements pour
-# ne pas afficher chaque touche deux fois, et on dédoublonne au fil de l'eau.
+# wev écrit une ligne par événement, du type :
+#   [14:  wl_keyboard] key: serial: 42; time: 1234; key: 59; state: 1 (pressed)
+#   sym: XF86MonBrightnessUp (269025027), utf8: ''
+#
+# On ne garde que les appuis — sans quoi chaque touche apparaîtrait deux fois —
+# et on dédoublonne au fil de l'eau. Le nom du symbole est ce qui se met dans
+# rc.xml ; le code du noyau est noté à côté, il sert quand aucun symbole n'est
+# associé à la touche.
 seen=""
-xev -event keyboard 2>/dev/null \
-  | grep --line-buffered -B2 'KeyPress' -A3 2>/dev/null \
-  | grep --line-buffered -o 'keysym 0x[0-9a-f]*, [A-Za-z0-9_]*' \
-  | sed -u 's/keysym 0x[0-9a-f]*, //' \
-  | while IFS= read -r sym; do
+wev -f wl_keyboard 2>/dev/null \
+  | grep --line-buffered -E 'state: 1 \(pressed\)|^ *sym:' \
+  | while IFS= read -r ligne; do
+        case "$ligne" in
+            *"state: 1 (pressed)"*)
+                code="$(printf '%s' "$ligne" | sed -n 's/.*key: \([0-9]*\);.*/\1/p')"
+                continue ;;
+        esac
+
+        sym="$(printf '%s' "$ligne" | sed -n 's/^ *sym: \([A-Za-z0-9_+]*\).*/\1/p')"
+        [ -n "$sym" ] || continue
         case " $seen " in *" $sym "*) continue ;; esac
+
         seen="$seen $sym"
         n=$(( $(wc -l < "$OUT") + 1 ))
-        printf '  %2d.  %s\n' "$n" "$sym"
-        printf '%s\n' "$sym" >> "$OUT"
+        printf '  %2d.  %-28s (code noyau %s)\n' "$n" "$sym" "${code:-?}"
+        printf '%s\tcode=%s\n' "$sym" "${code:-?}" >> "$OUT"
     done
 
 echo
 echo "  Relevé écrit dans : $OUT"
-echo "  Le transmettre tel quel : les liaisons Openbox en découleront."
+echo "  Le transmettre tel quel : les liaisons labwc en découleront, sous la"
+echo "  forme  <keybind key=\"XF86...\"><action name=\"Execute\" .../></keybind>"

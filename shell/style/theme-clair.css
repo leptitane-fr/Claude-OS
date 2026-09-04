@@ -1,0 +1,41 @@
+/* =========================================================================
+   Claude-OS — thème « Clair »
+
+   Inspiration ChromeOS : surfaces blanches et mates, gris neutres, accent
+   bleu réservé aux éléments actifs.
+
+   TOUS les thèmes définissent exactement les mêmes noms. shell.css ne
+   connaît qu'eux, et jamais une couleur littérale : ajouter un thème, c'est
+   ajouter un fichier comme celui-ci, sans toucher à une seule règle.
+   ========================================================================= */
+
+@define-color accent            #4285f4;
+@define-color accent-hover      #5a95f5;
+/* Texte posé sur l'accent : blanc dans les quatre thèmes, mais nommé pour
+   qu'un thème futur puisse en décider autrement. */
+@define-color on-accent         #ffffff;
+
+@define-color accent-press      #3574d4;
+
+@define-color surface           #ffffff;  /* dock, barre, panneaux           */
+@define-color surface-alt       #f1f3f4;  /* survol, champs                  */
+@define-color surface-sunk      #e8eaed;  /* enfoncé, séparateurs            */
+
+@define-color text              #202124;
+@define-color text-dim          #5f6368;
+
+@define-color border            alpha(#000000, 0.14);
+@define-color shadow            alpha(#000000, 0.16);  /* large et diffuse   */
+@define-color shadow-close      alpha(#000000, 0.10);  /* courte et dense    */
+
+@define-color ok                #34a853;
+@define-color warn              #fbbc05;
+@define-color danger            #ea4335;
+
+.fond-degrade {
+  background-color: #e9ecf1;
+  background-image:
+    radial-gradient(ellipse 90% 70% at 22% 8%,  alpha(@accent, 0.14), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 85% 92%, alpha(#1abc9c, 0.10), transparent 55%),
+    linear-gradient(165deg, #eef1f5 0%, #e4e8ee 55%, #dde2ea 100%);
+}

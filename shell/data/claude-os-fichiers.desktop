@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Fichiers
+Comment=Parcourir les fichiers et les dossiers
+Exec=claude-os-fichiers %U
+Icon=system-file-manager
+Terminal=false
+Categories=System;FileTools;FileManager;
+Keywords=fichiers;dossiers;explorateur;gestionnaire;disque;
+# Déclaré gestionnaire des dossiers : « Ouvrir le dossier contenant », depuis
+# Chromium par exemple, arrive alors ici plutôt que nulle part.
+MimeType=inode/directory;
+StartupNotify=true

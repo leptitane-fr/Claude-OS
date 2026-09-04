@@ -112,7 +112,29 @@ say "Installation des paquets"
 
 PKGS="$(grep -vE '^\s*(#|$)' "$REPO_DIR/install/packages.list" | sed 's/#.*//' | tr -d ' \t' | tr '\n' ' ')"
 info "$(echo "$PKGS" | wc -w) paquets"
-run "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $PKGS"
+
+# En un seul appel : c'est le plus rapide, et apt résout tout d'un coup.
+#
+# Mais un SEUL nom introuvable — un paquet renommé, retiré de la distribution —
+# fait échouer l'installation entière, sans dire lequel. On reprend alors
+# paquet par paquet : c'est plus lent, mais on obtient un système fourni et la
+# liste exacte de ce qui manque.
+if [ "$DRY" -eq 1 ]; then
+	run "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $PKGS"
+elif DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends $PKGS; then
+	:
+else
+	warn "l'installation groupée a échoué — reprise paquet par paquet"
+	ABSENTS=""
+	for pkg in $PKGS; do
+		DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+			"$pkg" >/dev/null 2>&1 || ABSENTS="$ABSENTS $pkg"
+	done
+	if [ -n "$ABSENTS" ]; then
+		warn "paquets introuvables ou en échec :$ABSENTS"
+		warn "le reste est installé ; me transmettre cette liste"
+	fi
+fi
 
 # --------------------------------------------------------- Claude Desktop
 
@@ -189,69 +211,192 @@ else
 	info "aucune configuration Wi-Fi ifupdown — NetworkManager gère seul"
 fi
 
+# ------------------------------------------------- retrait de l'ancien bureau
+
+say "Retrait de l'ancienne interface"
+
+# DEUX PIÈGES, ET CE SONT LES PLUS SÉRIEUX DE CETTE MISE À JOUR.
+#
+# 1. L'essai du shell installait ses binaires dans /usr/local/bin, qui vient
+#    AVANT /usr/bin dans le PATH. Laissés en place, ils masqueraient purement
+#    et simplement la version qu'on vient d'installer : on croirait tourner
+#    sur le neuf, on tournerait sur l'ancien.
+#
+# 2. Il écrivait aussi ~/.config/labwc/, que labwc préfère à /etc/xdg/labwc/.
+#    Cette copie figerait la configuration du jour de l'essai, et aucune mise
+#    à jour de rc.xml n'aurait plus le moindre effet.
+#
+# Les deux se retirent ici, avant d'installer quoi que ce soit.
+
+for b in dock status fond lanceur reglages fichiers shell-basculer; do
+	if [ -e "/usr/local/bin/claude-os-$b" ]; then
+		info "retrait du binaire d'essai /usr/local/bin/claude-os-$b"
+		run "rm -f '/usr/local/bin/claude-os-$b'"
+	fi
+done
+run "rm -rf /usr/local/share/claude-os-shell"
+run "rm -f /usr/local/share/applications/claude-os-reglages.desktop"
+run "rm -f /usr/local/share/applications/claude-os-fichiers.desktop"
+
+if [ -d "$TARGET_HOME/.config/labwc" ]; then
+	info "retrait de ~/.config/labwc — la configuration système reprend la main"
+	run "rm -rf '$TARGET_HOME/.config/labwc'"
+fi
+
+# L'arbre de travail de l'essai, et la référence que le dépôt en garde.
+if [ -d "$TARGET_HOME/shell-essai" ]; then
+	info "retrait de l'arbre d'essai ~/shell-essai"
+	run "rm -rf '$TARGET_HOME/shell-essai'"
+	# safe.directory : ce script tourne en root, le dépôt appartient à
+	# l'utilisateur, et git refuse sinon d'y toucher.
+	run "git -c safe.directory='$REPO_DIR' -C '$REPO_DIR' worktree prune >/dev/null 2>&1 || true"
+fi
+
+# --- l'interface X11, abandonnée -----------------------------------------
+#
+# Elle a été construite, installée, et n'a pas fonctionné (voir docs/02 §2.4).
+# Ses fichiers ne servent plus à rien et ses paquets pèsent une centaine de
+# mégaoctets sur un eMMC déjà petit.
+
+for f in session launcher settings toggle-shelf plank-setup; do
+	run "rm -f '/usr/local/bin/claude-os-$f'"
+done
+run "rm -rf /usr/share/claude-os/openbox /usr/share/claude-os/picom"
+run "rm -rf /usr/share/claude-os/plank  /usr/share/claude-os/rofi"
+run "rm -rf /usr/share/claude-os/tint2"
+run "rm -rf /usr/share/themes/ClaudeOS /usr/share/plank/themes/ClaudeOS"
+run "rm -f /usr/local/share/applications/claude-os-chromium.desktop"
+run "rm -f /usr/local/share/applications/claude-os-claude.desktop"
+run "rm -f /usr/local/share/applications/claude-os-launcher.desktop"
+run "rm -f /usr/local/share/applications/claude-os-notes.desktop"
+run "rm -f /usr/local/share/applications/claude-os-settings.desktop"
+run "rm -rf '$TARGET_HOME/.config/plank' '$TARGET_HOME/.config/pcmanfm'"
+
+# Le serveur X n'est PAS purgé : l'écran de connexion de LightDM ne sait pas
+# s'en passer. Le retirer laisserait la machine sur un écran noir au
+# démarrage. Voir install/packages.list.
+VIEUX="openbox plank tint2 picom rofi pcmanfm xcape xdotool dunst xwallpaper
+       libnotify-bin python3-gi gir1.2-gtk-3.0 network-manager-gnome blueman
+       x11-utils x11-xserver-utils"
+A_PURGER=""
+for pkg in $VIEUX; do
+	dpkg -l "$pkg" 2>/dev/null | grep -q "^ii" && A_PURGER="$A_PURGER $pkg"
+done
+if [ -n "$A_PURGER" ]; then
+	info "purge de l'ancienne pile :$A_PURGER"
+	run "DEBIAN_FRONTEND=noninteractive apt-get purge -y $A_PURGER >/dev/null 2>&1 || true"
+else
+	info "aucun paquet de l'ancienne pile à retirer"
+fi
+
+# ---------------------------------------------------- compilation du shell
+
+say "Compilation du shell"
+
+# Le shell est compilé ici, sur la machine, plutôt que distribué en binaires.
+# Une minute sur le N6000, et le dépôt reste du source.
+#
+# --prefix=/usr et non /usr/local : c'est un composant du système, au même
+# titre que labwc. Aucun fichier géré par dpkg n'est écrasé, les noms sont
+# les nôtres.
+BUILD_DIR="$REPO_DIR/shell/build"
+run "rm -rf '$BUILD_DIR'"
+run "meson setup '$BUILD_DIR' '$REPO_DIR/shell' --prefix=/usr --buildtype=release >/dev/null" \
+	|| die "meson setup a échoué. Détail :
+      meson setup $BUILD_DIR $REPO_DIR/shell --prefix=/usr"
+run "ninja -C '$BUILD_DIR'" || die "la compilation du shell a échoué."
+run "meson install -C '$BUILD_DIR' >/dev/null" || die "l'installation du shell a échoué."
+info "six binaires installés dans /usr/bin"
+
 # ------------------------------------------------------- fichiers du système
 
 say "Déploiement de l'environnement"
 
 info "copie de rootfs/ vers /"
 run "cp -a '$REPO_DIR/rootfs/.' /"
-run "chmod +x /usr/local/bin/claude-os-session"
+run "chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer"
+run "chmod +x /etc/xdg/labwc/autostart"
 
-info "enregistrement de la session auprès de LightDM"
-run "mkdir -p /usr/share/xsessions"
-run "cat > /usr/share/xsessions/claude-os.desktop <<'EOF'
-[Desktop Entry]
-Name=Claude OS
-Comment=Environnement Claude OS
-Exec=/usr/local/bin/claude-os-session
-Type=Application
-DesktopNames=ClaudeOS
+# La session est WAYLAND. LightDM lit /usr/share/wayland-sessions ; l'ancienne
+# session X11 doit disparaître, sinon elle reste proposée à la connexion et un
+# choix malheureux ramène une interface qui n'existe plus.
+info "session Wayland enregistrée auprès de LightDM"
+run "rm -f /usr/share/xsessions/claude-os.desktop"
+run "rm -f '$TARGET_HOME/.xsession'"
+
+# Ouvrir directement sur la session : il n'y a qu'un utilisateur et qu'une
+# session, l'écran de connexion n'a rien à demander.
+run "mkdir -p /etc/lightdm/lightdm.conf.d"
+run "cat > /etc/lightdm/lightdm.conf.d/50-claude-os.conf <<'EOF'
+[Seat:*]
+user-session=claude-os
 EOF"
 
-run "install -o '$TARGET_USER' -g '$TARGET_USER' -m 0644 /dev/null '$TARGET_HOME/.xsession'"
-run "printf '#!/bin/sh\nexec /usr/local/bin/claude-os-session\n' > '$TARGET_HOME/.xsession'"
-run "chmod +x '$TARGET_HOME/.xsession'"
-run "chown '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.xsession'"
+# Le fichier de configuration du shell. ÉCRIT UNE SEULE FOIS.
+#
+# Il appartient ensuite à l'utilisateur : le dock y enregistre l'ordre des
+# icônes au glisser-déposer, le lanceur et le clic droit y ajoutent et
+# retirent des applications, le panneau de réglages y écrit le thème. Le
+# réécrire à chaque fourniture effacerait tout cela sans prévenir.
+CONF="$TARGET_HOME/.config/claude-os/shell.conf"
+if [ -f "$CONF" ]; then
+	info "configuration du shell conservée : $CONF"
 
-info "dock plank : icônes épinglées"
-# Seuls les .dockitem se déposent ici. Les RÉGLAGES de plank (position, taille,
-# thème, contenu) passent par GSettings depuis la version 0.11 : le fichier
-# « settings » de ce répertoire est obsolète et ignoré. C'est claude-os-plank-setup,
-# lancé par la session, qui les applique — il a besoin de la session dbus de
-# l'utilisateur, impossible à atteindre depuis ce script lancé en root.
-run "mkdir -p '$TARGET_HOME/.config/plank/dock1/launchers'"
-run "cp -n '$REPO_DIR/rootfs/usr/share/claude-os/plank/launchers/'*.dockitem '$TARGET_HOME/.config/plank/dock1/launchers/' 2>/dev/null || true"
-run "chown -R '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.config/plank'"
+	# Une seule exception à « on ne touche pas au fichier de l'utilisateur ».
+	#
+	# Les Réglages ne sont plus une icône du dock : ils s'ouvrent depuis le
+	# panneau de la barre d'état. Un fichier écrit avant ce changement les
+	# épingle encore, et l'icône resterait là sans que rien ne l'explique.
+	# On retire cette entrée-là, et elle seule : ni l'ordre, ni le thème, ni
+	# les autres applications ne sont touchés.
+	if grep -q '^pinned=.*claude-os-reglages' "$CONF"; then
+		info "les Réglages quittent le dock — ils sont dans la barre d'état"
+		run "sed -i -e 's/;claude-os-reglages//' -e 's/claude-os-reglages;//' -e 's/^pinned=claude-os-reglages\$/pinned=/' '$CONF'"
+	fi
 
-info "bureau PCManFM : fond d'écran et apparence"
-# Le fond d'écran passe par la configuration, pas par « pcmanfm --set-wallpaper »,
-# qui exige un gestionnaire de bureau déjà lancé et ouvre sinon une boîte modale
-# bloquant l'ouverture de session.
-run "mkdir -p '$TARGET_HOME/.config/pcmanfm/default'"
-run "cat > '$TARGET_HOME/.config/pcmanfm/default/desktop-items-0.conf' <<'EOF'
-[*]
-wallpaper_mode=crop
-wallpaper_common=1
-wallpaper=/usr/share/claude-os/wallpaper/default.png
-desktop_bg=#0a0c12
-desktop_fg=#e8eaed
-desktop_shadow=#000000
-desktop_font=Inter 10
-show_wm_menu=0
-sort=mtime;ascending;
+	info "le gestionnaire de fichiers n'est pas épinglé d'office :"
+	info "  le glisser depuis le lanceur vers le dock, ou clic droit dessus"
+else
+	# Uniquement ce qui est réellement installé : une icône épinglée sans
+	# application derrière affiche un pictogramme générique qui ne lance rien.
+	PINNED="chromium"
+	command -v claude-desktop >/dev/null 2>&1 && PINNED="$PINNED;claude-desktop"
+	command -v mousepad       >/dev/null 2>&1 && PINNED="$PINNED;mousepad"
+	PINNED="$PINNED;claude-os-fichiers"
+
+	run "mkdir -p '$TARGET_HOME/.config/claude-os'"
+	run "cat > '$CONF' <<EOF
+[dock]
+pinned=$PINNED
+reserve_space=false
+
+[appearance]
+theme=claude-sombre
+icon_theme=Papirus
+font=
+
+[wallpaper]
+image=/usr/share/claude-os/wallpaper/default.png
+fill=true
 EOF"
+	info "dock épinglé sur : $PINNED"
+fi
 
-info "thème GTK sombre"
-run "mkdir -p '$TARGET_HOME/.config/gtk-3.0'"
-run "cat > '$TARGET_HOME/.config/gtk-3.0/settings.ini' <<'EOF'
+# Les applications ordinaires — Chromium, le bloc-notes, les dialogues de
+# Claude Desktop — ne sont pas redessinées par la feuille de style du shell.
+# Sans ceci elles resteraient claires au milieu d'un bureau sombre.
+info "thème GTK sombre pour les applications"
+run "mkdir -p '$TARGET_HOME/.config/gtk-3.0' '$TARGET_HOME/.config/gtk-4.0'"
+for v in 3.0 4.0; do
+	run "cat > '$TARGET_HOME/.config/gtk-$v/settings.ini' <<'EOF'
 [Settings]
 gtk-theme-name=Adwaita-dark
-gtk-icon-theme-name=Papirus-Dark
+gtk-icon-theme-name=Papirus
 gtk-font-name=Inter 10
 gtk-application-prefer-dark-theme=1
 gtk-cursor-theme-name=Adwaita
-gtk-enable-animations=1
 EOF"
+done
 run "chown -R '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.config'"
 
 # -------------------------------------------------------------------- énergie
@@ -307,7 +452,10 @@ run "cat > /etc/chromium.d/99-claude-os <<'EOF'
 # Décodage vidéo matériel (VA-API). Vérifier chrome://gpu après installation :
 # « Video Decode » doit indiquer « Hardware accelerated ».
 export CHROMIUM_FLAGS=\"\${CHROMIUM_FLAGS} --enable-features=VaapiVideoDecodeLinuxGL,VaapiVideoDecoder\"
-export CHROMIUM_FLAGS=\"\${CHROMIUM_FLAGS} --ozone-platform=x11\"
+# Wayland natif : sans ce drapeau Chromium démarre sous Xwayland, ce qui
+# ajoute un serveur X entier en mémoire, rend le texte plus flou sur écran
+# dense et partage mal le presse-papier.
+export CHROMIUM_FLAGS=\"\${CHROMIUM_FLAGS} --ozone-platform-hint=auto\"
 # Rendu plus fluide des listes et du défilement sur GPU intégré modeste
 export CHROMIUM_FLAGS=\"\${CHROMIUM_FLAGS} --enable-gpu-rasterization --enable-zero-copy\"
 EOF"
@@ -357,13 +505,17 @@ if [ "$DRY" -eq 1 ]; then
 fi
 
 echo
-info "Redémarrer, puis se connecter à la session « Claude OS »."
+info "Redémarrer. LightDM ouvre directement la session « Claude OS »."
 echo
 info "À essayer une fois la session ouverte :"
-info "  touche Loupe                      masque / affiche dock et barre d'état"
-info "  Super + Espace                    lanceur d'applications"
-info "  clic droit sur le bureau          menu, dont « Réglages d'affichage »"
-info "  glisser une icône du dock         réorganisation, enregistrée par plank"
+info "  touche Loupe (Super)              masque / affiche dock et barre d'état"
+info "  bouton rond à gauche du dock      lanceur d'applications"
+info "  Super + A                         idem, au clavier"
+info "  clic sur la barre d'état          Wi-Fi, Bluetooth, batterie, Réglages"
+info "  clic droit sur une icône du dock  épingler, retirer, fermer"
+info "  glisser une icône du dock         réorganisation, enregistrée aussitôt"
+info "  Super + Entrée                    terminal de secours (foot)"
+info "  Super + Maj + Q                   fermer la session"
 echo
 info "Vérifications à faire à la première ouverture de session :"
 info "  vainfo | head -5                  décodage vidéo matériel"
@@ -373,7 +525,8 @@ info "  aplay -l && wpctl status          audio (haut-parleurs internes !)"
 info "  free -h                           empreinte mémoire au repos"
 info "  tlp-stat -s -c                    gestion d'énergie active"
 info "  powertop --auto-tune=false        consommation par poste"
-info "  bash tools/probe-keys.sh          codes des touches Chromebook"
+info "  bash tools/probe-keys.sh          codes des touches Chromebook (Wayland)"
+info "  bash tools/validate-install.sh    contrôle complet de l'installation"
 echo
 warn "L'audio est le point de risque n°1 sur cette machine : casque"
 warn "fonctionnel mais haut-parleurs muets est le symptôme classique."

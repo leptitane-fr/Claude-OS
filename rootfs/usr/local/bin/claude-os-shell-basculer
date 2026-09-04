@@ -1,0 +1,16 @@
+#!/bin/sh
+# Masque ou affiche le dock et la barre d'état, ensemble.
+#
+# Appelé par le raccourci clavier de labwc. Les deux composants sont des
+# processus séparés — un défaut dans l'un ne doit pas emporter l'autre — et
+# chacun publie l'action « basculer » sur le bus de session sous son
+# identifiant d'application. Pas de démon d'orchestration, pas de socket à
+# nous, pas de chasse au numéro de processus.
+#
+# Les deux appels sont indépendants : si un composant n'est pas lancé, son
+# appel échoue seul et l'autre bascule quand même.
+set -u
+
+for app in os.claude.shell.dock os.claude.shell.status; do
+    gapplication action "$app" basculer 2>/dev/null || true
+done

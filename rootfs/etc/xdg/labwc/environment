@@ -1,0 +1,20 @@
+# Environnement de la session labwc.
+#
+# labwc lit ce fichier AVANT de créer le clavier XKB et avant de lancer
+# l'autostart : c'est le seul endroit où poser ce qui doit valoir pour toute
+# la session.
+
+# Disposition du clavier : azerty.
+XKB_DEFAULT_LAYOUT=fr
+
+# GTK parle Wayland directement. Sans cela il peut retomber sur X11 via
+# Xwayland, ce qui ajoute un serveur entier en mémoire pour rien.
+GDK_BACKEND=wayland
+
+# Qt, au cas où une application en amènerait une bibliothèque.
+QT_QPA_PLATFORM=wayland
+
+# Ce que les portails XDG annoncent aux applications. Chromium et Electron
+# s'en servent pour choisir leur intégration de bureau.
+XDG_CURRENT_DESKTOP=labwc
+XDG_SESSION_DESKTOP=claude-os

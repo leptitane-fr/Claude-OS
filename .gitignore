@@ -1,6 +1,8 @@
 # Artefacts de build
 /build/
 /out/
+# Le shell est compilé sur la machine, dans son propre répertoire.
+shell/build/
 *.img
 *.iso
 *.rom
@@ -18,6 +20,5 @@
 # (celui-ci se committe ; le .rom associé, jamais)
 !firmware-backup-manifest.txt
 
-# Artefacts Python
-__pycache__/
-*.pyc
+# Relevé des touches produit par tools/probe-keys.sh
+/touches-relevees.txt

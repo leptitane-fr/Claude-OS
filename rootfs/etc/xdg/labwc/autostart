@@ -1,0 +1,15 @@
+#!/bin/sh
+# Composants du shell Claude-OS, lancés par labwc au démarrage de la session.
+#
+# Deux processus séparés et non un seul : un défaut dans la barre d'état ne
+# doit pas emporter le dock, et chacun peut être relancé isolément sans
+# fermer la session.
+
+# Noms nus plutôt que chemins absolus : le même fichier sert pour l'image
+# construite (binaires dans /usr/bin) et pour un essai compilé à la main sur
+# une machine déjà installée (/usr/local/bin, qui vient en premier dans PATH).
+# Le fond d'ecran en premier : il occupe la couche la plus basse, et le
+# voir apparaitre apres le dock donnerait un demarrage en deux temps.
+claude-os-fond   &
+claude-os-dock   &
+claude-os-status &

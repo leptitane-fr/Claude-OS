@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Bloc-notes
-Comment=Éditeur de texte
-Exec=mousepad %F
-Icon=accessories-text-editor
-Terminal=false
-Categories=Utility;TextEditor;
-StartupWMClass=Mousepad

@@ -4,9 +4,10 @@ Distribution Linux légère destinée à remplacer ChromeOS **en natif** sur un
 **HP Chromebook x360 14b-cb0000sf**, et construite autour de **Claude Desktop**
 comme environnement de travail principal, doté de privilèges étendus sur le système.
 
-> **État : amorçage.** Le socle technique est arrêté et documenté ; la première
-> étape opérationnelle (relevé matériel) est prête à être exécutée. Rien n'a
-> encore été flashé ni installé sur la machine cible.
+> **État : en service.** Le firmware est flashé, Debian 13 installée, le
+> bureau tourne sur la machine — dock, barre d'état, lanceur, gestionnaire de
+> fichiers. Restent l'audio à valider et les touches de la rangée supérieure à
+> câbler.
 
 ---
 
@@ -31,7 +32,8 @@ comme environnement de travail principal, doté de privilèges étendus sur le s
 | Board name cible | **`MADOO`** | Identifiant réel du HP Chromebook x360 14b-cb0 dans la base MrChromebox. C'est lui, pas le nom commercial, qui détermine le firmware applicable. |
 | Firmware | **UEFI Full ROM (MrChromebox)** | `MADOO` est présent dans la base sans le drapeau `noUEFI` : le firmware UEFI complet est disponible pour cette carte. Il permet un démarrage Linux standard, sans bidouille de bootloader. |
 | Distribution de base | **Debian 13 « trixie »** | Imposé par la cible : Claude Desktop pour Linux est distribué en `.deb` pour Debian 12+ / Ubuntu 22.04+. Trixie apporte en plus le noyau **6.12 LTS**, nettement meilleur que le 6.1 de Bookworm pour l'audio SOF des Chromebooks Jasper Lake. Support jusqu'en 2030. |
-| Session graphique v1 | **X11 léger** | Anthropic indique que le raccourci global *Quick Entry* de Claude Desktop exige X11 **ou** le portail Wayland `GlobalShortcuts` — que les compositeurs wlroots légers n'implémentent pas de façon fiable. X11 garantit la fonctionnalité complète dès la v1. Wayland sera réévalué en v2. |
+| Session graphique | **Wayland — labwc** | X11 avait été retenu pour *Quick Entry* de Claude Desktop. La pile X11 a été construite, installée, et a échoué à l'usage : dock insensible au clic, tactile non fonctionnel, barre d'état absente. Le choix a été retourné. Coût assumé : Quick Entry n'est pas disponible. Voir `docs/02` §2.4. |
+| Interface | **Shell sur mesure, C + GTK4** | Six petits programmes — dock, barre d'état, lanceur, gestionnaire de fichiers, réglages, fond d'écran — pèsent moins que les six composants existants qu'ils remplacent, partagent une feuille de style et un fichier de configuration, et font exactement ce qu'on leur demande. |
 | Système de fichiers | **btrfs + compression zstd** | Gain d'espace notable sur un eMMC de faible capacité, et surtout **snapshots instantanés** — le mécanisme qui rend les privilèges étendus de Claude réversibles. |
 | Mémoire | **zram (zstd)** | Indispensable si la machine est en 4 Go, une fois Electron chargé. |
 | Machine cible | **`MADOO`** — N6000, 4 Go | Board confirmé sur trois sources indépendantes. 4 Go de LPDDR4x **soudée** : plafond définitif, non extensible. |
@@ -57,8 +59,9 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | Fichier | Rôle |
 |---|---|
 | [`install/provision.sh`](install/provision.sh) | Transforme une Debian 13 minimale en Claude OS. Idempotent, `--dry-run` disponible. |
-| [`install/packages.list`](install/packages.list) | Les 34 paquets, chacun justifié en commentaire. |
-| [`rootfs/`](rootfs/) | Les fichiers déployés tels quels : configurations tint2, picom, openbox, session, fond d'écran. |
+| [`install/packages.list`](install/packages.list) | Les 49 paquets, chacun justifié en commentaire. |
+| [`shell/`](shell/) | Le code du bureau : dock, barre d'état, lanceur, gestionnaire de fichiers, réglages, fond d'écran. Compilé sur la machine par `provision.sh`. |
+| [`rootfs/`](rootfs/) | Les fichiers déployés tels quels : configuration de labwc, session Wayland, lanceur Claude, fond d'écran. |
 
 ### Outils
 
@@ -67,8 +70,7 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`tools/probe-hardware.sh`](tools/probe-hardware.sh) | Relevé matériel en lecture seule, 13 sections. À lancer depuis ChromeOS **avant** tout effacement. |
 | [`tools/verify-firmware-backup.sh`](tools/verify-firmware-backup.sh) | Valide une sauvegarde de firmware avant de flasher : taille, dump vide, signature `__FMAP__`, régions, et comparaison de deux lectures. Retourne `2` si la sauvegarde est inutilisable. |
 | [`tools/validate-install.sh`](tools/validate-install.sh) | Passe en revue l'installation poste par poste — Wi-Fi, Bluetooth, **audio**, VA-API, énergie, session, empreinte mémoire — et rend un verdict. À lancer après `provision.sh`. |
-| [`tools/essayer-shell.sh`](tools/essayer-shell.sh) | Installe, **à côté** de la session actuelle, le shell GTK4 de la branche `custom-linux-usb-debian` : dock, barre d'état, réglages, écrits en C sous labwc. Réversible, rien dans `/usr` ni dans l'amorçage. |
-| [`tools/probe-keys.sh`](tools/probe-keys.sh) | Relève ce qu'émettent réellement la rangée supérieure et la touche Loupe du clavier Chromebook, pour en déduire les liaisons Openbox. |
+| [`tools/probe-keys.sh`](tools/probe-keys.sh) | Relève, sous Wayland, ce qu'émettent réellement la rangée supérieure et la touche Loupe du clavier Chromebook, pour en déduire les liaisons labwc. |
 
 ---
 
@@ -141,7 +143,20 @@ Le firmware UEFI est flashé, le cavalier retiré, la machine remontée.
    `sudo bash install/provision.sh`.
 3. **Valider** avec `bash tools/validate-install.sh` — l'audio en premier.
 4. **Relever les touches** avec `bash tools/probe-keys.sh`, pour en tirer les
-   liaisons Openbox définitives.
+   liaisons labwc définitives.
 
-Puis les reports : rclone pour Drive et OneDrive, réglage fin du tactile, et
-les couleurs des boutons si une voie apparaît.
+### Mettre à jour
+
+Le bureau se met à jour comme le reste du dépôt :
+
+```sh
+cd ~/Claude-OS && git pull
+sudo bash install/provision.sh
+```
+
+`provision.sh` recompile le shell et le réinstalle. Il **ne touche pas** à
+`~/.config/claude-os/shell.conf` : l'ordre des icônes, le thème et les
+applications épinglées sont à vous.
+
+Puis les reports : rclone pour Drive et OneDrive, les notifications, les
+icônes sur le bureau, et le câblage des touches de luminosité et de volume.

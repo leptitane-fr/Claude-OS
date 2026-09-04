@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Claude OS
+Comment=Dock centré, barre d'état, lanceur — sur labwc
+Exec=labwc
+TryExec=labwc
+Type=Application
+DesktopNames=labwc

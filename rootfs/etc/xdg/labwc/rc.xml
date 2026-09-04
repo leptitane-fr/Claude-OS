@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<!--
+  Claude-OS — configuration de labwc
+
+  Volontairement minimale : ce compositeur ne sert qu'à porter le shell
+  sur-mesure. Tout ce qui relève de l'apparence est dans le shell, pas ici.
+-->
+<labwc_config>
+
+  <core>
+    <!-- Le dock et la barre dessinent déjà tout ce qu'il faut ; les
+         décorations de labwc feraient double emploi visuellement. Les
+         fenêtres gardent leurs propres décorations côté client. -->
+    <decoration>client</decoration>
+    <gap>0</gap>
+  </core>
+
+  <theme>
+    <!-- Pas d'ombre portée du compositeur : les surfaces du shell portent
+         déjà la leur, en CSS, calculée une seule fois. -->
+    <dropShadows>no</dropShadows>
+  </theme>
+
+  <keyboard>
+    <!-- Raccourcis intégrés de labwc (Alt-Tab, Alt-F4, déplacements...).
+         Sans cette ligne, définir le moindre raccourci ci-dessous les
+         supprimerait tous : labwc ne charge ses valeurs par défaut que si on
+         le lui demande explicitement (src/config/rcxml.c, « default.keyboard »). -->
+    <default />
+
+    <!-- Masquer / afficher le dock et la barre d'état.
+
+         Deux liaisons pour la même action, et ce n'est pas de l'excès de
+         zèle. Mesuré ici : labwc déclenche bien « Super_L » quand la touche
+         arrive comme touche ordinaire, mais pas quand elle arrive comme
+         modificateur seul. Le comportement du clavier réel n'a pas pu être
+         reproduit sans matériel, donc Super+Espace est fourni comme
+         solution de repli garantie.
+
+         Si la touche Windows seule se déclenche en trop pendant d'autres
+         raccourcis Super, supprimer la première liaison suffit. -->
+    <keybind key="Super_L">
+      <action name="Execute" command="/usr/local/bin/claude-os-shell-basculer"/>
+    </keybind>
+    <keybind key="W-space">
+      <action name="Execute" command="/usr/local/bin/claude-os-shell-basculer"/>
+    </keybind>
+
+    <!-- Le lanceur d'applications. Super seul bascule déjà le dock et la
+         barre d'état : on ne le lui reprend pas. Super+A, comme
+         « applications ». -->
+    <keybind key="W-a">
+      <action name="Execute" command="claude-os-lanceur"/>
+    </keybind>
+
+    <!-- Filets de sécurité : les seuls moyens d'ouvrir quoi que ce soit si
+         le dock ET le lanceur refusent de démarrer. Un terminal et un
+         navigateur, joignables au clavier quoi qu'il arrive. -->
+    <keybind key="W-Return">
+      <action name="Execute" command="foot"/>
+    </keybind>
+    <keybind key="W-b">
+      <action name="Execute" command="chromium"/>
+    </keybind>
+
+    <keybind key="W-f">
+      <action name="ToggleFullscreen"/>
+    </keybind>
+
+    <!-- Quitter la session. Volontairement peu accessible au doigt, mais il
+         doit exister : une session sans sortie au clavier est un piège. -->
+    <keybind key="W-S-q">
+      <action name="Exit"/>
+    </keybind>
+  </keyboard>
+
+</labwc_config>

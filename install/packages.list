@@ -5,32 +5,58 @@
 #
 # Lignes vides et commentaires ignorés par provision.sh.
 
-#--- Serveur graphique ------------------------------------------------------
-xserver-xorg-core              # X11 : requis par Claude Desktop (Quick Entry)
-xserver-xorg-input-libinput    # clavier, pavé tactile, écran tactile
-x11-xserver-utils              # xset, xsetroot, xrdb
-xinit                          # démarrage de session
-
-#--- Interface --------------------------------------------------------------
-openbox                        # gestionnaire de fenêtres (~10 Mo)
-plank                          # dock : glisser-déposer des icônes, zoom, ombres
-tint2                          # barre d'état uniquement (~12 Mo)
-rofi                           # lanceur d'applications (non résident)
-pcmanfm                        # bureau (icônes, fond d'écran) + gestionnaire de fichiers
-xcape                          # touche Loupe : Super seul -> F13
-xdotool                        # bascule d'affichage de l'étagère
-picom                          # compositeur : coins arrondis, flou, ombres
-dunst                          # notifications
-xwallpaper                     # fond d'écran (plus léger que feh)
-libnotify-bin                  # notify-send, utilisé par la barre d'état
+#--- Session graphique ------------------------------------------------------
+#
+# Wayland de bout en bout. Il n'y a PAS de serveur X : le compositeur labwc
+# parle directement à libinput et au noyau. C'est ce qui rend l'écran tactile
+# fonctionnel sans configuration, et ce qui évite de payer un serveur X
+# entier en mémoire sur une machine de 4 Go.
+labwc                          # compositeur wlroots (~2 Mo)
+libgtk4-layer-shell0           # ancre le dock et la barre hors du flux des fenêtres
+libglib2.0-bin                 # gapplication : la bascule dock/barre l'appelle
 lightdm                        # gestionnaire de session
-lightdm-gtk-greeter            # écran de connexion, thémable
+lightdm-gtk-greeter            # écran de connexion
+#
+# L'ÉCRAN DE CONNEXION, ET LUI SEUL, tourne encore sous X.
+#
+# La session, elle, est intégralement Wayland. Mais le greeter de LightDM ne
+# sait démarrer que sur un serveur X : purger celui-ci laisserait la machine
+# sur un écran noir au démarrage. Ces trois paquets sont donc le prix de
+# l'écran de connexion, et rien d'autre ne s'en sert.
+#
+# S'en débarrasser voudrait dire remplacer LightDM par greetd, qui n'a pas
+# besoin de X. C'est une bascule à faire et à essayer séparément — pas au
+# détour d'un nettoyage.
+xserver-xorg-core
+xserver-xorg-input-libinput
+xinit
+# Filet de sécurité, et rien d'autre : toute application Wayland d'ici s'en
+# passe. Il ne coûte rien tant qu'aucun client X11 ne démarre, et il évite de
+# se retrouver bloqué par un programme qui ne saurait pas parler Wayland.
+xwayland
+foot                           # terminal, natif Wayland (~1 Mo) — secours au clavier
+
+#--- Compilation du shell ---------------------------------------------------
+#
+# Le shell est compilé SUR LA MACHINE, à la fourniture et à chaque mise à
+# jour. Une minute sur le N6000, et cela évite de distribuer des binaires
+# depuis un dépôt git. Ces paquets peuvent être purgés après coup si la place
+# manque, au prix de les réinstaller à la prochaine mise à jour.
+build-essential
+meson
+ninja-build
+pkgconf
+libgtk-4-dev
+libgtk4-layer-shell-dev
+libwayland-dev
+libwayland-bin                 # wayland-scanner : engendre le code du protocole
 
 #--- Apparence --------------------------------------------------------------
-fonts-inter                    # police d'interface
+fonts-inter                    # police des thèmes Clair et Sombre
+fonts-lato                     # police des thèmes Claude
 fonts-dejavu-core              # repli
 fonts-noto-color-emoji         # émojis dans les pages web
-papirus-icon-theme             # icônes du dock
+papirus-icon-theme             # icônes
 # Le chargeur SVG de gdk-pixbuf. Papirus ne contient QUE des SVG : sans lui,
 # aucune de ses icônes ne se charge, et GTK affiche une page barrée d'un
 # triangle à leur place. Il n'arrive ici que comme recommandation d'autres
@@ -40,8 +66,7 @@ papirus-icon-theme             # icônes du dock
 librsvg2-common
 
 #--- Réseau -----------------------------------------------------------------
-network-manager                # gestion Wi-Fi
-network-manager-gnome          # nm-applet, dans la zone de notification
+network-manager                # gestion Wi-Fi, pilotée depuis la barre d'état
 #
 # Firmware. CONFIRMÉ SUR LA MACHINE : la carte est une Realtek RTL8822CE
 # (10ec:c822), pilote rtw_8822ce. Le firmware Intel a donc été retiré.
@@ -49,20 +74,27 @@ firmware-realtek               # RTL8822CE (Wi-Fi) et btrtl (Bluetooth)
 firmware-misc-nonfree          # firmware GPU Intel i915 : gestion d'énergie de l'affichage
 
 #--- Bluetooth --------------------------------------------------------------
-bluez                          # pile Bluetooth
-blueman                        # applet et fenêtre d'appairage
+bluez                          # pile Bluetooth, pilotée depuis la barre d'état
 libspa-0.2-bluetooth           # audio Bluetooth (A2DP) pour PipeWire
 
 #--- Audio ------------------------------------------------------------------
 #
 # SANS CE FIRMWARE, AUCUN SON. Les Chromebooks Jasper Lake confient l'audio à
 # un DSP (Sound Open Firmware) qui doit être chargé au démarrage : sans le
-# blob, le contrôleur ne s'initialise pas du tout. Son absence de cette liste
-# était une lacune — c'est précisément le risque n°1 identifié en conception.
+# blob, le contrôleur ne s'initialise pas du tout.
 firmware-sof-signed            # firmware du DSP audio (Sound Open Firmware)
 pipewire                       # serveur audio
 pipewire-pulse                 # compatibilité PulseAudio (Chromium, Electron)
 wireplumber                    # gestionnaire de sessions audio
+
+#--- Volumes amovibles ------------------------------------------------------
+#
+# Sans eux, GIO ne voit que ce qui est déjà monté : une clé USB branchée
+# n'apparaîtrait pas dans le volet du gestionnaire de fichiers, et rien ne
+# permettrait de la monter. Aucun montage automatique n'est mis en place pour
+# autant — c'est le clic sur le volume qui monte.
+udisks2
+gvfs                           # surveillance des volumes pour GIO
 
 #--- Trousseau --------------------------------------------------------------
 # Claude Desktop, application Electron, range son jeton de session via
@@ -84,10 +116,8 @@ tlp                            # gestion d'énergie : gouverneurs, PM périphér
 powertop                       # mesure de la consommation (diagnostic, pas d'auto-réglage)
 
 #--- Matériel et système ----------------------------------------------------
-brightnessctl                  # luminosité (rangée supérieure du clavier)
-x11-utils                      # xev, pour relever les codes des touches Chromebook
-python3-gi                     # panneau de réglages d'affichage (GTK3)
-gir1.2-gtk-3.0                 # liaisons GTK3 pour ce panneau
+brightnessctl                  # luminosité — la rangée supérieure reste à câbler
+wev                            # relève les codes des touches, sous Wayland
 systemd-zram-generator         # swap compressé en RAM — indispensable à 4 Go
 intel-media-va-driver          # décodage vidéo matériel (VA-API)
 va-driver-all                  # pilotes VA-API complémentaires

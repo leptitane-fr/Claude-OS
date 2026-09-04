@@ -1,0 +1,897 @@
+/* =========================================================================
+   Claude-OS Shell — feuille commune
+
+   Aucune couleur littérale ici : uniquement les jetons de tokens.css.
+   La classe .dark sur la fenêtre bascule l'ensemble du thème.
+   ========================================================================= */
+
+/* Fond transparent : le compositeur voit à travers, le dock flotte. */
+window.shell {
+  background: transparent;
+}
+
+/* -------------------------------------------------------------------------
+   Dock
+   ------------------------------------------------------------------------- */
+
+.dock {
+  background-color: @surface;
+  border: 1px solid @border;
+  /* Rayon généreux : sur un dock de 72 px de haut, 22 px donnent la forme de
+     pilule adoucie de ChromeOS sans tomber dans l'ovale. */
+  border-radius: 22px;
+  padding: 8px 12px;
+  margin: 0 0 12px 0;
+  /* Ombre à deux couches : une large et diffuse pour l'élévation, une courte
+     et dense pour asseoir le contact. C'est ce doublement qui donne la
+     profondeur de ChromeOS, là où une ombre unique paraît plate.
+     Calculée une fois par le compositeur, jamais réévaluée — rien à voir
+     avec un flou permanent. */
+  box-shadow: 0 8px 28px @shadow,
+              0 2px  6px @shadow-close;
+}
+
+/* Une icône du dock. La transformation d'échelle est portée par le GPU et
+   ne coûte rien tant qu'elle ne joue pas. */
+.dock-item {
+  /* 52 px : assez grand pour donner de la présence au dock sur un écran de
+     1920 px, assez petit pour qu'une dizaine d'icônes tiennent sans le faire
+     déborder. */
+  min-width: 52px;
+  min-height: 52px;
+  margin: 0 2px;
+  padding: 0;
+  border-radius: 14px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  transition: background-color 120ms ease-out,
+              transform        120ms ease-out;
+}
+
+.dock-item:hover {
+  background-color: @surface-alt;
+  /* Agrandissement discret : 8 % suffisent à donner la sensation de
+     réactivité. Au-delà, le dock semble sautiller. */
+  transform: scale(1.08) translateY(-2px);
+}
+
+.dock-item:active {
+  transform: scale(0.96);
+  transition-duration: 80ms;
+}
+
+/* Point sous l'icône d'une application ouverte. */
+.dock-indicator {
+  min-width: 4px;
+  min-height: 4px;
+  border-radius: 999px;
+  background-color: @text-dim;
+  margin-top: 2px;
+}
+
+.dock-indicator.active { background-color: @accent; }
+
+/* Séparateur entre applications épinglées et fenêtres ouvertes. */
+.dock-separator {
+  min-width: 1px;
+  margin: 8px 6px;
+  background-color: @surface-sunk;
+}
+
+/* -------------------------------------------------------------------------
+   Barre d'état — bas à droite
+
+   Même langage visuel que le dock : la cohérence des surfaces est ce qui
+   fait qu'une interface paraît conçue plutôt qu'assemblée.
+   ------------------------------------------------------------------------- */
+
+.status {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-radius: 18px;
+  padding: 6px 14px;
+  margin: 0 12px 12px 0;
+  box-shadow: 0 8px 28px @shadow,
+              0 2px  6px @shadow-close;
+}
+
+.status-item {
+  color: @text;
+  margin: 0 5px;
+}
+
+/* L'heure porte le regard : elle est le seul élément qu'on lit vraiment,
+   les autres se consultent d'un coup d'œil. */
+.status-clock {
+  font-weight: 500;
+  font-size: 13px;
+  margin-left: 8px;
+}
+
+/* Le pourcentage de batterie, plus discret que l'heure. */
+.status-battery-level {
+  font-size: 12px;
+  color: @text-dim;
+  margin-left: 2px;
+}
+
+/* Batterie faible : le seul endroit où une couleur d'alerte se justifie. */
+.status-battery-level.low { color: @danger; }
+
+.status-sep {
+  min-width: 1px;
+  margin: 6px 6px;
+  background-color: @surface-sunk;
+}
+
+/* La pilule entière est un bouton : on retire tout le chrome que GTK
+   applique par défaut à menubutton > button, pour que la seule surface
+   visible reste celle dessinée par .status. */
+menubutton.status > button {
+  background: none;
+  border: none;
+  box-shadow: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Retour au survol : assez pour dire « ceci se clique », assez discret pour
+   ne pas transformer une zone d'information en bouton criard. */
+menubutton.status:hover   { background-color: @surface-alt; }
+/* :checked = panneau ouvert. GTK pose cet état sur le menubutton tant que
+   son popover est affiché ; on s'en sert pour montrer d'où sort le
+   panneau. */
+menubutton.status:active,
+menubutton.status:checked { background-color: @surface-sunk; }
+
+/* -------------------------------------------------------------------------
+   Réglages rapides — panneau ouvert au clic sur la barre d'état
+
+   Rien de tout ceci n'est visible au repos. C'est la raison d'être du
+   panneau : la barre reste muette, le détail se demande.
+   ------------------------------------------------------------------------- */
+
+/* GTK dessine le fond du popover sur son nœud « contents ». C'est là que
+   doivent aller le rayon et l'ombre, pas sur le popover lui-même. */
+popover.qs-popover > contents {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-radius: 20px;
+  padding: 12px;
+  box-shadow: 0 12px 36px @shadow,
+              0 2px   8px @shadow-close;
+}
+
+/* Largeur fixe : un panneau qui change de taille selon le nom du réseau
+   connecté donne une impression d'instabilité. */
+.qs { min-width: 296px; }
+
+/* --- Bascules ----------------------------------------------------------- */
+
+.qs-tile {
+  /* « background: none » d'abord, et ce n'est pas cosmétique : Adwaita
+     peint les boutons avec un background-IMAGE, qui recouvre tout
+     background-color qu'on poserait dessous. Sans cette remise à zéro les
+     deux pastilles restent blanches quoi qu'on écrive ensuite — constaté à
+     l'écran, puis mesuré au pixel. */
+  background: none;
+  background-color: @surface-alt;
+  min-height: 56px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 16px;
+  box-shadow: none;
+  transition: background-color 120ms ease-out;
+}
+
+.qs-tile:hover { background-color: @surface-sunk; }
+
+/* Activé : le seul endroit du panneau où l'accent apparaît. Une bascule se
+   lit d'un coup d'œil ou elle ne sert à rien. */
+.qs-tile.on       { background-color: @accent; }
+.qs-tile.on:hover { background-color: @accent-hover; }
+
+.qs-tile.on .qs-tile-icon,
+.qs-tile.on .qs-tile-name,
+.qs-tile.on .qs-tile-state { color: @on-accent; }
+
+.qs-tile.on .qs-tile-state { opacity: 0.82; }
+
+.qs-tile:disabled { opacity: 0.42; }
+
+.qs-tile-icon  { color: @text; }
+.qs-tile-name  { font-size: 13px; font-weight: 500; color: @text; }
+.qs-tile-state { font-size: 11px; color: @text-dim; }
+
+/* --- Carte batterie ------------------------------------------------------ */
+
+.qs-card {
+  background: none;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background-color: @surface-alt;
+}
+
+.qs-battery-icon   { color: @text; }
+.qs-battery-pct    { font-size: 20px; font-weight: 500; color: @text; }
+/* La consommation en watts vit ici : lisible quand on la cherche, absente
+   le reste du temps. */
+.qs-battery-detail { font-size: 12px; color: @text-dim; }
+
+/* Application ouverte : l'icône se détache très légèrement du fond. Le point
+   sous l'icône porte déjà l'information, ceci ne fait que la renforcer — un
+   dock où l'on cherche lequel des points est allumé a raté son but. */
+.dock-item.running            { background-color: @surface-alt; }
+
+/* -------------------------------------------------------------------------
+   Liste des fenêtres d'une application, au survol de son icône
+   ------------------------------------------------------------------------- */
+
+popover.dock-windows-popover > contents {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-radius: 16px;
+  padding: 6px;
+  box-shadow: 0 12px 36px @shadow,
+              0 2px   8px @shadow-close;
+}
+
+.dock-window-row {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 10px;
+  padding: 6px 10px;
+  min-height: 0;
+  font-size: 13px;
+  color: @text;
+  transition: background-color 120ms ease-out;
+}
+
+/* Le niveau « sunk » plutôt que « alt » : sur le fond du panneau, l'écart de
+   « alt » est de trois points de gris et ne se voit pas. Mesuré au pixel,
+   pas jugé à l'œil. */
+.dock-window-row:hover             { background-color: @surface-sunk; }
+
+/* La fenêtre au premier plan, pour se repérer quand il y en a plusieurs. */
+.dock-window-row.active { background-color: @accent; color: @on-accent; }
+
+/* Le dégradé du fond d'écran est défini par CHAQUE THÈME : c'est la partie
+   la plus dépendante de la palette. Voir style/theme-*.css. */
+
+/* En thème clair, le même dessin en très pâle : la cohérence du geste
+   compte plus que l'inversion littérale des couleurs. */
+
+/* -------------------------------------------------------------------------
+   Panneau de réglages
+
+   Une fenêtre ordinaire, mais le même langage que le reste : mêmes surfaces,
+   mêmes rayons, mêmes espacements. Un panneau de réglages qui ne ressemble
+   pas au bureau qu'il règle sonne faux.
+   ------------------------------------------------------------------------- */
+
+/* Le fond du panneau est le niveau « alt » : les cartes, en surface pleine,
+   s'en détachent. Aucune valeur littérale — le thème décide. */
+window.reglages { background-color: @surface-alt; }
+
+.reglages-pile { padding: 16px; }
+
+.reglages-carte {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-radius: 16px;
+  padding: 14px 16px;
+}
+
+.reglages-titre {
+  font-size: 12px;
+  font-weight: 600;
+  color: @text-dim;
+  margin-bottom: 6px;
+}
+
+.reglages-ligne { padding: 8px 0; }
+
+.reglages-libelle { font-size: 14px; color: @text; }
+.reglages-detail  { font-size: 12px; color: @text-dim; margin-top: 2px; }
+
+/* Le choix du thème : deux boutons soudés, celui qui est actif prend
+   l'accent. C'est le seul endroit coloré du panneau. */
+.reglages-paire button {
+  background: none;
+  background-color: @surface-alt;
+  border: 1px solid @border;
+  color: @text;
+  padding: 5px 16px;
+  font-size: 13px;
+  box-shadow: none;
+}
+
+.reglages-paire button:checked {
+  background-color: @accent;
+  border-color: @accent;
+  color: @on-accent;
+}
+
+/* -------------------------------------------------------------------------
+   Pages détaillées des réglages rapides (Wi-Fi, Bluetooth)
+
+   Même surface que la page principale : ce sont des pages du même panneau,
+   pas des fenêtres différentes.
+   ------------------------------------------------------------------------- */
+
+.qs-entete { margin-bottom: 2px; }
+
+.qs-titre-page { font-size: 15px; font-weight: 600; color: @text; }
+
+.qs-retour {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border-radius: 999px;
+  color: @text;
+}
+
+.qs-retour:hover { background-color: @surface-alt; }
+
+/* Le chevron est collé à la pastille : les deux forment un objet, mais deux
+   zones cliquables. */
+.qs-chevron {
+  background: none;
+  background-color: @surface-alt;
+  border: none;
+  box-shadow: none;
+  min-width: 26px;
+  padding: 0 2px;
+  margin-left: 2px;
+  border-radius: 16px;
+  color: @text-dim;
+  transition: background-color 120ms ease-out;
+}
+
+.qs-chevron:hover { background-color: @surface-sunk; color: @text; }
+
+.qs-vide { font-size: 13px; color: @text-dim; }
+
+/* --- Une ligne de réseau ou d'appareil ----------------------------------- */
+
+.reseau-ligne {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 12px;
+  padding: 9px 10px;
+  min-height: 0;
+  font-size: 13px;
+  color: @text;
+  transition: background-color 120ms ease-out;
+}
+
+.reseau-ligne:hover  { background-color: @surface-alt; }
+.reseau-ligne.actif  { background-color: @surface-sunk; }
+
+.reseau-etat    { font-size: 11px; color: @text-dim; }
+.reseau-cadenas { color: @text-dim; }
+
+.reseau-mdp     { font-size: 13px; border-radius: 10px; }
+
+.reseau-valider {
+  background: none;
+  background-color: @accent;
+  color: @on-accent;
+  border: none;
+  box-shadow: none;
+  border-radius: 10px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.reseau-valider:hover { background-color: @accent-hover; }
+
+/* Retour de la dernière action, sous la liste des appareils. Discret, mais
+   toujours présent : un clic sans effet visible ni explication est le pire
+   des deux mondes. */
+.qs-etat {
+  font-size: 12px;
+  color: @text-dim;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background-color: @surface-alt;
+}
+
+/* -------------------------------------------------------------------------
+   Lanceur d'applications
+
+   Mêmes surfaces, mêmes rayons, mêmes ombres que le dock et la barre : le
+   lanceur doit avoir l'air d'appartenir au même bureau, pas d'une
+   application ouverte par-dessus.
+   ------------------------------------------------------------------------- */
+
+.lanceur-cadre {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-radius: 20px;
+  padding: 16px;
+  /* Même doublement d'ombre que le dock : une large pour l'élévation, une
+     courte pour asseoir le contact. */
+  box-shadow: 0 12px 36px @shadow,
+              0 2px   8px @shadow-close;
+}
+
+/* --- barre d'outils ------------------------------------------------------ */
+
+.lanceur-barre { padding: 0 2px 2px 2px; }
+
+.lanceur-libelle {
+  font-size: 12px;
+  color: @text-dim;
+  margin-left: 6px;
+}
+
+/* « background: none » d'abord : Adwaita peint les entrées avec un
+   background-IMAGE qui recouvrirait toute couleur posée dessous. Même piège
+   que les pastilles des réglages rapides. */
+.lanceur-recherche {
+  background: none;
+  background-color: @surface-alt;
+  border: 1px solid transparent;
+  box-shadow: none;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: @text;
+  min-height: 32px;
+}
+
+.lanceur-recherche:focus-within { border-color: @accent; }
+
+.lanceur-tri > button {
+  background: none;
+  background-color: @surface-alt;
+  border: 1px solid transparent;
+  box-shadow: none;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  color: @text;
+  min-height: 32px;
+}
+
+.lanceur-tri > button:hover { background-color: @surface-sunk; }
+
+/* --- segments « Afficher » ----------------------------------------------- */
+
+/* Trois boutons soudés : rayons aux extrémités seulement, pour qu'ils
+   forment un objet et non trois. */
+.lanceur-vues button {
+  background: none;
+  background-color: @surface-alt;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: @text;
+  min-height: 32px;
+  transition: background-color 120ms ease-out;
+}
+
+.lanceur-vues button:first-child {
+  border-radius: 999px 0 0 999px;
+  padding-left: 14px;
+}
+
+.lanceur-vues button:last-child {
+  border-radius: 0 999px 999px 0;
+  padding-right: 14px;
+}
+
+.lanceur-vues button:hover   { background-color: @surface-sunk; }
+
+/* La vue active prend l'accent : c'est le seul endroit coloré de la barre,
+   et il faut le lire d'un coup d'œil. */
+.lanceur-vues button:checked {
+  background-color: @accent;
+  color: @on-accent;
+}
+
+.lanceur-vues button:checked:hover { background-color: @accent-hover; }
+
+/* --- contenu ------------------------------------------------------------- */
+
+.lanceur-contenu {
+  background-color: transparent;
+  padding: 4px 0;
+}
+
+/* La ligne de séparation par défaut de GtkListBox couperait la liste en
+   tranches ; les espacements suffisent à la lire. */
+.lanceur-contenu > row {
+  background-color: transparent;
+  padding: 0;
+}
+
+.lanceur-item {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 12px;
+  color: @text;
+  transition: background-color 120ms ease-out;
+}
+
+.lanceur-item.grille {
+  padding: 12px 6px;
+  min-width: 118px;
+}
+
+.lanceur-item.liste   { padding: 7px 10px; }
+.lanceur-item.details { padding: 9px 10px; }
+
+.lanceur-item:hover { background-color: @surface-sunk; }
+
+/* Déjà épinglée au dock. Même vocabulaire que le point sous une icône du
+   dock : la surface se détache très légèrement, sans crier. */
+.lanceur-item.epinglee { background-color: @surface-alt; }
+
+.lanceur-nom       { font-size: 13px; color: @text; }
+.lanceur-detail    { font-size: 11px; color: @text-dim; }
+.lanceur-categorie { font-size: 11px; color: @text-dim; }
+
+.lanceur-vide { font-size: 14px; color: @text-dim; }
+
+/* -------------------------------------------------------------------------
+   Menus contextuels — dock et lanceur
+
+   GTK dessine le fond d'un popover sur son nœud « contents » : c'est là que
+   vont le rayon et l'ombre, pas sur le popover lui-même.
+   ------------------------------------------------------------------------- */
+
+popover.dock-menu > contents,
+popover.lanceur-menu > contents {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: 0 12px 36px @shadow,
+              0 2px   8px @shadow-close;
+}
+
+popover.dock-menu modelbutton,
+popover.lanceur-menu modelbutton {
+  border-radius: 9px;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: @text;
+  min-height: 0;
+}
+
+popover.dock-menu modelbutton:hover,
+popover.lanceur-menu modelbutton:hover { background-color: @surface-alt; }
+
+/* -------------------------------------------------------------------------
+   Bouton du lanceur, à gauche du dock
+   ------------------------------------------------------------------------- */
+
+/* Rond plutôt que carré arrondi : il ouvre une liste, il ne représente pas
+   une application. La forme dit la différence avant qu'on lise l'icône. */
+.dock-lanceur {
+  border-radius: 999px;
+  color: @text-dim;
+}
+
+.dock-lanceur:hover { color: @text; }
+
+/* -------------------------------------------------------------------------
+   Réglages, au bas du panneau des réglages rapides
+   ------------------------------------------------------------------------- */
+
+.qs-reglages {
+  background: none;
+  background-color: @surface-alt;
+  border: none;
+  box-shadow: none;
+  border-radius: 16px;
+  padding: 10px 14px;
+  min-height: 0;
+  transition: background-color 120ms ease-out;
+}
+
+.qs-reglages:hover { background-color: @surface-sunk; }
+
+/* =========================================================================
+   Gestionnaire de fichiers
+
+   Une fenêtre ordinaire, mais le même langage que le reste du bureau :
+   mêmes surfaces, mêmes rayons, même accent. Aucune couleur littérale.
+   ========================================================================= */
+
+/* window.shell est transparent — c'est ce qu'il faut pour une surface qui
+   flotte, pas pour une fenêtre d'application. */
+window.fichiers { background-color: @surface; }
+
+/* --- barre de navigation -------------------------------------------------- */
+
+.fichiers-barre {
+  padding: 8px 10px;
+  background-color: @surface;
+  border-bottom: 1px solid @border;
+}
+
+.fichiers-outil {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 8px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  color: @text;
+}
+
+.fichiers-outil:hover            { background-color: @surface-alt; }
+.fichiers-outil:disabled         { opacity: 0.35; }
+
+/* --- fil d'Ariane --------------------------------------------------------- */
+
+.fichiers-barre-adresse {
+  background-color: @surface-alt;
+  border-radius: 999px;
+  padding: 2px 6px;
+}
+
+.fil-element {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 999px;
+  padding: 3px 10px;
+  min-height: 0;
+  font-size: 13px;
+  color: @text-dim;
+}
+
+.fil-element:hover { background-color: @surface-sunk; color: @text; }
+
+/* Le dernier segment est là où l'on est : il se lit, il ne s'atteint pas. */
+.fil-element.courant { color: @text; font-weight: 500; }
+
+.fil-separateur { color: @text-dim; font-size: 12px; }
+
+.fichiers-adresse {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 3px 8px;
+  font-size: 13px;
+  color: @text;
+  min-height: 26px;
+}
+
+.fichiers-recherche {
+  background: none;
+  background-color: @surface-alt;
+  border: 1px solid transparent;
+  box-shadow: none;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 13px;
+  color: @text;
+  min-height: 30px;
+}
+
+.fichiers-recherche:focus-within { border-color: @accent; }
+
+/* --- segments des vues ---------------------------------------------------- */
+
+.fichiers-vues button {
+  background: none;
+  background-color: @surface-alt;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 4px 11px;
+  font-size: 12px;
+  color: @text;
+  min-height: 30px;
+  transition: background-color 120ms ease-out;
+}
+
+.fichiers-vues button:first-child { border-radius: 999px 0 0 999px; padding-left: 13px; }
+.fichiers-vues button:last-child  { border-radius: 0 999px 999px 0; padding-right: 13px; }
+.fichiers-vues button:hover       { background-color: @surface-sunk; }
+
+.fichiers-vues button:checked {
+  background-color: @accent;
+  color: @on-accent;
+}
+
+.fichiers-vues button:checked:hover { background-color: @accent-hover; }
+
+/* --- barre d'actions ------------------------------------------------------ */
+
+.fichiers-actions {
+  padding: 6px 10px;
+  background-color: @surface-alt;
+  border-bottom: 1px solid @border;
+}
+
+.fichiers-action {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 8px;
+  padding: 4px 12px;
+  min-height: 28px;
+  font-size: 13px;
+  color: @text;
+  transition: background-color 120ms ease-out;
+}
+
+.fichiers-action:hover    { background-color: @surface-sunk; }
+.fichiers-action:disabled { opacity: 0.4; }
+
+/* --- volet des emplacements ----------------------------------------------- */
+
+.lieux-volet {
+  background-color: @surface-alt;
+  border-right: 1px solid @border;
+}
+
+.lieux { background-color: transparent; }
+
+.lieux-entete {
+  font-size: 11px;
+  font-weight: 600;
+  color: @text-dim;
+  padding: 12px 12px 2px 12px;
+}
+
+.lieux-entete-row { background-color: transparent; }
+
+.lieux-ligne {
+  padding: 6px 10px;
+  margin: 1px 6px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: @text;
+  background-color: transparent;
+  transition: background-color 120ms ease-out;
+}
+
+.lieux-ligne:hover    { background-color: @surface-sunk; }
+
+/* L'emplacement où l'on se trouve. Même accent que partout ailleurs : c'est
+   ce qui relie le volet au reste du bureau. */
+.lieux-ligne:selected,
+.lieux-ligne:selected .lieux-nom { background-color: @accent; color: @on-accent; }
+
+.lieux-nom   { font-size: 13px; }
+.lieux-icone { color: @text-dim; }
+.lieux-ligne:selected .lieux-icone { color: @on-accent; }
+
+.lieux-ejecter {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border-radius: 6px;
+  color: @text-dim;
+}
+
+.lieux-ejecter:hover { background-color: @surface; color: @text; }
+
+/* --- contenu -------------------------------------------------------------- */
+
+.fichiers-grille,
+.fichiers-liste,
+.fichiers-colonnes { background-color: @surface; }
+
+.fichiers-case  { padding: 10px 6px; }
+.fichiers-ligne { padding: 4px 8px; }
+
+.fichiers-nom    { font-size: 13px; color: @text; }
+.fichiers-detail { font-size: 12px; color: @text-dim; }
+
+/* La sélection, dans les trois vues. Les nœuds diffèrent — « child » pour
+   une grille, « row » pour une liste — mais le rendu doit être identique. */
+.fichiers-grille > child,
+.fichiers-liste > row,
+.fichiers-colonnes row {
+  border-radius: 10px;
+  margin: 1px 4px;
+  transition: background-color 120ms ease-out;
+}
+
+.fichiers-grille > child:hover,
+.fichiers-liste > row:hover,
+.fichiers-colonnes row:hover { background-color: @surface-alt; }
+
+.fichiers-grille > child:selected,
+.fichiers-liste > row:selected,
+.fichiers-colonnes row:selected { background-color: @accent; }
+
+.fichiers-grille > child:selected .fichiers-nom,
+.fichiers-liste > row:selected .fichiers-nom,
+.fichiers-colonnes row:selected .fichiers-nom,
+.fichiers-colonnes row:selected .fichiers-detail { color: @on-accent; }
+
+/* En-têtes de colonnes : c'est par eux qu'on trie, ils doivent se voir
+   cliquables sans peser plus que le contenu. */
+.fichiers-colonnes > header > button {
+  background: none;
+  background-color: @surface-alt;
+  border: none;
+  border-right: 1px solid @border;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 6px 10px;
+  min-height: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: @text-dim;
+}
+
+.fichiers-colonnes > header > button:hover { background-color: @surface-sunk; color: @text; }
+
+/* --- barre d'état --------------------------------------------------------- */
+
+.fichiers-etat {
+  font-size: 12px;
+  color: @text-dim;
+  padding: 6px 12px;
+  background-color: @surface-alt;
+  border-top: 1px solid @border;
+}
+
+/* --- menus contextuels ---------------------------------------------------- */
+
+popover.fichiers-menu > contents {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-radius: 14px;
+  padding: 6px;
+  box-shadow: 0 12px 36px @shadow,
+              0 2px   8px @shadow-close;
+}
+
+popover.fichiers-menu modelbutton {
+  border-radius: 9px;
+  padding: 7px 12px;
+  font-size: 13px;
+  color: @text;
+  min-height: 0;
+}
+
+popover.fichiers-menu modelbutton:hover { background-color: @surface-alt; }
+
+/* --- boîtes de dialogue --------------------------------------------------- */
+
+window.fichiers-dialogue { background-color: @surface; }
+
+.fichiers-saisie,
+.fichiers-proprietes { padding: 18px; }
+
+.prop-cle    { font-size: 12px; color: @text-dim; }
+.prop-valeur { font-size: 13px; color: @text; }
+
+window.fichiers-progres { background-color: @surface; }
+.fichiers-progres-pile  { padding: 18px; }

@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Chromium
-Comment=Navigateur web
-Exec=chromium %U
-Icon=chromium
-Terminal=false
-Categories=Network;WebBrowser;
-StartupWMClass=Chromium

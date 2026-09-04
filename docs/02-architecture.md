@@ -80,29 +80,44 @@ Pentium Silver **N6000** : 4 cœurs, 4 threads, 1,1–3,3 GHz, 6 W, UHD Graphics
 
 ---
 
-## 2.4 Session graphique : X11 en v1
+## 2.4 Session graphique : Wayland
 
-**Contre-intuitif, et assumé.** Wayland serait le choix moderne, mais la
-documentation d'Anthropic est explicite : le raccourci global *Quick Entry* de
-Claude Desktop exige **X11**, ou bien la prise en charge du portail Wayland
-`GlobalShortcuts`. Or ce portail n'est pas implémenté de façon fiable par les
-compositeurs wlroots légers (ceux qui, précisément, tiendraient dans le budget
-mémoire ci-dessus) : il l'est surtout par GNOME et KDE, hors budget.
+**Ce choix a été retourné en cours de route.** La v1 était partie sur X11,
+pour une raison qui paraissait décisive : la documentation d'Anthropic indique
+que le raccourci global *Quick Entry* de Claude Desktop exige X11, ou bien la
+prise en charge du portail Wayland `GlobalShortcuts` — que les compositeurs
+wlroots légers n'implémentent pas.
 
-Choisir Wayland en v1 reviendrait donc à sacrifier une fonctionnalité de
-l'application qui est la raison d'être du système, pour un gain théorique.
+La pile X11 a été construite, installée, et **elle a échoué à l'usage** :
+- le dock ne réagissait pas au clic, la zone sensible décalée de 40 px sous
+  l'icône, sans explication trouvée ;
+- l'écran tactile ne se comportait pas en écran tactile ;
+- la barre d'état ne s'affichait pas, tint2 n'hébergeant que les icônes
+  XEmbed, pas les indicateurs modernes.
 
-X11 apporte en prime, sur ce matériel précis : une pile Electron mieux éprouvée,
-et un outillage mature pour la rotation d'écran et l'étalonnage du tactile sur
-un convertible.
+Le raisonnement était juste, la conclusion fausse : on avait pesé une
+fonctionnalité de confort — un raccourci global — contre le fonctionnement de
+l'interface elle-même.
 
-**Wayland est un objectif de v2**, à rouvrir dès qu'un compositeur léger
-implémente `GlobalShortcuts` correctement.
+**La session est donc Wayland**, portée par **labwc** (compositeur wlroots,
+~2 Mo). Ce que cela donne, mesuré sur la machine : le tactile fonctionne sans
+configuration, le Wi-Fi et le Bluetooth se pilotent depuis la barre d'état,
+l'interface est fluide.
 
-Composants visés — gestionnaire de fenêtres léger, barre d'état minimale,
-`greetd` comme gestionnaire de session, `xdg-desktop-portal-gtk` pour les
-dialogues de fichiers dont Electron a besoin. Le détail sera arrêté après
-validation matérielle.
+Ce que cela coûte, honnêtement : **Quick Entry n'est pas disponible.** C'est
+le prix payé, et il est payé en connaissance de cause. Un compositeur qui
+implémenterait `GlobalShortcuts` rouvrirait la question ; labwc ne le fait pas
+aujourd'hui.
+
+Xwayland reste installé en filet de sécurité, mais rien de ce qui est fourni
+ne s'en sert : Chromium (`--ozone-platform-hint=auto`), Claude Desktop
+(`--ozone-platform=wayland`) et le shell parlent Wayland nativement.
+
+> **Une leçon qui vaut au-delà de ce point.** La décision X11 avait été prise
+> sur documentation, sans matériel. Elle tenait debout sur le papier pendant
+> plusieurs semaines de travail. C'est le premier démarrage réel qui l'a
+> réfutée. Les décisions d'architecture prises sans machine sont des
+> hypothèses, pas des conclusions.
 
 ---
 
@@ -191,9 +206,23 @@ peut être automatique ; une action définitive mérite une seconde paire d'yeux
 
 ## 2.7 Ce qui reste à trancher
 
-- Gestionnaire de fenêtres exact (après mesure réelle de l'empreinte mémoire sur
-  la machine, pas sur la base de suppositions).
-- Outil de construction d'image reproductible.
-- Remappage de la rangée de touches ChromeOS.
+- **Le remappage de la rangée supérieure.** Les touches de luminosité et de
+  volume n'émettent rien de câblé. `tools/probe-keys.sh` relève ce qu'elles
+  envoient réellement ; les liaisons labwc en découleront.
+- **Les notifications.** L'ancienne pile embarquait dunst, qui est parti avec
+  X11 ; rien ne les recueille aujourd'hui. `mako` est le démon Wayland
+  correspondant, à habiller aux couleurs du shell.
+- **Accès au nuage** — Google Drive, OneDrive — dans le volet du gestionnaire
+  de fichiers, par rclone. Le volet est déjà découpé en sections pour cela.
+- Outil de construction d'image reproductible, pour ne plus dépendre d'une
+  installation Debian faite à la main.
 - Politique de mise à jour : Debian stable strict, ou backports ciblés pour le
   noyau si l'audio l'exige.
+
+### Tranché depuis
+
+| Question | Réponse | Où |
+|---|---|---|
+| Serveur graphique | Wayland, labwc | §2.4 |
+| Gestionnaire de fenêtres | labwc, ~2 Mo | §2.4 |
+| Interface | shell sur mesure, GTK4 | `docs/04`, `shell/` |
