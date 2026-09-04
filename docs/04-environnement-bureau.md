@@ -184,7 +184,42 @@ la barre de titre de Chromium et de Claude Desktop.
 
 ---
 
-## 4.5 Ce qui est volontairement absent
+## 4.5 L'écran de connexion, et un piège qui a coûté une soirée
+
+LightDM affiche une barre en haut de l'écran de connexion — c'est le panneau
+du greeter, pas un morceau du bureau : il n'existe qu'avant l'ouverture de
+session. À droite, un bouton donne le choix de la session.
+
+**Ce menu l'emporte sur tout le reste.** LightDM retient la dernière session
+choisie, dans `~/.dmrc` et dans AccountsService, et la relance à la connexion
+suivante — quoi que dise `user-session=` du siège.
+
+C'est ce qui s'est passé à la bascule vers Wayland. La préférence enregistrée
+valait `lightdm-xsession`, la session X générique de Debian, qui exécute
+`~/.xsession` ; l'ancienne installation y mettait le lancement du bureau. En
+supprimant ce fichier sans corriger la préférence, on a laissé LightDM
+relancer une session vide.
+
+Et Debian ne s'arrête pas là : privé de `~/.xsession`, son `/etc/X11/Xsession`
+descend sa liste de replis et finit par lancer `x-terminal-emulator`. D'où le
+symptôme exact — fond noir, curseur, et **une fenêtre de terminal apparue
+toute seule**, qui n'avait aucun rapport avec le shell.
+
+`provision.sh` écrit désormais la préférence aux deux endroits. Et
+`validate-install.sh` vérifie quelle session tourne réellement : le contrôle
+qui aurait tranché en une ligne.
+
+Trois entrées restent proposées dans le menu :
+
+| Entrée | Ce qu'elle lance |
+|---|---|
+| **Claude OS** | `claude-os-session`, qui garantit un bus D-Bus puis lance labwc |
+| **labwc** | labwc directement — le même bureau, sans ce filet. Repli utile |
+| **Default Xsession** | une session X vide. À ne pas choisir |
+
+---
+
+## 4.6 Ce qui est volontairement absent
 
 | Absent | Pourquoi |
 |---|---|
@@ -198,7 +233,7 @@ la barre de titre de Chromium et de Claude Desktop.
 
 ---
 
-## 4.6 Ce qui reste à valider sur la machine
+## 4.7 Ce qui reste à valider sur la machine
 
 | Quoi | Comment | Enjeu |
 |---|---|---|
@@ -219,7 +254,7 @@ extension forçant VP9, ou `chrome://flags` — et se règle une fois pour toute
 
 ---
 
-## 4.7 Sources
+## 4.8 Sources
 
 - Documentation Anthropic, Claude Desktop pour Linux — *Quick Entry* et
   portails.

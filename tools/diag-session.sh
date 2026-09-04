@@ -26,6 +26,20 @@ if [ -n "$SID" ]; then
 	loginctl show-session "$SID" -p Type -p Class -p Active -p State -p Desktop \
 	         -p Display -p Remote 2>/dev/null | sed 's/^/  /'
 fi
+# LE POINT QUI A COÛTÉ UNE SOIRÉE. LightDM retient la session choisie par
+# l'utilisateur et la relance, quoi que dise « user-session » du siège. Une
+# préférence périmée renvoie sur une session X vide : fond noir, curseur, et
+# un terminal ouvert par le repli de /etc/X11/Xsession.
+DESK="$(loginctl show-session "${SID:-}" -p Desktop --value 2>/dev/null)"
+case "$DESK" in
+	claude-os|labwc) val "SESSION DÉMARRÉE" "$DESK ✓" ;;
+	"")              val "SESSION DÉMARRÉE" "<inconnue>" ;;
+	*)               val "SESSION DÉMARRÉE" "$DESK ✗  ← ce n'est pas Claude OS" ;;
+esac
+val "préférence ~/.dmrc" "$(sed -n 's/^Session=//p' "$HOME/.dmrc" 2>/dev/null || echo '<aucune>')"
+val "préférence AccountsService" \
+    "$(sed -n 's/^Session=//p' "/var/lib/AccountsService/users/$(id -un)" 2>/dev/null || echo '<aucune>')"
+val "sessions proposées" "$(ls /usr/share/wayland-sessions /usr/share/xsessions 2>/dev/null | grep '\.desktop' | tr '\n' ' ')"
 val "XDG_SESSION_TYPE" "${XDG_SESSION_TYPE:-<vide>}"
 val "XDG_RUNTIME_DIR"  "${XDG_RUNTIME_DIR:-<vide>}"
 
@@ -58,8 +72,11 @@ for b in claude-os-fond claude-os-dock claude-os-status \
 	val "$b" "$(command -v "$b" 2>/dev/null || echo 'INTROUVABLE')"
 done
 val "styles" "$(ls /usr/share/claude-os-shell/style/ 2>/dev/null | tr '\n' ' ' || echo 'ABSENTS')"
-# Un binaire resté dans /usr/local/bin masquerait celui de /usr/bin.
-RESTE="$(ls /usr/local/bin/claude-os-* 2>/dev/null | grep -vE 'claude-os-(claude|shell-basculer)$' | tr '\n' ' ')"
+# Un binaire du shell resté dans /usr/local/bin masquerait celui de /usr/bin.
+# Trois noms y vivent LÉGITIMEMENT : le lanceur de session, la bascule du
+# dock, et le lanceur Wayland de Claude Desktop. Les compter comme des restes
+# était un faux positif de la première version de ce diagnostic.
+RESTE="$(ls /usr/local/bin/claude-os-* 2>/dev/null | grep -vE 'claude-os-(claude|shell-basculer|session)$' | tr '\n' ' ')"
 [ -n "$RESTE" ] && val "restes /usr/local/bin" "$RESTE  ← masquent /usr/bin" \
                 || val "restes /usr/local/bin" "aucun ✓"
 

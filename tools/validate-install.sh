@@ -202,6 +202,17 @@ else
 	bad "AUCUN bus de session — les composants du shell ne peuvent pas démarrer"
 fi
 
+# QUELLE session tourne. LightDM relance celle que l'utilisateur a choisie la
+# dernière fois, et une préférence périmée renvoie sur une session X vide —
+# fond noir, curseur, un terminal. Ce contrôle-là aurait tranché en une ligne.
+SID="$(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$(id -un)" '$3==u && $4!="" {print $1; exit}')"
+DESK="$(loginctl show-session "$SID" -p Desktop --value 2>/dev/null)"
+case "$DESK" in
+	claude-os|labwc) ok "session « $DESK »" ;;
+	"")              warn "session indéterminée" ;;
+	*)               bad "session « $DESK » — ce n'est pas Claude OS. Choisir « Claude OS » dans le menu de l'écran de connexion." ;;
+esac
+
 # La session doit être WAYLAND. Une session X11 signifierait que LightDM a
 # ouvert autre chose que « Claude OS » — l'ancienne interface, ou un repli.
 if [ -n "${WAYLAND_DISPLAY:-}" ]; then

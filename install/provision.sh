@@ -334,8 +334,40 @@ run "rm -f '$TARGET_HOME/.xsession'"
 run "mkdir -p /etc/lightdm/lightdm.conf.d"
 run "cat > /etc/lightdm/lightdm.conf.d/50-claude-os.conf <<'EOF'
 [Seat:*]
+# Les sessions Wayland ne sont pas cherchées partout selon les versions :
+# on nomme les trois répertoires plutôt que de s'en remettre au défaut.
+sessions-directory=/usr/share/lightdm/sessions:/usr/share/wayland-sessions:/usr/share/xsessions
 user-session=claude-os
 EOF"
+
+# LA PRÉFÉRENCE DE L'UTILISATEUR L'EMPORTE SUR « user-session ».
+#
+# LightDM retient la dernière session choisie et la relance, quoi que dise le
+# réglage du siège. Celle de cette machine valait « lightdm-xsession » : la
+# session X générique de Debian, qui exécute ~/.xsession. L'ancienne
+# installation y mettait le lancement du bureau ; en le supprimant, on a
+# laissé LightDM relancer une session vide.
+#
+# Debian ne s'arrête pas là pour autant : privé de ~/.xsession, son
+# /etc/X11/Xsession descend sa liste de replis et finit par ouvrir
+# x-terminal-emulator. D'où le symptôme exact observé — fond noir, curseur,
+# et une fenêtre de terminal apparue toute seule.
+info "session par défaut de l'utilisateur : claude-os"
+run "printf '[Desktop]\nSession=claude-os\n' > '$TARGET_HOME/.dmrc'"
+run "chown '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.dmrc'"
+run "chmod 0644 '$TARGET_HOME/.dmrc'"
+
+# AccountsService, quand il est là, double cette information et gagne. Les
+# deux doivent dire la même chose. On ne réécrit QUE ces deux clés : le
+# fichier porte aussi la langue et l'icône du compte.
+AS="/var/lib/AccountsService/users/$TARGET_USER"
+if [ -f "$AS" ]; then
+	run "sed -i -e '/^Session=/d' -e '/^XSession=/d' '$AS'"
+	run "sed -i -e '/^\\[User\\]/a XSession=claude-os' -e '/^\\[User\\]/a Session=claude-os' '$AS'"
+	info "AccountsService mis d'accord"
+elif [ -d /var/lib/AccountsService/users ]; then
+	run "printf '[User]\nSession=claude-os\nXSession=claude-os\n' > '$AS'"
+fi
 
 # Le fichier de configuration du shell. ÉCRIT UNE SEULE FOIS.
 #
@@ -510,7 +542,10 @@ if [ "$DRY" -eq 1 ]; then
 fi
 
 echo
-info "Redémarrer. LightDM ouvre directement la session « Claude OS »."
+info "Se déconnecter puis se reconnecter — ou redémarrer."
+info "LightDM ouvre « Claude OS » : c'est la préférence qui vient d'être écrite."
+info "Le menu en haut à droite de l'écran de connexion permet d'en changer ;"
+info "« labwc » y donne le même bureau, sans notre lanceur de session."
 echo
 info "À essayer une fois la session ouverte :"
 info "  touche Loupe (Super)              masque / affiche dock et barre d'état"
