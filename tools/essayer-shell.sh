@@ -89,6 +89,16 @@ if [ -d "$ARBRE" ]; then
 	# on repart de la branche nue pour les réappliquer proprement.
 	git -C "$ARBRE" checkout --quiet --force "origin/$BRANCHE" 2>/dev/null || true
 	git -C "$ARBRE" reset --hard --quiet "origin/$BRANCHE" 2>/dev/null || true
+	# reset --hard ne touche PAS aux fichiers non suivis. Or un correctif qui
+	# CRÉE un fichier — launcher.c, fichiers.c — en laisse un derrière lui à
+	# chaque passe : à la suivante, « git apply » refusait de le recréer
+	# (« already exists in working directory ») et l'installation s'arrêtait
+	# sur un correctif pourtant intact. Le défaut ne se voyait qu'à la
+	# DEUXIÈME exécution ; constaté sur la machine, puis reproduit ici.
+	#
+	# Sans -x : le répertoire de compilation est dans le .gitignore de la
+	# branche, il survit, et on ne repart pas de zéro à chaque essai.
+	git -C "$ARBRE" clean -fdq 2>/dev/null || true
 else
 	git -C "$DEPOT" worktree add --detach "$ARBRE" "origin/$BRANCHE" --quiet \
 		|| die "création de l'arbre de travail impossible."
@@ -118,8 +128,12 @@ if [ -d "$CORRECTIFS" ]; then
 			info "correctif déjà en amont, ignoré : $nom"
 		else
 			die "le correctif $nom ne s'applique plus sur $BRANCHE.
-      Le code visé a changé. Vérifier patches/$nom avant de relancer :
-      cd $ARBRE && git apply --check -v $c"
+      Le code visé a changé. Voir le détail :
+      cd $ARBRE && git apply --check -v $c
+
+      Si le message parle d'un fichier « already exists », l'arbre d'essai
+      garde des fichiers d'une passe précédente. Le plus simple est alors :
+      rm -rf $ARBRE && bash tools/essayer-shell.sh"
 		fi
 	done
 fi
