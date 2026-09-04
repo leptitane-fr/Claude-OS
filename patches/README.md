@@ -73,3 +73,47 @@ sous la carte batterie — au même endroit que le Wi-Fi et la batterie, comme
 sur ChromeOS. `claude-os-reglages` disparaît des applications épinglées par
 défaut ; le bouton du lanceur garantit qu'aucune application ne devient
 inatteignable.
+
+### `0004-lanceur-clic-exterieur.patch`
+
+Le lanceur se ferme désormais au clic à côté. Sa surface s'ancre aux quatre
+bords de l'écran, avec une marge basse de 100 px : elle couvre tout, sauf la
+bande du dock, qui reste cliquable — et reste donc une cible de glisser-
+déposer. Le voile est entièrement transparent, rien ne change à l'écran ; il
+n'existe que pour recevoir les clics.
+
+C'est le compromis qui remplace le premier : le lanceur de ChromeOS occupe
+tout l'écran, mais un voile intégral aurait capté aussi les clics destinés au
+dock, et la cible du dépôt serait devenue inatteignable.
+
+### `0005-gestionnaire-fichiers.patch`
+
+Ajoute `claude-os-fichiers` : une fenêtre ordinaire, à la Windows —
+navigation, fil d'Ariane, volet des emplacements, barre d'actions, barre
+d'état — en quatre fichiers.
+
+| Fichier | Rôle |
+|---|---|
+| `fichiers.h` / `fichiers-item.c` | l'élément (un `GObject`) et la lecture d'un répertoire, asynchrone et par lots |
+| `fichiers-ops.c` | copier, déplacer, corbeille, supprimer — dans un fil séparé |
+| `fichiers-lieux.c` | le volet de gauche : dossiers personnels, favoris, périphériques |
+| `fichiers.c` | la fenêtre : barres, trois vues, menus, raccourcis |
+
+Trois vues — icônes, liste, détails — qui partagent **un seul** magasin, un
+seul filtre, un seul tri et une seule sélection. Changer de vue ne perd donc
+rien, et le tri se règle en cliquant les en-têtes de la vue Détails, dont le
+trieur est celui de tout le monde. Les trois sont virtuelles : un répertoire
+de dix mille fichiers ne coûte que dix mille petits objets.
+
+`config.c` remplace `thunar` par `claude-os-fichiers` dans les applications
+épinglées par défaut.
+
+Deux points à savoir :
+
+- **Rien n'est jamais écrasé.** Quand la destination existe, le nom est
+  décalé : « notes (copie).txt ». Windows pose la question ; la poser depuis
+  un fil de travail demanderait de le suspendre à chaque collision.
+- **La corbeille pointe sur un vrai dossier**, `~/.local/share/Trash/files`,
+  parce que l'adresse `trash:///` demanderait gvfs. On y voit ce qui a été
+  jeté, sous son nom d'origine ; restaurer un fichier à sa place d'origine
+  n'est en revanche pas possible de là.

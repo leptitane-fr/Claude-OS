@@ -31,6 +31,13 @@ fonts-inter                    # police d'interface
 fonts-dejavu-core              # repli
 fonts-noto-color-emoji         # émojis dans les pages web
 papirus-icon-theme             # icônes du dock
+# Le chargeur SVG de gdk-pixbuf. Papirus ne contient QUE des SVG : sans lui,
+# aucune de ses icônes ne se charge, et GTK affiche une page barrée d'un
+# triangle à leur place. Il n'arrive ici que comme recommandation d'autres
+# paquets, et la fourniture se fait avec --no-install-recommends : il doit
+# donc être demandé explicitement. Vérifié au banc d'essai, dans un
+# conteneur où son absence reproduisait exactement ce symptôme.
+librsvg2-common
 
 #--- Réseau -----------------------------------------------------------------
 network-manager                # gestion Wi-Fi

@@ -176,6 +176,7 @@ sed -i 's|command="xfce4-terminal"|command="foot"|' "$HOME/.config/labwc/rc.xml"
 PINNED="chromium"
 command -v claude-desktop >/dev/null 2>&1 && PINNED="$PINNED;claude-desktop"
 command -v mousepad       >/dev/null 2>&1 && PINNED="$PINNED;mousepad"
+PINNED="$PINNED;claude-os-fichiers"
 # Les réglages ne sont plus épinglés : ils s'ouvrent depuis le panneau de la
 # barre d'état. Le bouton du lanceur, à gauche du dock, donne accès au reste.
 
