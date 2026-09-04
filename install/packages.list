@@ -57,6 +57,13 @@ pipewire                       # serveur audio
 pipewire-pulse                 # compatibilité PulseAudio (Chromium, Electron)
 wireplumber                    # gestionnaire de sessions audio
 
+#--- Trousseau --------------------------------------------------------------
+# Claude Desktop, application Electron, range son jeton de session via
+# libsecret. Sans fournisseur Secret Service, il faut se reconnecter à chaque
+# démarrage. Constaté sur l'autre machine du projet, pas supposé.
+gnome-keyring                  # fournisseur Secret Service
+libsecret-1-0                  # bibliothèque cliente
+
 #--- Portails XDG -----------------------------------------------------------
 xdg-desktop-portal             # requis par Electron
 xdg-desktop-portal-gtk         # sélecteurs de fichiers
