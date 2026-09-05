@@ -184,42 +184,82 @@ la barre de titre de Chromium et de Claude Desktop.
 
 ---
 
-## 4.5 L'écran de connexion, et un piège qui a coûté une soirée
+## 4.5 L'écran de connexion
 
-LightDM affiche une barre en haut de l'écran de connexion — c'est le panneau
-du greeter, pas un morceau du bureau : il n'existe qu'avant l'ouverture de
-session. À droite, un bouton donne le choix de la session.
+Un seul compte, un seul champ. Le nom d'usage, le mot de passe, l'heure dans
+le coin — et le même dégradé de fond que le bureau, lu dans le thème de
+l'utilisateur.
 
-**Ce menu l'emporte sur tout le reste.** LightDM retient la dernière session
-choisie, dans `~/.dmrc` et dans AccountsService, et la relance à la connexion
-suivante — quoi que dise `user-session=` du siège.
-
-C'est ce qui s'est passé à la bascule vers Wayland. La préférence enregistrée
-valait `lightdm-xsession`, la session X générique de Debian, qui exécute
-`~/.xsession` ; l'ancienne installation y mettait le lancement du bureau. En
-supprimant ce fichier sans corriger la préférence, on a laissé LightDM
-relancer une session vide.
-
-Et Debian ne s'arrête pas là : privé de `~/.xsession`, son `/etc/X11/Xsession`
-descend sa liste de replis et finit par lancer `x-terminal-emulator`. D'où le
-symptôme exact — fond noir, curseur, et **une fenêtre de terminal apparue
-toute seule**, qui n'avait aucun rapport avec le shell.
-
-`provision.sh` écrit désormais la préférence aux deux endroits. Et
-`validate-install.sh` vérifie quelle session tourne réellement : le contrôle
-qui aurait tranché en une ligne.
-
-Trois entrées restent proposées dans le menu :
-
-| Entrée | Ce qu'elle lance |
+| Couche | Rôle |
 |---|---|
-| **Claude OS** | `claude-os-session`, qui garantit un bus D-Bus puis lance labwc |
-| **labwc** | labwc directement — le même bureau, sans ce filet. Repli utile |
-| **Default Xsession** | une session X vide. À ne pas choisir |
+| **greetd** | ouvre la session. Ne dessine rien |
+| **labwc**, configuration nue | porte l'écran. Aucun raccourci clavier |
+| **`claude-os-connexion`** | le champ de mot de passe |
+
+### L'authentification n'est pas dans notre code
+
+`claude-os-connexion` ne touche jamais à PAM, ne lit jamais `/etc/shadow`, et
+ne tourne pas en root — il tourne sous `_greetd`. Il **relaie** : greetd pose
+les questions de PAM, le programme les affiche, renvoie les réponses, greetd
+décide. C'est délibéré : un écran de connexion qui ferait lui-même
+l'authentification serait un programme privilégié de plus à auditer.
+
+Le protocole est `greetd-ipc(7)` — une longueur sur quatre octets, puis du
+JSON, sur la socket nommée par `GREETD_SOCK`.
+
+### La configuration de labwc y est nue, et c'est le but
+
+`/etc/xdg/labwc-greeter/rc.xml` ne définit **aucun** raccourci — pas même les
+raccourcis intégrés de labwc, qu'il faut demander explicitement. Tout
+raccourci ici serait une porte ouverte *avant* authentification. C'est
+pourquoi cette configuration est séparée de celle de la session, qui offre au
+contraire un terminal de secours au clavier : les deux besoins sont opposés,
+ils ne peuvent pas partager un fichier.
+
+### Ce que cela a permis de retirer
+
+Le greeter de LightDM ne savait démarrer que sur un serveur X. C'était son
+**dernier usage** sur cette machine. Voir §4.6.
 
 ---
 
-## 4.6 Ce qui est volontairement absent
+## 4.6 Le serveur X : ce qui en avait besoin
+
+La question mérite une réponse nette, parce qu'elle a servi d'argument à deux
+décisions successives.
+
+| Ce qui pourrait en avoir besoin | Verdict |
+|---|---|
+| La session et le bureau | **Non.** labwc et le shell sont Wayland natifs |
+| Chromium | **Non.** `--ozone-platform-hint=auto` |
+| Claude Desktop | **Non.** `--ozone-platform=wayland` |
+| Le bloc-notes, le terminal | **Non.** GTK3 et foot parlent Wayland |
+| L'écran tactile | **Non.** libinput passe par le compositeur |
+| L'écran de connexion de LightDM | **Oui** — et c'était le seul |
+
+En remplaçant LightDM par greetd, plus rien ne réclame de serveur X.
+
+**Xwayland reste installé**, et c'est un choix : il ne démarre que si un
+programme X11 se lance, et ne coûte rien tant qu'aucun ne le fait. C'est le
+filet pour le jour où une application ne saurait pas parler Wayland.
+
+Ce qui n'est **pas** rendu possible pour autant : *Quick Entry* de Claude
+Desktop, qui demande X11 **ou** le portail `GlobalShortcuts`. labwc n'implémente
+pas ce portail, et lancer Claude Desktop sous Xwayland ne suffirait pas — le
+raccourci doit être global, donc connu du compositeur. Cette fonction reste
+indisponible, comme annoncé en `docs/02` §2.4.
+
+### Ce qui n'est pas purgé tout de suite
+
+LightDM et le serveur X restent **installés mais désactivés** le temps que
+greetd fasse ses preuves. Un écran de connexion qui refuse de s'afficher
+enferme dehors, et ce Chromebook n'a pas de touches F pour changer de terminal
+virtuel : il ne resterait que SSH. Le retour en arrière tient en une commande,
+et la purge est le dernier geste.
+
+---
+
+## 4.7 Ce qui est volontairement absent
 
 | Absent | Pourquoi |
 |---|---|
@@ -228,12 +268,12 @@ Trois entrées restent proposées dans le menu :
 | Indexeur de fichiers | écrit sur l'eMMC en permanence pour une recherche rare |
 | Gestionnaire de paquets graphique | `apt` suffit, et c'est 80 Mo de moins |
 | Client de courrier, suite bureautique | usage 100 % web |
-| Serveur X | Wayland de bout en bout ; Xwayland n'est qu'un filet |
+| Serveur X | plus rien n'en a besoin depuis greetd — voir §4.6 |
 | Démon de notifications | parti avec X11 — à remettre, voir `docs/02` §2.7 |
 
 ---
 
-## 4.7 Ce qui reste à valider sur la machine
+## 4.8 Ce qui reste à valider sur la machine
 
 | Quoi | Comment | Enjeu |
 |---|---|---|
@@ -254,7 +294,7 @@ extension forçant VP9, ou `chrome://flags` — et se règle une fois pour toute
 
 ---
 
-## 4.8 Sources
+## 4.9 Sources
 
 - Documentation Anthropic, Claude Desktop pour Linux — *Quick Entry* et
   portails.

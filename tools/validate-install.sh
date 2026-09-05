@@ -193,6 +193,27 @@ for p in labwc claude-os-fond claude-os-dock claude-os-status; do
 	pgrep -x "$p" >/dev/null 2>&1 && ok "$p en cours" || bad "$p absent"
 done
 
+# L'écran de connexion. greetd doit être actif, LightDM ne doit plus l'être :
+# les deux ensemble se disputeraient le terminal virtuel 1.
+if systemctl is-enabled greetd >/dev/null 2>&1; then
+	ok "greetd activé"
+	systemctl is-enabled lightdm >/dev/null 2>&1 \
+		&& warn "LightDM aussi est activé — les deux se disputeront le VT 1" \
+		|| note "LightDM désactivé"
+else
+	warn "greetd n'est pas activé : l'écran de connexion est encore celui de LightDM"
+fi
+[ -x /usr/bin/claude-os-connexion ] && ok "écran de connexion installé" \
+	|| bad "claude-os-connexion absent"
+
+# Le serveur X. Plus rien n'en a besoin depuis greetd ; s'il tourne, c'est
+# qu'un programme l'a réveillé, et il faut savoir lequel.
+if pgrep -x Xorg >/dev/null 2>&1; then
+	warn "un serveur X tourne : $(pgrep -a Xorg | head -1)"
+else
+	ok "aucun serveur X en mémoire"
+fi
+
 # LE BUS DE SESSION. Sans lui, les composants du shell quittent au démarrage
 # sans un mot : écran noir, curseur, rien d'autre. C'est le premier point à
 # regarder devant un bureau vide.

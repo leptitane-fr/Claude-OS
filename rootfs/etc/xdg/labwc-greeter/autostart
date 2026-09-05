@@ -1,0 +1,3 @@
+#!/bin/sh
+# Le seul programme de l'écran de connexion.
+exec /usr/local/bin/claude-os-greeter

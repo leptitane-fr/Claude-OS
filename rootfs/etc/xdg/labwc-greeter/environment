@@ -1,0 +1,8 @@
+# Environnement de l'écran de connexion.
+#
+# Le clavier doit être en azerty AVANT la saisie du mot de passe : c'est
+# précisément le moment où une disposition fausse fait le plus de dégâts, la
+# frappe étant invisible.
+XKB_DEFAULT_LAYOUT=fr
+
+GDK_BACKEND=wayland

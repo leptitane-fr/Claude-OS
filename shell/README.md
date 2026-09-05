@@ -32,6 +32,7 @@ Ce qui a été ajouté ou corrigé au passage :
 | `claude-os-lanceur` | liste des applications | à la demande, puis masqué |
 | `claude-os-fichiers` | gestionnaire de fichiers | non |
 | `claude-os-reglages` | apparence, fond d'écran, dock | non |
+| `claude-os-connexion` | écran de connexion, sous greetd | avant la session |
 
 Les trois résidents sont des processus **séparés** : un défaut dans la barre
 d'état n'emporte pas le dock, et chacun se relance seul sans fermer la
@@ -46,8 +47,12 @@ sudo meson install -C build
 ```
 
 Il faut `libgtk-4-dev`, `libgtk4-layer-shell-dev`, `libwayland-dev`,
-`libwayland-bin` (pour `wayland-scanner`), `meson`, `ninja-build` et
-`pkgconf`. `install/provision.sh` s'en charge.
+`libwayland-bin` (pour `wayland-scanner`), `libjson-glib-dev`, `meson`,
+`ninja-build` et `pkgconf`. `install/provision.sh` s'en charge.
+
+`json-glib` ne sert qu'à l'écran de connexion, qui parle à greetd en JSON.
+Écrire un analyseur à la main pour un protocole dont une erreur d'analyse
+empêche de se connecter n'est pas un pari raisonnable.
 
 Le protocole `wlr-foreign-toplevel-management-v1` — celui qui dit quelles
 fenêtres sont ouvertes — n'est empaqueté nulle part dans Debian trixie. Son

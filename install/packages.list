@@ -27,22 +27,15 @@ labwc                          # compositeur wlroots (~2 Mo)
 dbus-user-session
 libgtk4-layer-shell0           # ancre le dock et la barre hors du flux des fenêtres
 libglib2.0-bin                 # gapplication : la bascule dock/barre l'appelle
-lightdm                        # gestionnaire de session
-lightdm-gtk-greeter            # écran de connexion
 #
-# L'ÉCRAN DE CONNEXION, ET LUI SEUL, tourne encore sous X.
+# L'écran de connexion. greetd ne dessine RIEN : il ouvre une session, et
+# c'est tout. Le champ de mot de passe est claude-os-connexion, écrit ici,
+# sous labwc, avec la feuille de style du bureau.
 #
-# La session, elle, est intégralement Wayland. Mais le greeter de LightDM ne
-# sait démarrer que sur un serveur X : purger celui-ci laisserait la machine
-# sur un écran noir au démarrage. Ces trois paquets sont donc le prix de
-# l'écran de connexion, et rien d'autre ne s'en sert.
-#
-# S'en débarrasser voudrait dire remplacer LightDM par greetd, qui n'a pas
-# besoin de X. C'est une bascule à faire et à essayer séparément — pas au
-# détour d'un nettoyage.
-xserver-xorg-core
-xserver-xorg-input-libinput
-xinit
+# C'est ce qui a permis de retirer le serveur X : le greeter de LightDM ne
+# savait démarrer que sur X, et c'était son DERNIER usage sur cette machine.
+greetd                         # démon d'ouverture de session (~1 Mo)
+libjson-glib-1.0-0             # protocole greetd-ipc, en JSON
 # Filet de sécurité, et rien d'autre : toute application Wayland d'ici s'en
 # passe. Il ne coûte rien tant qu'aucun client X11 ne démarre, et il évite de
 # se retrouver bloqué par un programme qui ne saurait pas parler Wayland.
@@ -63,6 +56,7 @@ libgtk-4-dev
 libgtk4-layer-shell-dev
 libwayland-dev
 libwayland-bin                 # wayland-scanner : engendre le code du protocole
+libjson-glib-dev
 
 #--- Apparence --------------------------------------------------------------
 fonts-inter                    # police des thèmes Clair et Sombre

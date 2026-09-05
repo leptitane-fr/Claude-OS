@@ -1,0 +1,28 @@
+#!/bin/sh
+# Claude OS — lancement de l'écran de connexion.
+#
+# Un script plutôt qu'une commande directe dans /etc/greetd/config.toml,
+# pour deux raisons : le nom du compte se lit dans un fichier plutôt que
+# d'être recopié dans la configuration de greetd, et la sortie du greeter est
+# conservée. Quand un écran de connexion refuse de s'afficher, on n'a aucun
+# autre moyen de savoir pourquoi — pas de terminal, pas de session ouverte.
+set -u
+
+JOURNAL=/var/log/claude-os-connexion.log
+COMPTE=""
+[ -r /etc/claude-os/utilisateur ] && COMPTE="$(cat /etc/claude-os/utilisateur)"
+
+# Sans nom de compte, le greeter cherche lui-même le seul compte humain de la
+# machine — celui dont l'UID est entre 1000 et 60000.
+if [ -n "$COMPTE" ]; then
+	set -- --utilisateur "$COMPTE"
+else
+	set --
+fi
+
+# Le journal n'est pas garanti accessible en écriture : le greeter tourne
+# sous « _greetd ». On essaie, et on continue sans si ce n'est pas possible.
+if : > "$JOURNAL" 2>/dev/null; then
+	exec /usr/bin/claude-os-connexion "$@" >> "$JOURNAL" 2>&1
+fi
+exec /usr/bin/claude-os-connexion "$@"

@@ -277,12 +277,18 @@ run "rm -f /usr/local/share/applications/claude-os-notes.desktop"
 run "rm -f /usr/local/share/applications/claude-os-settings.desktop"
 run "rm -rf '$TARGET_HOME/.config/plank' '$TARGET_HOME/.config/pcmanfm'"
 
-# Le serveur X n'est PAS purgé : l'écran de connexion de LightDM ne sait pas
-# s'en passer. Le retirer laisserait la machine sur un écran noir au
-# démarrage. Voir install/packages.list.
+# Le serveur X et LightDM ne sont PAS purgés ici, et c'est délibéré : tant
+# que greetd n'a pas fait ses preuves sur cette machine, ils sont le seul
+# retour en arrière possible. Un écran de connexion qui refuse de s'afficher
+# enferme dehors, et ce Chromebook n'a pas de touches F pour changer de
+# terminal virtuel.
+#
+# Leur purge est le dernier geste, une fois greetd confirmé :
+#   sudo apt purge lightdm lightdm-gtk-greeter xserver-xorg-core xinit \
+#                  xserver-xorg-input-libinput x11-common
 VIEUX="openbox plank tint2 picom rofi pcmanfm xcape xdotool dunst xwallpaper
        libnotify-bin python3-gi gir1.2-gtk-3.0 network-manager-gnome blueman
-       x11-utils x11-xserver-utils"
+       x11-utils x11-xserver-utils gnome-terminal gnome-terminal-data"
 A_PURGER=""
 for pkg in $VIEUX; do
 	dpkg -l "$pkg" 2>/dev/null | grep -q "^ii" && A_PURGER="$A_PURGER $pkg"
@@ -319,54 +325,61 @@ say "Déploiement de l'environnement"
 
 info "copie de rootfs/ vers /"
 run "cp -a '$REPO_DIR/rootfs/.' /"
-run "chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer /usr/local/bin/claude-os-session"
-run "chmod +x /etc/xdg/labwc/autostart"
+run "chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer /usr/local/bin/claude-os-session /usr/local/bin/claude-os-greeter"
+run "chmod +x /etc/xdg/labwc/autostart /etc/xdg/labwc-greeter/autostart"
 
-# La session est WAYLAND. LightDM lit /usr/share/wayland-sessions ; l'ancienne
-# session X11 doit disparaître, sinon elle reste proposée à la connexion et un
-# choix malheureux ramène une interface qui n'existe plus.
-info "session Wayland enregistrée auprès de LightDM"
+# La session est WAYLAND, et l'écran de connexion aussi. L'ancienne session
+# X11 doit disparaître, sinon elle reste proposée à la connexion et un choix
+# malheureux ramène une interface qui n'existe plus.
+info "écran de connexion : greetd + claude-os-connexion"
 run "rm -f /usr/share/xsessions/claude-os.desktop"
 run "rm -f '$TARGET_HOME/.xsession'"
 
-# Ouvrir directement sur la session : il n'y a qu'un utilisateur et qu'une
-# session, l'écran de connexion n'a rien à demander.
-run "mkdir -p /etc/lightdm/lightdm.conf.d"
-run "cat > /etc/lightdm/lightdm.conf.d/50-claude-os.conf <<'EOF'
-[Seat:*]
-# Les sessions Wayland ne sont pas cherchées partout selon les versions :
-# on nomme les trois répertoires plutôt que de s'en remettre au défaut.
-sessions-directory=/usr/share/lightdm/sessions:/usr/share/wayland-sessions:/usr/share/xsessions
-user-session=claude-os
+# Le compte à ouvrir. Le greeter sait le trouver seul — le seul UID entre
+# 1000 et 60000 — mais l'écrire ici lève toute ambiguïté si un second compte
+# apparaît un jour.
+run "mkdir -p /etc/claude-os"
+run "printf '%s\n' '$TARGET_USER' > /etc/claude-os/utilisateur"
+
+# greetd n'affiche rien de lui-même : il lance un compositeur, qui lance
+# notre champ de mot de passe. Le compte « _greetd » vient du paquet.
+run "mkdir -p /etc/greetd"
+run "cat > /etc/greetd/config.toml <<'EOF'
+# Claude OS — ouverture de session.
+#
+# greetd ne dessine rien. Il lance labwc avec une configuration NUE — aucun
+# raccourci clavier, aucun menu — qui lance claude-os-connexion. Une fois le
+# mot de passe accepté, greetd remplace le tout par la session.
+
+[terminal]
+# Le premier terminal virtuel, celui qu'on voit au démarrage.
+vt = 1
+
+[default_session]
+command = \"labwc -C /etc/xdg/labwc-greeter\"
+user = \"_greetd\"
 EOF"
 
-# LA PRÉFÉRENCE DE L'UTILISATEUR L'EMPORTE SUR « user-session ».
+# LA BASCULE DU GESTIONNAIRE DE SESSION.
 #
-# LightDM retient la dernière session choisie et la relance, quoi que dise le
-# réglage du siège. Celle de cette machine valait « lightdm-xsession » : la
-# session X générique de Debian, qui exécute ~/.xsession. L'ancienne
-# installation y mettait le lancement du bureau ; en le supprimant, on a
-# laissé LightDM relancer une session vide.
+# On désactive sans arrêter : couper LightDM maintenant fermerait la session
+# en cours, celle depuis laquelle ce script tourne peut-être. La bascule
+# prend effet au redémarrage.
 #
-# Debian ne s'arrête pas là pour autant : privé de ~/.xsession, son
-# /etc/X11/Xsession descend sa liste de replis et finit par ouvrir
-# x-terminal-emulator. D'où le symptôme exact observé — fond noir, curseur,
-# et une fenêtre de terminal apparue toute seule.
-info "session par défaut de l'utilisateur : claude-os"
-run "printf '[Desktop]\nSession=claude-os\n' > '$TARGET_HOME/.dmrc'"
-run "chown '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.dmrc'"
-run "chmod 0644 '$TARGET_HOME/.dmrc'"
-
-# AccountsService, quand il est là, double cette information et gagne. Les
-# deux doivent dire la même chose. On ne réécrit QUE ces deux clés : le
-# fichier porte aussi la langue et l'icône du compte.
-AS="/var/lib/AccountsService/users/$TARGET_USER"
-if [ -f "$AS" ]; then
-	run "sed -i -e '/^Session=/d' -e '/^XSession=/d' '$AS'"
-	run "sed -i -e '/^\\[User\\]/a XSession=claude-os' -e '/^\\[User\\]/a Session=claude-os' '$AS'"
-	info "AccountsService mis d'accord"
-elif [ -d /var/lib/AccountsService/users ]; then
-	run "printf '[User]\nSession=claude-os\nXSession=claude-os\n' > '$AS'"
+# LightDM n'est PAS purgé à cette étape, et c'est délibéré. Un écran de
+# connexion qui refuse de s'afficher enferme dehors — le clavier de ce
+# Chromebook n'a pas de touches F pour changer de terminal virtuel, il ne
+# resterait que SSH. Tant que greetd n'a pas fait ses preuves, le retour en
+# arrière doit tenir en une commande :
+#
+#     sudo systemctl disable greetd && sudo systemctl enable lightdm
+#
+if systemctl list-unit-files 2>/dev/null | grep -q '^greetd\.service'; then
+	info "activation de greetd, désactivation de LightDM"
+	run "systemctl disable lightdm >/dev/null 2>&1 || true"
+	run "systemctl enable greetd >/dev/null 2>&1"
+else
+	warn "greetd n'est pas installé : l'écran de connexion reste celui de LightDM"
 fi
 
 # Le fichier de configuration du shell. ÉCRIT UNE SEULE FOIS.

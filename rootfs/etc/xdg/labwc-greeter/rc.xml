@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<!--
+  Claude OS — labwc pour l'écran de connexion.
+
+  Volontairement NU. Ce compositeur ne porte qu'une chose : le champ de mot
+  de passe. Aucun raccourci n'est défini — pas de terminal, pas de plein
+  écran, pas de sortie de session — parce que tout raccourci ici serait une
+  porte ouverte AVANT authentification.
+
+  C'est pourquoi cette configuration est séparée de celle de la session :
+  celle du bureau, elle, offre un terminal de secours au clavier. Les deux
+  besoins sont opposés, ils ne peuvent pas partager un fichier.
+-->
+<labwc_config>
+
+  <core>
+    <decoration>client</decoration>
+    <gap>0</gap>
+  </core>
+
+  <theme>
+    <dropShadows>no</dropShadows>
+  </theme>
+
+  <keyboard>
+    <!-- Pas de <default /> : les raccourcis intégrés de labwc — Alt-Tab,
+         Alt-F4, déplacement de fenêtre — n'ont rien à faire sur un écran de
+         connexion. Leur absence est le but. -->
+  </keyboard>
+
+  <mouse>
+    <!-- Aucun menu au clic droit sur le fond. -->
+  </mouse>
+
+</labwc_config>

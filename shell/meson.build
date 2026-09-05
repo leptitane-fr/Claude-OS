@@ -14,6 +14,10 @@ layershell = dependency('gtk4-layer-shell-0')
 giounix    = dependency('gio-unix-2.0')   # GDesktopAppInfo
 wlclient   = dependency('wayland-client')
 pangocairo = dependency('pangocairo')   # liste des familles installees
+# L'ecran de connexion parle a greetd en JSON. Ecrire un analyseur a la main
+# pour un protocole dont une erreur d'analyse empeche de se connecter n'est
+# pas un pari raisonnable ; json-glib pese 150 Ko et ne depend que de GLib.
+jsonglib   = dependency('json-glib-1.0')
 
 # wlr-foreign-toplevel-management-v1 : le protocole qui dit quelles fenetres
 # sont ouvertes. Il n'est empaquete nulle part dans Debian trixie -- aucun
@@ -61,6 +65,11 @@ executable('claude-os-fond',
 executable('claude-os-lanceur',
   'src/launcher.c', commun,
   dependencies : [gtk, layershell, giounix, pangocairo],
+  install : true)
+
+executable('claude-os-connexion',
+  'src/connexion.c', commun,
+  dependencies : [gtk, layershell, giounix, pangocairo, jsonglib],
   install : true)
 
 executable('claude-os-fichiers',

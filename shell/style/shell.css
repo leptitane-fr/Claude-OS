@@ -895,3 +895,68 @@ window.fichiers-dialogue { background-color: @surface; }
 
 window.fichiers-progres { background-color: @surface; }
 .fichiers-progres-pile  { padding: 18px; }
+
+/* =========================================================================
+   Écran de connexion
+
+   Il précède le bureau : il doit lui ressembler. Même dégradé de fond —
+   celui du thème —, mêmes surfaces, même accent, même horloge en bas à
+   droite. Rien d'autre à l'écran qu'un nom et un champ.
+   ========================================================================= */
+
+.connexion-carte {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-radius: 20px;
+  padding: 32px 36px;
+  min-width: 300px;
+  /* Même doublement d'ombre que le dock : une large pour l'élévation, une
+     courte pour asseoir le contact. */
+  box-shadow: 0 16px 44px @shadow,
+              0 2px   8px @shadow-close;
+}
+
+.connexion-nom {
+  font-size: 19px;
+  font-weight: 500;
+  color: @text;
+  margin-bottom: 4px;
+}
+
+/* « background: none » d'abord : Adwaita peint les champs avec un
+   background-IMAGE qui recouvrirait toute couleur posée dessous. */
+.connexion-mdp {
+  background: none;
+  background-color: @surface-alt;
+  border: 1px solid transparent;
+  box-shadow: none;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 14px;
+  color: @text;
+  min-height: 38px;
+}
+
+.connexion-mdp:focus-within { border-color: @accent; }
+
+.connexion-message {
+  font-size: 12px;
+  color: @text-dim;
+  min-height: 16px;
+}
+
+/* Le seul endroit coloré de cet écran, et il ne s'allume qu'en cas d'échec. */
+.connexion-message.faute { color: @danger; }
+
+.connexion-coin { padding: 0 28px 24px 0; }
+
+.connexion-heure {
+  font-size: 34px;
+  font-weight: 300;
+  color: @text;
+}
+
+.connexion-date {
+  font-size: 13px;
+  color: @text-dim;
+}
