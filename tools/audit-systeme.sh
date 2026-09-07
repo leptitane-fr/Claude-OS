@@ -109,10 +109,20 @@ sec "2. Ce qui tourne"
 
 val "mémoire utilisée" "$(free -m | awk '/^Mem:/{print $3 " Mo sur " $2}')"
 echo
-echo "  --- les 20 processus les plus gourmands ---"
-ps -eo rss,pid,user,comm --sort=-rss 2>/dev/null | head -21 \
-	| awk 'NR==1{printf "      %8s %7s %-10s %s\n","Mo","PID","USER","COMMANDE"; next}
-	       {printf "      %8.1f %7s %-10s %s\n", $1/1024, $2, $3, $4}'
+echo "  --- les 20 processus les plus gourmands, en mémoire RÉELLE (PSS) ---"
+# RSS compte chaque page partagée dans TOUS les processus qui la voient :
+# trois programmes GTK4 affichent chacun la totalité de GTK, et leur somme
+# dépasse largement ce qu'ils occupent vraiment. Le PSS, lui, répartit chaque
+# page partagée entre ses utilisateurs — c'est le seul chiffre qu'on peut
+# additionner.
+for pid in $(ls /proc | grep -E '^[0-9]+$'); do
+	PSS="$(awk '/^Pss:/{s+=$2} END{print s+0}' "/proc/$pid/smaps_rollup" 2>/dev/null)"
+	[ "${PSS:-0}" -gt 0 ] 2>/dev/null || continue
+	printf '%s %s %s\n' "$PSS" "$pid" "$(tr -d '\0' < "/proc/$pid/comm" 2>/dev/null)"
+done | sort -rn | head -20 \
+	| awk 'BEGIN{printf "      %8s %7s %s\n","Mo","PID","COMMANDE"}
+	       {t+=$1; printf "      %8.1f %7s %s\n", $1/1024, $2, $3}
+	       END{printf "      %8.1f          — total des 20\n", t/1024}'
 
 echo
 echo "  --- services système actifs ---"
@@ -177,7 +187,14 @@ for motif in gnome- xfce4- xfce mate- lxde lxqt kde plasma cinnamon budgie \
 	[ -n "$T" ] && ETRANGERS="$ETRANGERS $T"
 done
 if [ -n "$ETRANGERS" ]; then
-	for p in $ETRANGERS; do echo "      $p"; done
+	# Le nom seul ne dit pas s'il peut partir. Ce qui compte, c'est QUI en
+	# dépend : un paquet dont rien ne dépend se purge, les autres non.
+	for p in $ETRANGERS; do
+		DEP="$(apt-cache rdepends --installed --no-recommends --no-suggests \
+		        --no-enhances --no-breaks --no-replaces --no-conflicts "$p" 2>/dev/null \
+		       | tail -n +3 | tr -d ' |' | grep -v "^$p$" | sort -u | tr '\n' ' ')"
+		printf '      %-28s dépendants installés : %s\n' "$p" "${DEP:-AUCUN — purgeable}"
+	done
 else
 	echo "      aucun ✓"
 fi

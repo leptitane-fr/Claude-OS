@@ -136,6 +136,17 @@ else
 	fi
 fi
 
+# TOUT CE QUI EST LISTÉ EST « MANUEL », ET LE RESTE.
+#
+# Un paquet marqué « installé automatiquement » est à la merci du prochain
+# apt autoremove. C'est ainsi que Chromium a disparu de cette machine : il
+# figurait dans cette liste, mais son marquage disait le contraire, et le
+# nettoyage de fin de fourniture l'a emporté sans un mot.
+#
+# apt-mark est idempotent et ne coûte rien ; il est le garde-fou de
+# l'autoremove qui suit.
+run "apt-mark manual $PKGS >/dev/null 2>&1 || true"
+
 # --------------------------------------------------------- Claude Desktop
 
 if [ "$WITH_CLAUDE" -eq 1 ]; then
@@ -377,10 +388,38 @@ EOF"
 if systemctl list-unit-files 2>/dev/null | grep -q '^greetd\.service'; then
 	info "activation de greetd, désactivation de LightDM"
 	run "systemctl disable lightdm >/dev/null 2>&1 || true"
-	run "systemctl enable greetd >/dev/null 2>&1"
+
+	# LE SYMLIEN QUI BLOQUAIT TOUT.
+	#
+	# greetd.service porte « Alias=display-manager.service », comme tout
+	# gestionnaire de session. Or /etc/systemd/system/display-manager.service
+	# existe déjà : il pointe sur lightdm, posé par son paquet et non par
+	# « systemctl enable ». « systemctl disable lightdm » ne le retire donc
+	# pas, et « systemctl enable greetd » échoue sur « File exists ».
+	#
+	# La sortie de cette commande partait dans /dev/null : l'activation
+	# échouait sans un mot, la machine redémarrait sur LightDM, et le
+	# correctif semblait n'avoir « rien changé ». Constaté sur la machine.
+	run "rm -f /etc/systemd/system/display-manager.service"
+	run "systemctl enable greetd"
+
+	# On VÉRIFIE. Une bascule de gestionnaire de session qu'on croit faite
+	# et qui ne l'est pas coûte un redémarrage et une soirée.
+	if [ "$DRY" -eq 0 ] && ! systemctl is-enabled greetd >/dev/null 2>&1; then
+		warn "l'activation de greetd a échoué — LightDM est remis en service"
+		warn "pour ne pas laisser la machine sans écran de connexion."
+		run "systemctl enable lightdm >/dev/null 2>&1 || true"
+	else
+		info "greetd activé ; LightDM ne démarrera plus"
+	fi
 else
 	warn "greetd n'est pas installé : l'écran de connexion reste celui de LightDM"
 fi
+
+# Debian retient le gestionnaire de session choisi dans ce fichier, que
+# certains scripts de paquets relisent. Il doit dire la même chose que
+# systemd, sinon une mise à jour de lightdm peut tout ramener en arrière.
+run "printf '%s\n' /usr/sbin/greetd > /etc/X11/default-display-manager"
 
 # Le fichier de configuration du shell. ÉCRIT UNE SEULE FOIS.
 #
@@ -537,11 +576,53 @@ done
 # Trois familles de firmware Wi-Fi sont embarquées faute de certitude sur le
 # module. Une fois la machine démarrée, celles qui ne servent pas peuvent
 # partir : c'est quelques dizaines de Mo sur un eMMC déjà petit.
+# --- services qui tournent sans servir ------------------------------------
+#
+# Chacun est justifié individuellement. Rien n'est désactivé « parce que ça a
+# l'air inutile » : cron et anacron restent, par exemple, parce que Debian y
+# fait tourner la rotation des journaux et l'indexation des pages de manuel —
+# les couper remplirait le disque en silence.
+
+# Unités SYSTÈME.
+if systemctl list-unit-files NetworkManager-wait-online.service 2>/dev/null \
+   | grep -q NetworkManager-wait-online; then
+	info "NetworkManager-wait-online : retarde le démarrage jusqu'à ce que"
+	info "  le réseau réponde. Rien ici n'attend le réseau pour démarrer."
+	run "systemctl disable NetworkManager-wait-online.service >/dev/null 2>&1 || true"
+fi
+
+# Unités UTILISATEUR, masquées globalement.
+#
+# « systemctl --user » demanderait le bus de l'utilisateur, que ce script —
+# lancé en root — n'a pas. « --global mask » écrit dans /etc/systemd/user et
+# ne demande aucun bus. C'est réversible : systemctl --global unmask.
+for svc in foot-server.socket foot-server.service \
+           mpris-proxy.service filter-chain.service; do
+	case "$svc" in
+		foot-server.*)      quoi="mode serveur de foot, dont rien ne se sert ici" ;;
+		mpris-proxy.service) quoi="relais des touches multimédia Bluetooth, non câblées" ;;
+		filter-chain.service) quoi="chaîne de filtres PipeWire, vide sur cette machine" ;;
+	esac
+	info "$svc : $quoi"
+	run "systemctl --global mask '$svc' >/dev/null 2>&1 || true"
+done
+
 info "firmware Wi-Fi : purger les familles inutilisées après validation"
 info "  lspci -nnk | grep -A3 -i network    puis  apt purge firmware-<inutile>"
 
+# L'AUTOREMOVE NE DOIT PAS ÊTRE MUET.
+#
+# C'est lui qui a emporté Chromium, et sa sortie partait dans /dev/null : la
+# fourniture s'est terminée « sans erreur » sur un système amputé. On regarde
+# d'abord ce qu'il compte retirer, on le dit, et on ne le fait qu'ensuite.
 info "nettoyage des paquets orphelins"
-run "apt-get autoremove -y --purge >/dev/null 2>&1 || true"
+ORPHELINS="$(apt-get -s autoremove 2>/dev/null | sed -n 's/^Remv \([^ ]*\).*/\1/p' | tr '\n' ' ')"
+if [ -n "$ORPHELINS" ]; then
+	info "à retirer :$ORPHELINS"
+	run "apt-get autoremove -y --purge >/dev/null 2>&1 || true"
+else
+	info "aucun orphelin"
+fi
 run "apt-get clean"
 
 # ------------------------------------------------------- contrôle final
