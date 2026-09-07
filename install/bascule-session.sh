@@ -30,6 +30,11 @@
 #                redémarrage, la machine s'en aperçoit seule, écrit pourquoi,
 #                et repart sur un écran où l'on peut entrer.
 #
+#   --deployer   Recopie rootfs/ vers / — les lanceurs, la configuration de
+#                labwc, le filet — sans toucher aux paquets ni au shell
+#                compilé. « git pull » met à jour le DÉPÔT, pas la machine :
+#                c'est cette étape qui manquait entre les deux.
+#
 #   --revenir    Défait la bascule.
 #
 # USAGE
@@ -47,6 +52,7 @@ ACTION=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--verifier) ACTION=verifier ;;
+		--deployer) ACTION=deployer ;;
 		--essai)    ACTION=essai
 		            if [ "${2:-}" ] && [ -z "${2//[0-9]/}" ]; then DUREE="$2"; shift; fi ;;
 		--basculer) ACTION=basculer ;;
@@ -202,6 +208,51 @@ verifier() {
 	printf '  \033[31m%d anomalie(s). NE PAS basculer avant correction.\033[0m\n' "$ANOMALIES"
 	printf '      La plupart se corrigent en relançant :  sudo bash install/provision.sh\n'
 	return 1
+}
+
+# ===========================================================================
+#  DÉPLOYER — recopier rootfs/ sans relancer toute la fourniture
+# ===========================================================================
+#
+#  « git pull » met à jour le dépôt ; il ne touche pas à /usr/local/bin ni à
+#  /etc/xdg. Un correctif apporté à un lanceur restait donc dans le dépôt
+#  pendant qu'on essayait l'ancienne version sur la machine, sans que rien ne
+#  le signale. C'est arrivé ici : le greeter corrigé pour ne plus perdre son
+#  journal n'était pas celui qui tournait.
+#
+#  provision.sh fait ce déploiement, mais il réinstalle aussi les paquets et
+#  recompile le shell — plusieurs minutes qu'on ne veut pas payer pour copier
+#  quatre fichiers pendant un diagnostic.
+deployer() {
+	DEPOT="$(cd "$(dirname "$0")/.." && pwd)"
+	[ -d "$DEPOT/rootfs" ] || die "rootfs/ introuvable dans $DEPOT"
+
+	say "Déploiement de rootfs/ depuis $DEPOT"
+	info "branche : $(git -C "$DEPOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+	info "commit  : $(git -C "$DEPOT" log --oneline -1 2>/dev/null || echo '?')"
+
+	cp -a "$DEPOT/rootfs/." /
+	chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer \
+	         /usr/local/bin/claude-os-session /usr/local/bin/claude-os-greeter \
+	         /etc/xdg/labwc/autostart /etc/xdg/labwc-greeter/autostart \
+	         /usr/local/lib/claude-os/filet-session 2>/dev/null || true
+	ok "fichiers copiés" "/usr/local/bin, /etc/xdg, /usr/local/lib"
+
+	# Le journal de l'écran de connexion doit appartenir à « _greetd », sans
+	# quoi le greeter ne peut pas y écrire et sa panne reste muette.
+	if getent passwd _greetd >/dev/null 2>&1; then
+		touch /var/log/claude-os-connexion.log
+		chown _greetd:_greetd /var/log/claude-os-connexion.log
+		chmod 0644 /var/log/claude-os-connexion.log
+		ok "journal du greeter" "accessible à _greetd"
+	else
+		ko "compte _greetd" "absent — greetd est-il installé ?"
+	fi
+
+	systemctl daemon-reload 2>/dev/null || true
+	echo
+	info "Déployé. L'essai peut être relancé :"
+	info "    sudo bash $0 --essai"
 }
 
 # ---------------------------------------------------------------------------
@@ -368,7 +419,17 @@ EOF
 	                      || ko "le GREETER ne tourne pas"
 
 	if [ -z "$GREETER_PID" ]; then
-		postmortem_essai
+		# L'AUTOPSIE VA DANS UN FICHIER, PAS À L'ÉCRAN.
+		#
+		# Elle fait plusieurs dizaines de lignes, et une sortie de console
+		# recopiée à la main se fait couper — on a déjà perdu deux allers-
+		# retours sur des journaux tronqués en cours de route. L'écran ne
+		# reçoit que le verdict ; le fichier porte tout, et se transmet
+		# d'un bloc.
+		RAPPORT="/var/log/claude-os-essai-$(date '+%Y%m%d-%H%M%S').txt"
+		postmortem_essai > "$RAPPORT" 2>&1
+		chmod 0644 "$RAPPORT" 2>/dev/null || true
+		resume_essai "$RAPPORT"
 	fi
 
 	RESTE=$((DUREE - 15))
@@ -384,6 +445,42 @@ EOF
 	info "Si le champ de mot de passe s'est affiché, la bascule est sûre :"
 	info "    sudo bash $0 --basculer"
 	info "Sinon, ne rien basculer et transmettre TOUT le texte ci-dessus."
+}
+
+# ---------------------------------------------------------------------------
+#  Le verdict à l'écran : court, pour être lu et recopié sans être tronqué.
+# ---------------------------------------------------------------------------
+resume_essai() {
+	R="$1"
+	echo
+	warn "L'essai a échoué."
+	echo
+	info "── les constats ──"
+	grep -aE '✓|✗' "$R" 2>/dev/null | sed 's/^/  /'
+	echo
+	info "── journal de greetd, 12 dernières lignes ──"
+	journalctl -u claude-os-essai-greeter -b --no-pager 2>/dev/null \
+		| tail -12 | sed 's/^/      /'
+	echo
+	info "── ce qu'a dit l'écran de connexion ──"
+	TROUVE=0
+	for f in /var/log/claude-os-connexion.log \
+	         /run/user/*/claude-os-connexion.log \
+	         /tmp/claude-os-connexion.log; do
+		[ -s "$f" ] || continue
+		info "  ($f)"
+		tail -20 "$f" | sed 's/^/      /'
+		TROUVE=1
+	done
+	if [ "$TROUVE" -eq 0 ]; then
+		warn "  AUCUN journal du greeter nulle part."
+		warn "  Cela veut dire qu'il n'a même pas été LANCÉ par labwc,"
+		warn "  ou que /usr/local/bin/claude-os-greeter est l'ancienne"
+		warn "  version, muette. Déployer puis recommencer :"
+		warn "      sudo bash $0 --deployer"
+	fi
+	echo
+	printf '  \033[1mRapport complet à transmettre : %s\033[0m\n' "$R"
 }
 
 # ===========================================================================
@@ -459,6 +556,7 @@ revenir() {
 
 case "$ACTION" in
 	verifier) verifier ;;
+	deployer) deployer ;;
 	essai)    essai ;;
 	basculer) basculer ;;
 	revenir)  revenir ;;
