@@ -1,0 +1,153 @@
+# Claude OS — à lire avant toute intervention
+
+Ce fichier est chargé automatiquement à l'ouverture d'une session. Il dit
+**où en est le projet** et **ce qu'on ne casse jamais**. Le détail est dans
+[`docs/`](docs/) ; ici, l'essentiel pour reprendre la main sans dommage.
+
+---
+
+## Où en est le projet — 7 septembre 2026
+
+**Le bureau est en service.** Firmware UEFI flashé, Debian 13 installée,
+`greetd` ouvre l'écran de connexion Claude OS, le mot de passe est accepté et
+la session labwc s'ouvre avec le dock, la barre d'état et le lanceur.
+
+La machine est un **HP Chromebook x360 14b-cb0000sf**, board `MADOO`,
+Pentium Silver N6000, **4 Go de RAM soudée**. Compte utilisateur : `stef`.
+Accès SSH actif — c'est le filet de secours de toute intervention.
+
+Versions constatées sur la machine : labwc 0.8.3, greetd 0.10.3,
+xwayland 2:24.1.6, libgtk4-layer-shell0 1.0.4, dbus-user-session 1.16.2.
+
+### Ce qui reste ouvert
+
+| Sujet | État |
+|---|---|
+| **Audio** | **EN ÉCHEC.** `sof_rt5682 jsl_rt5682_def: probe with driver sof_rt5682 failed with error -22`, précédé de `ipc tx timed out` et `failed to load DSP topology`. Le DSP démarre mais la topologie ne se charge pas. C'est le risque n°1 identifié dès `docs/01`. |
+| Affichage au démarrage | L'écran reste noir avec deux lignes d'erreur jusqu'à ce qu'on touche le pavé tactile, puis l'écran de connexion apparaît. Non diagnostiqué. |
+| Rangée supérieure du clavier | Non câblée. `tools/probe-keys.sh` relève les codes, les liaisons labwc restent à écrire. |
+| Reports | rclone (Drive, OneDrive), notifications, icônes sur le bureau. |
+
+---
+
+## Les invariants — les enfreindre casse la machine
+
+Chacun a coûté une soirée. Ils sont vérifiés par
+`install/bascule-session.sh --verifier` ; ne pas les contourner.
+
+### 1. Ne JAMAIS purger `xwayland`, `x11-common` ni `xserver-common`
+
+`labwc` porte `Depends: xwayland`, et `xwayland → xserver-common →
+x11-common`. Nommer l'un de ces trois dans une purge **désinstalle le
+compositeur**, et la machine redémarre sans bureau ni écran de connexion.
+
+Xwayland n'est jamais exécuté — tout parle Wayland nativement — mais il doit
+rester installé. `xserver-xorg-core`, lui, est sans danger : mesuré.
+
+`provision.sh` interroge apt **avant** toute purge et l'abandonne si un
+composant vital figure dans la cascade. Ne pas retirer ce garde-fou.
+
+### 2. `/tmp/.X11-unix` doit appartenir à `root`, mode `1777`
+
+labwc démarre Xwayland à l'ouverture et **traite son échec comme fatal**.
+Xwayland refuse le répertoire s'il n'appartient ni à root ni à l'utilisateur
+courant. L'écran de connexion tourne sous `_greetd` : si c'est lui qui crée
+le répertoire, la **session de l'utilisateur** ne peut plus s'en servir et
+meurt en une seconde, en boucle — l'écran de connexion, lui, reste parfait.
+
+La règle est dans `rootfs/etc/tmpfiles.d/claude-os-x11.conf`.
+
+### 3. `git pull` ne déploie RIEN
+
+`rootfs/` n'est recopié vers `/` que par `provision.sh` ou par
+`bascule-session.sh --deployer`. Trois séances de diagnostic ont porté sur
+des correctifs présents dans le dépôt et absents de la machine.
+
+**Après tout `git pull` touchant `rootfs/`, lancer `--deployer`.**
+
+### 4. Aucune sortie de commande n'est envoyée dans `/dev/null`
+
+Ce projet a perdu Chromium, puis le compositeur, puis une bascule de
+gestionnaire de session, à cause de trois `>/dev/null 2>&1` sur des
+commandes qui échouaient en silence. Une commande qui peut échouer doit
+parler, et son code de retour doit être lu.
+
+### 5. Ce dépôt n'a pas de branche par défaut
+
+Trois branches `claude/…` coexistent. Un `git pull` sur la mauvaise répond
+« Déjà à jour » sans rien changer. `provision.sh` affiche désormais sa
+branche et son commit, et **refuse de tourner** s'il est antérieur au
+correctif de la purge. La branche de référence est
+`claude/examine-project-qgnt80`.
+
+---
+
+## Intervenir sur la session graphique
+
+Par étapes, et **jamais d'un bloc** — c'est la forme « tout d'un coup » qui a
+produit la panne de septembre autant que son contenu.
+
+```sh
+cd ~/Claude-OS && git pull
+sudo bash install/bascule-session.sh --verifier   # ne change rien
+sudo bash install/bascule-session.sh --deployer   # recopie rootfs/ vers /
+sudo bash install/bascule-session.sh --essai      # ← REGARDER L'ÉCRAN
+sudo bash install/bascule-session.sh --basculer   # arme le filet, puis bascule
+sudo systemctl reboot
+```
+
+`--essai` affiche le véritable écran de connexion sur un terminal virtuel
+libre pendant trente secondes, puis rend l'affichage — sans rien activer,
+sans rien purger, sans toucher à la session en cours. En cas d'échec il verse
+son autopsie dans `/var/log/claude-os-essai-<date>.txt`.
+
+`--revenir` défait la bascule.
+
+### Le filet de sécurité
+
+Armé par `provision.sh` et par `--basculer`. Quatre minutes après le
+démarrage, il vérifie que l'écran de connexion est affiché ou qu'une session
+est ouverte. Sinon il écrit `/var/log/claude-os-echec-<date>.txt` — état des
+binaires, des paquets, journaux de greetd et labwc — **avant** de désactiver
+greetd et de redémarrer sur un écran où l'on peut entrer. Il se désarme seul
+dès que la session a fait ses preuves.
+
+Il garantit qu'on ne peut plus être enfermé dehors. Il ne couvre pas le cas
+« écran de connexion présent mais session qui boucle » : c'est voulu.
+
+---
+
+## Où lire quoi quand ça ne marche pas
+
+| Symptôme | Fichier |
+|---|---|
+| Pas d'écran de connexion, console texte, écran noir | `sudo bash tools/diag-connexion.sh` |
+| Session ouverte mais bureau anormal | `bash tools/diag-session.sh` |
+| L'écran de connexion meurt | `/var/log/claude-os-connexion.log` |
+| La session meurt | `~/.local/state/claude-os/session.log` (et `.1`) |
+| Le bureau démarre mal | `~/.local/state/claude-os/shell.log` |
+| Le filet est intervenu | `/var/log/claude-os-filet.log` |
+
+Le greeter et la session consignent leur contexte, leur sortie complète et
+leur **code de retour**. Un journal vide alors qu'une tentative a eu lieu
+signifie que le programme n'a pas été lancé du tout — pas qu'il s'est tu.
+
+---
+
+## Méthode
+
+Ce projet s'est trompé plusieurs fois en annonçant des causes avec assurance.
+Trois règles en sont sorties :
+
+1. **Mesurer, pas supposer.** Une dépendance se lit dans `apt-cache show`,
+   un comportement de labwc dans sa source, une panne dans son journal. Les
+   décisions d'architecture prises sans machine sont des hypothèses.
+2. **Écrire ce qui n'est pas établi comme tel.** `docs/06` dit explicitement
+   ce qui n'a jamais été prouvé. Une cause plausible n'est pas une cause.
+3. **Un outil de diagnostic qui ment coûte plus qu'il ne rapporte.** Deux
+   faux négatifs ont été trouvés et corrigés avant livraison ; l'essai lui-même
+   fabriquait un temps le symptôme qu'il cherchait.
+
+Le code et les commentaires sont **en français**, et les commentaires
+expliquent *pourquoi*, pas *quoi*. Les messages de commit sont en français,
+détaillés, et disent ce qui a été mesuré.

@@ -15,7 +15,7 @@
 # la session labwc SANS purge, valider leur démarrage, puis seulement retirer
 # les composants X11 ». Ce script est cette procédure.
 #
-# QUATRE ÉTAPES, TROIS RÉVERSIBLES SANS REDÉMARRER
+# CINQ ÉTAPES, UNE SEULE QUI ENGAGE
 #
 #   --verifier   Ne change RIEN. Contrôle que tout ce dont l'écran de
 #                connexion a besoin est présent et cohérent.
@@ -37,8 +37,12 @@
 #
 #   --revenir    Défait la bascule.
 #
+# Seul --basculer change le gestionnaire de session, et il arme le filet
+# avant de le faire. Les quatre autres se défont sans redémarrer.
+#
 # USAGE
 #   sudo bash install/bascule-session.sh --verifier
+#   sudo bash install/bascule-session.sh --deployer
 #   sudo bash install/bascule-session.sh --essai [secondes]   (défaut : 30)
 #   sudo bash install/bascule-session.sh --basculer
 #   sudo bash install/bascule-session.sh --revenir
@@ -674,8 +678,9 @@ revenir() {
 	else
 		systemctl set-default multi-user.target >/dev/null 2>&1 || true
 		ok "console texte" "la machine démarrera sur une console"
-		info "Pour retrouver un écran graphique complet :"
-		info "    sudo bash install/restore-session-x11-ssh.sh"
+		info "On s'y connecte au clavier, sans seconde machine. Pour revenir"
+		info "à l'écran de connexion Claude OS une fois le défaut corrigé :"
+		info "    sudo bash $0 --verifier   puis   --essai   puis   --basculer"
 	fi
 	info "Effectif au prochain redémarrage."
 }

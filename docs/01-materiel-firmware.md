@@ -353,7 +353,7 @@ Les quatre points doivent être vrais simultanément :
 
 | Risque | Détail | Gravité |
 |---|---|---|
-| **Audio** | Les Chromebooks Jasper Lake utilisent SOF (Sound Open Firmware) avec un codec discret et des amplificateurs de haut-parleurs pilotés séparément. Symptôme classique : le casque fonctionne, les haut-parleurs internes restent muets faute du bon profil UCM. Le noyau 6.12 de Debian 13 et un `alsa-ucm-conf` récent améliorent nettement la situation, sans garantie. | **Élevée** — c'est le premier point à tester. |
+| **Audio** | Les Chromebooks Jasper Lake utilisent SOF (Sound Open Firmware) avec un codec discret et des amplificateurs de haut-parleurs pilotés séparément. Symptôme classique : le casque fonctionne, les haut-parleurs internes restent muets faute du bon profil UCM. Le noyau 6.12 de Debian 13 et un `alsa-ucm-conf` récent améliorent nettement la situation, sans garantie. | **AVÉRÉ — voir §1.8.** |
 | **Wi-Fi** | Firmware `iwlwifi` non libre requis. S'il n'est pas embarqué dans l'image d'installation, la machine démarre sans réseau. | Moyenne, mais bloquante à l'installation. |
 | **Veille** | Le S0ix sur Chromebook hors ChromeOS est souvent imparfait : consommation en veille supérieure à l'origine. | Moyenne — confort. |
 | **Clavier** | Rangée de touches ChromeOS non standard ; pas de touches F1–F12 physiques. Nécessite un remappage. | Faible — purement logiciel. |
@@ -361,7 +361,51 @@ Les quatre points doivent être vrais simultanément :
 
 ---
 
-## 1.8 Sources
+## 1.8 Audio — le risque s'est réalisé
+
+**Relevé sur la machine le 7 septembre 2026**, dans le journal de démarrage.
+Ce n'est plus une hypothèse : la carte son ne s'initialise pas du tout.
+
+```
+sof-audio-pci-intel-icl 0000:00:1f.3: ipc tx timed out for 0x30100000
+sof-audio-pci-intel-icl 0000:00:1f.3: fw_state: SOF_FW_BOOT_COMPLETE (7)
+sof-audio-pci-intel-icl 0000:00:1f.3: Failed to setup widget PIPELINE.12.DMIC1.IN
+sof-audio-pci-intel-icl 0000:00:1f.3: error: tplg component load failed -110
+sof-audio-pci-intel-icl 0000:00:1f.3: error: failed to load DSP topology -22
+sof_rt5682 jsl_rt5682_def: ASoC: failed to instantiate card -22
+sof_rt5682 jsl_rt5682_def: probe with driver sof_rt5682 failed with error -22
+```
+
+Ce que ces lignes disent, dans l'ordre :
+
+1. le **firmware DSP démarre** — `SOF_FW_BOOT_COMPLETE` — donc le blob est
+   présent et se charge. Ce n'est pas un firmware manquant ;
+2. la première commande envoyée au DSP **expire** (`ipc tx timed out`) ;
+3. la **topologie** échoue en conséquence, sur le widget `DMIC1.IN` — le
+   microphone numérique ;
+4. la carte `jsl_rt5682` n'est donc jamais instanciée : aucun périphérique
+   audio n'existe côté ALSA.
+
+Le blocage est au chargement de la topologie, pas au profil UCM. Le symptôme
+attendu était « les haut-parleurs restent muets » ; le symptôme réel est
+« il n'y a pas de carte son ».
+
+Deux pistes, dans cet ordre :
+
+- **la topologie fournie ne correspond pas à cette carte.** Les Chromebooks
+  Jasper Lake déclarent leur variante par le HWID ; `sof-firmware` de Debian
+  peut livrer une topologie générique là où ChromeOS en utilisait une
+  spécifique. Comparer le fichier `.tplg` retenu avec la variante `MADOO` ;
+- **le DMIC est déclaré alors qu'il n'existe pas ou diffère.** L'échec porte
+  précisément sur `PIPELINE.12.DMIC1.IN` ; un paramètre noyau
+  `snd_sof_intel_hda_generic.dmic_num=` permet de le forcer, et sert d'essai
+  de bissection.
+
+Le relevé complet est produit par `bash tools/validate-install.sh`.
+
+---
+
+## 1.9 Sources
 
 - Base de données des périphériques MrChromebox — `MrChromebox/scripts`, fichier
   `device-db.sh` (entrée `MADOO`, lue et vérifiée).

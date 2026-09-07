@@ -4,16 +4,20 @@ Distribution Linux légère destinée à remplacer ChromeOS **en natif** sur un
 **HP Chromebook x360 14b-cb0000sf**, et construite autour de **Claude Desktop**
 comme environnement de travail principal, doté de privilèges étendus sur le système.
 
-> **État : en cours de remise en route.** Le firmware est flashé, Debian 13
-> installée, et le bureau a tourné sur la machine — dock, barre d'état,
-> lanceur, gestionnaire de fichiers. Une purge de paquets fautive a ensuite
-> désinstallé le compositeur (`labwc` dépend de `xwayland`, que la purge
-> nommait), et la machine est repartie sur l'écran de connexion de secours.
+> **État : en service.** Le firmware est flashé, Debian 13 installée, et le
+> bureau tourne sur la machine — `greetd` ouvre l'écran de connexion Claude OS,
+> le mot de passe est accepté, la session labwc s'ouvre avec le dock, la barre
+> d'état et le lanceur.
 >
-> La cause est établie et corrigée, le greeter a été réessayé et fonctionne.
-> La remise en service tient en quatre commandes — voir
-> [Remettre le bureau en service](#remettre-le-bureau-en-service). Restent
-> ensuite l'audio à valider et les touches de la rangée supérieure à câbler.
+> Deux pannes de session graphique ont été traversées et résolues le
+> 7 septembre 2026 ; leur post-mortem est dans
+> [`docs/06`](docs/06-journal-incident-wayland.md), et les invariants qui en
+> découlent dans [`CLAUDE.md`](CLAUDE.md) — **à lire avant toute
+> intervention**.
+>
+> Restent ouverts : l'**audio**, qui échoue au chargement de la topologie DSP,
+> l'affichage qui n'apparaît qu'au premier contact du pavé tactile, et les
+> touches de la rangée supérieure à câbler.
 
 ---
 
@@ -54,12 +58,13 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 
 | Document | Contenu |
 |---|---|
+| [`CLAUDE.md`](CLAUDE.md) | **À lire en premier.** Où en est le projet, les cinq invariants qu'on ne casse jamais, la procédure d'intervention sur la session graphique, et où lire quoi quand ça ne marche pas. Chargé automatiquement par Claude Code. |
 | [`docs/01-materiel-firmware.md`](docs/01-materiel-firmware.md) | Le matériel, le déverrouillage du firmware, les points de non-retour et la procédure de sauvegarde. **À lire avant toute manipulation de la machine.** |
 | [`docs/02-architecture.md`](docs/02-architecture.md) | Le socle logiciel, le budget mémoire, et le modèle de privilèges de Claude sur le système. |
 | [`docs/03-write-protect-jumper.md`](docs/03-write-protect-jumper.md) | **Résolu.** Le cavalier de write-protect de MADOO est `J1`, confirmé par mesure (`wpsw_cur` = `0`). Méthode d'identification et protocole de pontage. |
 | [`docs/04-environnement-bureau.md`](docs/04-environnement-bureau.md) | La pile graphique, le rendu visuel, ce qui est volontairement absent, et les points à valider sur la machine. |
 | [`docs/05-energie.md`](docs/05-energie.md) | Économie d'énergie : ce qui compte vraiment, les réglages TLP et noyau, et ce qui est délibérément écarté. |
-| [`docs/06-journal-incident-wayland.md`](docs/06-journal-incident-wayland.md) | **Résolu.** L'incident de migration Wayland : la purge nommait `xwayland`, dont `labwc` dépend, et désinstallait le compositeur. Cause établie, correctif, et le filet qui empêche que cela enferme à nouveau dehors. |
+| [`docs/06-journal-incident-wayland.md`](docs/06-journal-incident-wayland.md) | **Résolu.** Post-mortem des deux pannes de session : la purge qui désinstallait le compositeur, et `/tmp/.X11-unix` possédé par `_greetd`. Ce qui a fait perdre du temps, et ce qui n'est pas établi. |
 
 ### Installation
 
@@ -67,8 +72,7 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 |---|---|
 | [`install/provision.sh`](install/provision.sh) | Transforme une Debian 13 minimale en Claude OS. Idempotent, `--dry-run` disponible. |
 | [`install/packages.list`](install/packages.list) | Les paquets, chacun justifié en commentaire. |
-| [`install/bascule-session.sh`](install/bascule-session.sh) | Met l'écran de connexion en service **par étapes** : vérifier, essayer sur un terminal virtuel libre, basculer, revenir. Les trois premières ne redémarrent rien. |
-| [`install/restore-session-x11-ssh.sh`](install/restore-session-x11-ssh.sh) | Retour d'urgence vers LightDM, depuis SSH. |
+| [`install/bascule-session.sh`](install/bascule-session.sh) | Met l'écran de connexion en service **par étapes** : `--verifier`, `--deployer`, `--essai` sur un terminal virtuel libre, `--basculer`, `--revenir`. Seul `--basculer` change le gestionnaire de session. |
 | [`shell/`](shell/) | Le code du bureau : dock, barre d'état, lanceur, gestionnaire de fichiers, réglages, fond d'écran. Compilé sur la machine par `provision.sh`. |
 | [`rootfs/`](rootfs/) | Les fichiers déployés tels quels : configuration de labwc, session Wayland, lanceur Claude, fond d'écran. |
 
@@ -85,7 +89,71 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 
 ---
 
-## Étape 0 — Vérifier le board (2 minutes, sans rien casser)
+## Intervenir sur la session graphique
+
+Le bureau est en service. Toute intervention qui touche à la session ou à
+l'écran de connexion se fait **par étapes**, jamais d'un bloc — c'est cette
+forme, autant que le contenu, qui a produit les pannes de septembre.
+
+```sh
+cd ~/Claude-OS && git pull
+sudo bash install/bascule-session.sh --verifier   # ne change rien
+sudo bash install/bascule-session.sh --deployer   # recopie rootfs/ vers /
+sudo bash install/bascule-session.sh --essai      # ← REGARDER L'ÉCRAN
+sudo bash install/bascule-session.sh --basculer   # arme le filet, puis bascule
+sudo systemctl reboot
+```
+
+**`git pull` ne déploie rien** : `rootfs/` n'est recopié vers `/` que par
+`--deployer` ou par `provision.sh`. Trois séances de diagnostic ont porté sur
+des correctifs présents dans le dépôt et absents de la machine.
+
+`--essai` affiche le véritable écran de connexion sur un terminal virtuel
+libre pendant trente secondes, puis rend l'affichage — sans rien activer,
+sans rien purger, sans toucher à la session en cours. En cas d'échec il verse
+son autopsie dans `/var/log/claude-os-essai-<date>.txt`.
+
+Au redémarrage, le **filet de sécurité** vérifie quatre minutes après le
+démarrage qu'on peut bien entrer. Sinon il écrit pourquoi dans
+`/var/log/claude-os-echec-<date>.txt` et repart sur un écran où l'on se
+connecte — sans seconde machine. Il se désarme seul une fois la session
+éprouvée.
+
+Les invariants à ne jamais enfreindre sont dans [`CLAUDE.md`](CLAUDE.md).
+
+### Mettre à jour le bureau
+
+```sh
+cd ~/Claude-OS && git pull
+sudo bash install/provision.sh
+```
+
+`provision.sh` recompile le shell et le réinstalle. Il **ne touche pas** à
+`~/.config/claude-os/shell.conf` : l'ordre des icônes, le thème et les
+applications épinglées sont à vous.
+
+## Ce qui reste à faire
+
+1. **L'audio.** En échec : le DSP démarre mais la topologie ne se charge pas
+   (`sof_rt5682 … probe failed -22`). C'est le risque n°1 identifié dès
+   `docs/01`, et le premier chantier. `bash tools/validate-install.sh` en
+   rend compte.
+2. **L'affichage au démarrage**, qui n'apparaît qu'au premier contact du
+   pavé tactile, précédé de deux lignes d'erreur. Non diagnostiqué.
+3. **Les touches de la rangée supérieure**, à relever avec
+   `bash tools/probe-keys.sh` puis à câbler dans `rc.xml`.
+4. **Les reports** : rclone pour Drive et OneDrive, les notifications, les
+   icônes sur le bureau.
+
+---
+
+## Annexe — si l'on repart de zéro
+
+Ces deux étapes sont **faites** sur la machine actuelle : le board est
+confirmé `MADOO`, le firmware UEFI est flashé et le matériel relevé. Elles
+sont conservées pour qui referait l'opération sur une seconde machine.
+
+### Vérifier le board (2 minutes, sans rien casser)
 
 « HP Chromebook x360 14b » recouvre **cinq plateformes matérielles
 différentes** ; seul le suffixe de deux lettres les distingue. Flasher le
@@ -105,7 +173,7 @@ change. Détails et sources dans
 
 ---
 
-## Étape 1 — Relever le matériel
+### Relever le matériel
 
 Le reste (noyau, pilotes, firmwares à embarquer) dépend de faits que seule la
 machine peut donner. Le relevé doit être lancé **depuis ChromeOS, avant tout
@@ -140,63 +208,3 @@ Puis il produit un rapport Markdown à me transmettre, qui répond aux
 questions encore ouvertes : capacité exacte de l'eMMC, **chaîne audio**
 (principal risque de non-fonctionnement sous Linux), contrôleur Wi-Fi et
 firmware associé, état du write-protect et version du CR50.
-
-## Remettre le bureau en service
-
-Le firmware est flashé et Debian 13 installée ; la machine est aujourd'hui sur
-l'écran de connexion de secours, **sans compositeur** — le script de retour
-d'urgence réinstalle Xorg et Xwayland, mais pas `labwc`.
-
-Depuis SSH, ou depuis un terminal de la session de secours :
-
-```sh
-cd ~/Claude-OS && git pull
-sudo bash install/provision.sh
-```
-
-`provision.sh` réinstalle `labwc`, recompile le shell, redéploie l'écran de
-connexion et **arme le filet de sécurité**. La purge ne peut plus emporter le
-compositeur : elle demande d'abord à apt ce qu'il retirerait, et renonce si un
-composant vital figure dans la réponse.
-
-Puis, par étapes — les trois premières ne redémarrent rien et ne changent pas
-le gestionnaire de session :
-
-```sh
-sudo bash install/bascule-session.sh --verifier   # tout est-il là ?
-sudo bash install/bascule-session.sh --essai      # ← REGARDER L'ÉCRAN
-sudo bash install/bascule-session.sh --basculer
-sudo systemctl reboot
-```
-
-`--essai` affiche le véritable champ de mot de passe sur un terminal virtuel
-libre pendant trente secondes, puis rend l'affichage tout seul. C'est l'étape
-qui manquait en septembre : on voit l'écran de connexion **avant** de confier
-le démarrage de la machine à greetd.
-
-En cas de doute au redémarrage, ne rien faire : le filet constate au bout de
-quatre minutes que personne ne peut entrer, écrit pourquoi dans
-`/var/log/claude-os-echec-*.txt`, et repart sur un écran où l'on se connecte.
-Pour défaire la bascule à la main : `sudo bash install/bascule-session.sh --revenir`.
-
-### Ensuite
-
-1. **Valider** avec `bash tools/validate-install.sh` — l'audio en premier.
-2. **Relever les touches** avec `bash tools/probe-keys.sh`, pour en tirer les
-   liaisons labwc définitives.
-
-### Mettre à jour
-
-Le bureau se met à jour comme le reste du dépôt :
-
-```sh
-cd ~/Claude-OS && git pull
-sudo bash install/provision.sh
-```
-
-`provision.sh` recompile le shell et le réinstalle. Il **ne touche pas** à
-`~/.config/claude-os/shell.conf` : l'ordre des icônes, le thème et les
-applications épinglées sont à vous.
-
-Puis les reports : rclone pour Drive et OneDrive, les notifications, les
-icônes sur le bureau, et le câblage des touches de luminosité et de volume.
