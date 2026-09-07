@@ -363,6 +363,37 @@ essai() {
 	nettoyer_essai() {
 		chvt "$VT_COURANT" 2>/dev/null || true
 		systemctl stop claude-os-essai-greeter.service >/dev/null 2>&1 || true
+
+		# LE GREETER SURVIT À L'ARRÊT DU SERVICE, ET CE N'EST PAS UN CAPRICE.
+		#
+		# pam_systemd ouvre une session logind pour « _greetd ». systemd
+		# déplace alors labwc et le greeter dans un « session-NN.scope » qui
+		# leur est propre, HORS du cgroup du service d'essai. Arrêter le
+		# service tue greetd et laisse ses enfants tourner.
+		#
+		# Ce qui reste est un compositeur orphelin qui garde le terminal
+		# virtuel : fond noir, pointeur, et plus rien d'autre. Il fausse
+		# tous les essais suivants, et il ressemble EXACTEMENT à la panne
+		# qu'on cherche — de quoi diagnostiquer pendant des heures un
+		# symptôme fabriqué par l'outil de diagnostic lui-même.
+		#
+		# On termine donc la session logind, ce qui emporte tout le scope.
+		# Le filtre porte sur le terminal virtuel d'essai : jamais on ne
+		# touche à un écran de connexion en service sur un autre VT.
+		for sid in $(loginctl list-sessions --no-legend 2>/dev/null \
+		             | awk '$3=="_greetd"{print $1}'); do
+			vt="$(loginctl show-session "$sid" -p VTNr --value 2>/dev/null)"
+			[ "$vt" = "$VT_ESSAI" ] || continue
+			loginctl terminate-session "$sid" >/dev/null 2>&1 || true
+		done
+
+		# Repli, si la session logind n'existait pas : viser le compositeur
+		# de l'écran de connexion par sa ligne de commande exacte.
+		if pgrep -f 'labwc -C /etc/xdg/labwc-greeter' >/dev/null 2>&1; then
+			sleep 1
+			pkill -f 'labwc -C /etc/xdg/labwc-greeter' >/dev/null 2>&1 || true
+		fi
+
 		rm -f /etc/greetd/config-essai.toml
 	}
 	trap nettoyer_essai EXIT INT TERM
@@ -439,8 +470,16 @@ EOF
 	trap - EXIT
 
 	say "Essai terminé, affichage rendu au terminal virtuel $VT_COURANT"
+	# Le ménage laisse une seconde aux processus pour partir avant de juger.
+	sleep 2
 	if pgrep -f '/claude-os-connexion' >/dev/null 2>&1; then
-		warn "un greeter tourne encore — le signaler, ce n'est pas normal"
+		warn "un greeter tourne ENCORE malgré le ménage :"
+		pgrep -af '/claude-os-connexion' | sed 's/^/        /'
+		warn "L'arrêter à la main avant tout autre essai, sinon il gardera"
+		warn "le terminal virtuel et le prochain essai sera faussé :"
+		warn "    sudo pkill -f 'labwc -C /etc/xdg/labwc-greeter'"
+	else
+		ok "aucun processus d'essai résiduel" "le terminal virtuel est rendu"
 	fi
 	info "Si le champ de mot de passe s'est affiché, la bascule est sûre :"
 	info "    sudo bash $0 --basculer"

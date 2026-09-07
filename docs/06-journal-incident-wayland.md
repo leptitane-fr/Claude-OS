@@ -239,3 +239,68 @@ sudo systemctl reboot
 libre pendant trente secondes, sans rien activer, sans rien purger et sans
 toucher à la session en cours. C'est la validation progressive que la première
 séance recommandait sans avoir les moyens de la faire.
+
+---
+
+# L'écran de connexion fonctionne sur la machine
+
+Date : 2026-09-07, troisième séance.
+
+Mesuré sur le matériel, par `bascule-session.sh --essai`, sans redémarrage et
+sans bascule du gestionnaire de session :
+
+```
+  ✓ le compositeur tourne                      pid 4147
+  ✓ le greeter tourne                          pid 4183
+```
+
+Le champ de mot de passe s'affiche. La chaîne `greetd → labwc → autostart →
+claude-os-greeter → claude-os-connexion` est bonne de bout en bout sur MADOO.
+
+## Ce qui a débloqué
+
+`--deployer`, ajouté à cette séance. **`git pull` met à jour le dépôt, pas la
+machine** : `rootfs/` n'est recopié vers `/` que par `provision.sh`. Trois
+essais ont donc porté sur l'ancien `/usr/local/bin/claude-os-greeter` pendant
+que le correctif dormait dans le dépôt, sans que rien ne le signale — le
+dépôt était à jour, et c'est ce qu'on regardait.
+
+`--deployer` fait cette recopie seule, sans réinstaller les paquets ni
+recompiler le shell, et annonce la branche et le commit qu'il déploie.
+
+## Un symptôme fabriqué par l'outil de diagnostic
+
+L'essai laissait derrière lui un compositeur orphelin, et il faut le dire
+parce que cela a coûté des allers-retours.
+
+`pam_systemd` ouvre une session logind pour `_greetd` ; systemd déplace alors
+labwc et le greeter dans un `session-NN.scope` qui leur est propre, **hors du
+cgroup du service d'essai**. Arrêter le service tuait greetd et laissait ses
+enfants tourner. Ce qui restait était un compositeur sans greeter, gardant le
+terminal virtuel : **fond noir et pointeur de souris** — c'est-à-dire
+exactement le symptôme que l'on cherchait à diagnostiquer.
+
+Le ménage termine désormais la session logind, ce qui emporte le scope entier.
+Le filtre porte sur le numéro de terminal virtuel de l'essai, pour ne jamais
+toucher à un écran de connexion en service.
+
+## Ce qui n'est pas établi
+
+Pourquoi le greeter ne démarrait pas lors des premiers essais n'a pas été
+tranché, et il ne faut pas le présenter autrement. Deux explications tiennent :
+le `claude-os-greeter` réellement présent sur la machine différait de celui du
+dépôt, ou un compositeur orphelin d'un essai précédent tenait déjà le terminal
+virtuel. Aucune des deux n'a été prouvée.
+
+Ce qui a changé, en revanche, c'est qu'un tel échec ne serait plus muet : le
+greeter écrit maintenant son contexte, sa sortie et son code de retour dans le
+premier emplacement où l'écriture réussit vraiment, et `--essai` verse son
+autopsie complète dans `/var/log/claude-os-essai-<date>.txt`.
+
+## Trois contrôles ajoutés en route
+
+| Contrôle | Ce qu'il attrape |
+|---|---|
+| `ldd` sur les six binaires | Une bibliothèque manquante tue le programme avant sa première ligne : aucun processus, rien à l'écran, aucun message. Symptôme : fond noir et pointeur. |
+| `libgtk4-layer-shell0` | Sans lui, aucun composant ne peut s'ancrer à l'écran. |
+| Branche et commit affichés par `provision.sh` | Ce dépôt porte trois branches `claude/…` et aucune branche par défaut ; `git pull` sur la mauvaise répond « Déjà à jour ». `provision.sh` refuse en outre de tourner s'il est antérieur au correctif de la purge. |
