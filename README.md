@@ -79,6 +79,8 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`tools/probe-hardware.sh`](tools/probe-hardware.sh) | Relevé matériel en lecture seule, 13 sections. À lancer depuis ChromeOS **avant** tout effacement. |
 | [`tools/verify-firmware-backup.sh`](tools/verify-firmware-backup.sh) | Valide une sauvegarde de firmware avant de flasher : taille, dump vide, signature `__FMAP__`, régions, et comparaison de deux lectures. Retourne `2` si la sauvegarde est inutilisable. |
 | [`tools/validate-install.sh`](tools/validate-install.sh) | Passe en revue l'installation poste par poste — Wi-Fi, Bluetooth, **audio**, VA-API, énergie, session, empreinte mémoire — et rend un verdict. À lancer après `provision.sh`. |
+| [`tools/diag-connexion.sh`](tools/diag-connexion.sh) | **Quand il n'y a pas d'écran de connexion** — console texte, écran noir, ou repli du filet. Lit d'abord ce que le filet a collecté avant de redémarrer : c'est la seule trace du démarrage qui a échoué. |
+| [`tools/diag-session.sh`](tools/diag-session.sh) | Le pendant du précédent, quand la session graphique est ouverte mais que le bureau se comporte mal. |
 | [`tools/probe-keys.sh`](tools/probe-keys.sh) | Relève, sous Wayland, ce qu'émettent réellement la rangée supérieure et la touche Loupe du clavier Chromebook, pour en déduire les liaisons labwc. |
 
 ---
