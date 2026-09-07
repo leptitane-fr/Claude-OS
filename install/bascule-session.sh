@@ -217,6 +217,19 @@ verifier() {
 		&& ok "dbus-user-session" "présent" \
 		|| ko "dbus-user-session" "absent — le bureau s'ouvrirait vide"
 
+	# CE QUI DONNE AU COMPOSITEUR LE DROIT DE DESSINER.
+	#
+	# labwc passe par libseat, qui demande à logind une session ACTIVE sur un
+	# siège. pam_systemd la crée ; sans lui, libseat échoue sur « Could not get
+	# primary session » et le compositeur meurt en une seconde. Les deux
+	# paquets ne sont que des RECOMMANDATIONS, que provision.sh désactive.
+	dpkg-query -W -f='${db:Status-Status}' libpam-systemd 2>/dev/null | grep -qx installed \
+		&& ok "libpam-systemd" "pam_systemd : la session logind" \
+		|| ko "libpam-systemd" "ABSENT — aucune session logind, donc aucun siège"
+	dpkg-query -W -f='${db:Status-Status}' polkitd 2>/dev/null | grep -qx installed \
+		&& ok "polkitd" "présent" \
+		|| ko "polkitd" "absent — montage de volumes et siège non autorisés"
+
 	say "État actuel du gestionnaire de session"
 	# « systemctl is-enabled » écrit « not-found » sur sa sortie standard ET
 	# rend un code d'erreur : un « || echo » afficherait les deux.

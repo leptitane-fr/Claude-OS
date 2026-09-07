@@ -14,6 +14,26 @@
 # manque, on le fabrique ici.
 set -u
 
+# ---------------------------------------------------------------- le journal
+#
+# CE QUE LA SESSION DIT EN MOURANT DOIT SURVIVRE À SA MORT.
+#
+# Lancée par greetd, cette session écrit sur le terminal virtuel. Quand elle
+# échoue, wlroots y déverse ses erreurs en rouge — puis greetd reprend la main
+# et réaffiche l'écran de connexion par-dessus, en une seconde. Le message
+# passe à l'écran, illisible, et n'atteint NI le journal systemd (la sortie ne
+# va pas à greetd) NI aucun fichier. On voit « des lignes rouges qui
+# défilent » et l'on n'en sait pas plus.
+#
+# Tout est donc consigné ici, sous le compte de l'utilisateur, qui y a
+# toujours droit d'écriture. La tentative précédente est conservée en « .1 » :
+# quand on regarde après coup, la panne qui intéresse est souvent l'avant-
+# dernière.
+ETAT="${XDG_STATE_HOME:-${HOME:-/tmp}/.local/state}/claude-os"
+mkdir -p "$ETAT" 2>/dev/null || ETAT="/tmp"
+JOURNAL="$ETAT/session.log"
+[ -f "$JOURNAL" ] && mv -f "$JOURNAL" "$JOURNAL.1" 2>/dev/null
+
 : "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
 export XDG_RUNTIME_DIR
 
@@ -30,16 +50,37 @@ export QT_QPA_PLATFORM=wayland
 export ELECTRON_OZONE_PLATFORM_HINT=wayland
 export MOZ_ENABLE_WAYLAND=1
 
+{
+	echo "=== $(date '+%Y-%m-%d %H:%M:%S') — ouverture de la session Claude OS ==="
+	echo "compte           : $(id -un) (uid $(id -u))"
+	echo "HOME             : ${HOME:-<vide>}"
+	echo "XDG_RUNTIME_DIR  : $XDG_RUNTIME_DIR"
+	echo "  existe         : $([ -d "$XDG_RUNTIME_DIR" ] && echo oui || echo 'NON <<<<')"
+	echo "  bus de session : $([ -S "$XDG_RUNTIME_DIR/bus" ] && echo présent || echo absent)"
+	echo "DBUS_SESSION_BUS_ADDRESS : ${DBUS_SESSION_BUS_ADDRESS:-<vide>}"
+	echo "labwc            : $(command -v labwc || echo 'INTROUVABLE <<<<')"
+	echo "siège            : ${XDG_SEAT:-<vide>}   VT : ${XDG_VTNR:-<vide>}"
+	echo "config lue       : ${XDG_CONFIG_HOME:-$HOME/.config}/labwc puis /etc/xdg/labwc"
+	echo "  ~/.config/labwc : $([ -e "${XDG_CONFIG_HOME:-$HOME/.config}/labwc" ] && echo 'PRÉSENT — masque /etc/xdg <<<<' || echo absent)"
+	echo "--- sortie de labwc ---"
+} >> "$JOURNAL" 2>&1
+
+# PAS de « exec » : on veut reprendre la main après la sortie de labwc pour
+# enregistrer son code de retour. Sans cette ligne, une session qui meurt en
+# une seconde ne laisse rien derrière elle — c'est très exactement ce qui
+# rendait cette panne indéchiffrable.
 if [ -S "$XDG_RUNTIME_DIR/bus" ] || [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
-	exec labwc "$@"
+	labwc "$@" >> "$JOURNAL" 2>&1
+elif command -v dbus-run-session >/dev/null 2>&1; then
+	# Pas de bus : on en ouvre un pour la durée de la session.
+	dbus-run-session -- labwc "$@" >> "$JOURNAL" 2>&1
+else
+	# Ni bus ni moyen d'en créer un. On démarre quand même : le compositeur
+	# fonctionnera, et la trace dira pourquoi le bureau est vide.
+	echo "claude-os-session : aucun bus de session, et dbus-run-session est absent." >> "$JOURNAL"
+	labwc "$@" >> "$JOURNAL" 2>&1
 fi
+CODE=$?
 
-# Pas de bus : on en ouvre un pour la durée de la session.
-if command -v dbus-run-session >/dev/null 2>&1; then
-	exec dbus-run-session -- labwc "$@"
-fi
-
-# Ni bus ni moyen d'en créer un. On démarre quand même : le compositeur
-# fonctionnera, et la trace dira pourquoi le bureau est vide.
-echo "claude-os-session : aucun bus de session, et dbus-run-session est absent." >&2
-exec labwc "$@"
+echo "=== labwc s'est arrêté — code de retour $CODE ===" >> "$JOURNAL"
+exit "$CODE"

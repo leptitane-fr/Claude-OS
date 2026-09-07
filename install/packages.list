@@ -76,6 +76,29 @@ foot                           # terminal, natif Wayland (~1 Mo) — secours au 
 # le marque « installé manuellement » et le met hors de portée d'un autoremove.
 kbd                            # chvt, et l'azerty sur la console de secours
 
+#--- Siège, session et autorisations ----------------------------------------
+#
+# CE QUI DONNE AU COMPOSITEUR LE DROIT DE DESSINER.
+#
+# labwc ne peut pas ouvrir la carte graphique tout seul : il passe par
+# libseat, qui demande à logind une session ACTIVE sur un siège. Cette session
+# est créée par pam_systemd, fourni par libpam-systemd. Sans lui, aucune
+# session logind n'existe, libseat échoue sur « Could not get primary session »
+# et le compositeur meurt en une seconde — écran noir, ou retour immédiat à
+# l'écran de connexion.
+#
+# Ce paquet n'est qu'une RECOMMANDATION de systemd, et provision.sh désactive
+# les recommandations. Il doit donc être nommé ici, comme dbus-user-session
+# l'est plus haut et pour exactement la même raison.
+libpam-systemd                 # pam_systemd : la session logind, donc le siège
+#
+# polkit décide qui a le droit de monter un volume, de suspendre la machine ou
+# de prendre le contrôle d'un siège. udisks2, déclaré plus bas, en dépend pour
+# autoriser le montage d'une clé USB : sans lui, le clic sur un volume échoue
+# sans explication. labwc le nomme d'ailleurs de lui-même dans le message
+# d'aide qu'il affiche quand il n'obtient pas son siège.
+polkitd                        # autorisations : montage, veille, siège
+
 #--- Compilation du shell ---------------------------------------------------
 #
 # Le shell est compilé SUR LA MACHINE, à la fourniture et à chaque mise à

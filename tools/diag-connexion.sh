@@ -181,6 +181,30 @@ else
 	val "journal du shell" "absent — labwc n'a pas atteint son autostart"
 fi
 
+# LA PIÈCE MAÎTRESSE POUR CE SYMPTÔME.
+#
+# claude-os-session consigne ici tout ce que labwc dit en mourant — les lignes
+# rouges de wlroots que l'on voit défiler à l'écran sans pouvoir les lire,
+# parce que greetd réaffiche l'écran de connexion par-dessus en une seconde.
+# La tentative précédente est gardée en « .1 ».
+for f in "$CIBLE_HOME/.local/state/claude-os/session.log" \
+         "$CIBLE_HOME/.local/state/claude-os/session.log.1"; do
+	[ -f "$f" ] || continue
+	echo "  ================= $f ================="
+	sed 's/^/    /' "$f"
+	echo "  ================= fin ================="
+done
+if [ ! -f "$CIBLE_HOME/.local/state/claude-os/session.log" ]; then
+	val "journal de session" "ABSENT — claude-os-session à jour est-il déployé ?"
+	echo "    sudo bash install/bascule-session.sh --deployer"
+fi
+
+echo "  --- le siège et les autorisations ---"
+for p in libpam-systemd polkitd seatd; do
+	printf '    %-16s %s\n' "$p" \
+		"$(dpkg-query -W -f='${db:Status-Status}' "$p" 2>/dev/null || echo 'non installé')"
+done
+
 echo "  --- tentatives de session vues par greetd ---"
 journalctl -b -u greetd --no-pager 2>/dev/null \
 	| grep -iE "session|labwc|claude-os|error|fail|panic|refus" | tail -40 | sed 's/^/    /'
