@@ -432,6 +432,21 @@ run "rm -f '$TARGET_HOME/.xsession'"
 run "mkdir -p /etc/claude-os"
 run "printf '%s\n' '$TARGET_USER' > /etc/claude-os/utilisateur"
 
+# LE JOURNAL DE L'ÉCRAN DE CONNEXION, CRÉÉ POUR « _greetd ».
+#
+# Le greeter tourne sous ce compte, qui n'écrit pas dans /var/log. Son
+# message d'erreur se perdait donc exactement dans le cas où l'on en a
+# besoin : quand l'écran de connexion ne s'affiche pas. Le fichier est créé
+# ici, à lui, une fois pour toutes.
+if getent passwd _greetd >/dev/null 2>&1; then
+	run "touch /var/log/claude-os-connexion.log"
+	run "chown _greetd:_greetd /var/log/claude-os-connexion.log"
+	run "chmod 0644 /var/log/claude-os-connexion.log"
+	info "journal de l'écran de connexion accessible à _greetd"
+else
+	warn "compte « _greetd » absent : greetd est-il bien installé ?"
+fi
+
 # greetd n'affiche rien de lui-même : il lance un compositeur, qui lance
 # notre champ de mot de passe. Le compte « _greetd » vient du paquet.
 run "mkdir -p /etc/greetd"

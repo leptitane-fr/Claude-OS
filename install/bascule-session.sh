@@ -98,6 +98,37 @@ verifier() {
 		            || ko "$(basename "$b")" "absent ou non exécutable"
 	done
 
+	# UN BINAIRE PRÉSENT N'EST PAS UN BINAIRE QUI DÉMARRE.
+	#
+	# « /usr/bin/claude-os-connexion existe » ne prouve rien : s'il lui manque
+	# une bibliothèque partagée, l'éditeur de liens le tue AVANT sa première
+	# ligne de code. Le processus n'apparaît nulle part, rien ne s'affiche, et
+	# sous greetd le message part dans le vide. Symptôme à l'écran : un fond
+	# noir et le pointeur de la souris — labwc tourne, son client est mort.
+	#
+	# ldd le dit en une seconde, et ce contrôle couvre les six programmes.
+	MANQUANTES=""
+	for b in /usr/bin/claude-os-connexion /usr/bin/claude-os-fond \
+	         /usr/bin/claude-os-dock /usr/bin/claude-os-status \
+	         /usr/bin/claude-os-lanceur /usr/bin/claude-os-fichiers; do
+		[ -x "$b" ] || continue
+		L="$(ldd "$b" 2>/dev/null | awk '/not found/{print $1}' | sort -u | tr '\n' ' ')"
+		[ -n "$L" ] && MANQUANTES="$MANQUANTES $(basename "$b"):$L"
+	done
+	if [ -z "$MANQUANTES" ]; then
+		ok "bibliothèques des binaires" "toutes résolues"
+	else
+		ko "BIBLIOTHÈQUES MANQUANTES" "$MANQUANTES"
+		info "        Ces programmes ne peuvent pas démarrer du tout."
+		info "        Réinstaller le paquet fautif, puis relancer provision.sh."
+	fi
+
+	# gtk4-layer-shell ancre le dock, la barre et l'écran de connexion hors du
+	# flux des fenêtres. Sans lui, aucun des six ne s'affiche.
+	dpkg-query -W -f='${db:Status-Status}' libgtk4-layer-shell0 2>/dev/null | grep -qx installed \
+		&& ok "libgtk4-layer-shell0" "présent" \
+		|| ko "libgtk4-layer-shell0" "ABSENT — rien ne peut s'afficher"
+
 	say "La configuration du compositeur de connexion"
 	for f in /etc/xdg/labwc-greeter/rc.xml /etc/xdg/labwc-greeter/environment; do
 		[ -r "$f" ] && ok "$(basename "$f")" "$f" || ko "$(basename "$f")" "illisible : $f"

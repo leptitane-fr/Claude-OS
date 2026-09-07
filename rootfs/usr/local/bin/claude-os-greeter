@@ -8,7 +8,27 @@
 # autre moyen de savoir pourquoi — pas de terminal, pas de session ouverte.
 set -u
 
-JOURNAL=/var/log/claude-os-connexion.log
+# UN JOURNAL RÉELLEMENT ACCESSIBLE EN ÉCRITURE.
+#
+# Sous greetd, ce script tourne en « _greetd », qui n'écrit PAS dans /var/log
+# à moins que le fichier n'ait été créé pour lui — ce que provision.sh fait
+# désormais. La version précédente essayait /var/log, échouait en silence, et
+# lançait le greeter sans redirection : son message se perdait.
+#
+# C'est exactement le trou par lequel deux séances de diagnostic sont
+# passées. On essaie donc plusieurs emplacements, et l'on retient le premier
+# où l'écriture réussit vraiment. /tmp est le dernier recours : il est
+# toujours accessible, et un écran de connexion qui explique pourquoi il
+# n'apparaît pas vaut mieux qu'un fichier bien rangé et vide.
+JOURNAL=""
+for candidat in /var/log/claude-os-connexion.log \
+                "${XDG_RUNTIME_DIR:-}/claude-os-connexion.log" \
+                /tmp/claude-os-connexion.log; do
+	# XDG_RUNTIME_DIR vide produirait « /claude-os-connexion.log » : à écarter.
+	case "$candidat" in /claude-os-connexion.log) continue ;; esac
+	if : > "$candidat" 2>/dev/null; then JOURNAL="$candidat"; break; fi
+done
+
 COMPTE=""
 [ -r /etc/claude-os/utilisateur ] && COMPTE="$(cat /etc/claude-os/utilisateur)"
 
@@ -20,9 +40,32 @@ else
 	set --
 fi
 
-# Le journal n'est pas garanti accessible en écriture : le greeter tourne
-# sous « _greetd ». On essaie, et on continue sans si ce n'est pas possible.
-if : > "$JOURNAL" 2>/dev/null; then
-	exec /usr/bin/claude-os-connexion "$@" >> "$JOURNAL" 2>&1
+if [ -z "$JOURNAL" ]; then
+	# Aucun endroit où écrire : on lance quand même, la sortie ira dans le
+	# journal de greetd par l'intermédiaire de labwc.
+	exec /usr/bin/claude-os-connexion "$@"
 fi
-exec /usr/bin/claude-os-connexion "$@"
+
+# LE CONTEXTE AVANT LA SORTIE.
+#
+# « le greeter n'est pas là » ne dit rien. Sous quel compte il tournait, quel
+# affichage Wayland il visait et quel répertoire d'exécution il avait le
+# disent, et ces trois lignes ont plus d'une fois désigné la panne à elles
+# seules.
+{
+	echo "=== $(date '+%Y-%m-%d %H:%M:%S') — lancement de l'écran de connexion ==="
+	echo "compte du processus : $(id -un) (uid $(id -u))"
+	echo "compte à ouvrir     : ${COMPTE:-<recherche automatique>}"
+	echo "WAYLAND_DISPLAY     : ${WAYLAND_DISPLAY:-<vide>}"
+	echo "XDG_RUNTIME_DIR     : ${XDG_RUNTIME_DIR:-<vide>}"
+	echo "--- sortie de claude-os-connexion ---"
+} >> "$JOURNAL"
+
+# PAS de « exec » ici, délibérément : on veut reprendre la main après la
+# sortie du greeter pour enregistrer son code de retour. Un greeter qui
+# disparaît en laissant « code 127 » ou « code 1 » derrière lui a déjà dit
+# l'essentiel ; sans cette ligne, il ne dit rien du tout.
+/usr/bin/claude-os-connexion "$@" >> "$JOURNAL" 2>&1
+CODE=$?
+echo "=== l'écran de connexion s'est arrêté — code de retour $CODE ===" >> "$JOURNAL"
+exit "$CODE"
