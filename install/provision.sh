@@ -544,6 +544,52 @@ info "nettoyage des paquets orphelins"
 run "apt-get autoremove -y --purge >/dev/null 2>&1 || true"
 run "apt-get clean"
 
+# ------------------------------------------------------- contrôle final
+
+say "Contrôle des applications"
+
+# UNE APPLICATION ABSENTE NE SE VOIT PAS.
+#
+# Le dock affiche alors une icône générique qui ne lance rien, et rien à
+# l'écran ne dit pourquoi — il faut aller lire le journal du shell. Chromium
+# a disparu de cette machine sans que la fourniture s'en aperçoive : ce
+# contrôle est là pour que cela ne recommence pas.
+#
+# Le .desktop compte autant que le binaire : c'est LUI que le dock cherche.
+A_REPARER=""
+for app in chromium mousepad foot claude-os-fichiers claude-os-reglages; do
+	BIN=""; DESK=""
+	command -v "$app" >/dev/null 2>&1 && BIN=oui
+	for d in /usr/local/share/applications /usr/share/applications \
+	         "$TARGET_HOME/.local/share/applications"; do
+		[ -f "$d/$app.desktop" ] && { DESK=oui; break; }
+	done
+
+	if [ -n "$BIN" ] && [ -n "$DESK" ]; then
+		continue
+	fi
+	warn "$app : binaire=${BIN:-ABSENT} entrée .desktop=${DESK:-ABSENTE}"
+	# Nos propres binaires viennent de la compilation, pas d'apt.
+	case "$app" in claude-os-*) continue ;; esac
+	A_REPARER="$A_REPARER $app"
+done
+
+if [ -n "$A_REPARER" ]; then
+	info "réinstallation de :$A_REPARER"
+	run "DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends$A_REPARER" \
+		|| warn "la réinstallation a échoué — me transmettre le message ci-dessus"
+else
+	info "les cinq applications sont présentes, binaire et entrée .desktop"
+fi
+
+# Claude Desktop se contrôle à part : il vient de son propre dépôt, et
+# --no-claude permet de s'en passer.
+if [ "$WITH_CLAUDE" -eq 1 ]; then
+	command -v claude-desktop >/dev/null 2>&1 \
+		&& info "claude-desktop présent" \
+		|| warn "claude-desktop absent malgré l'installation"
+fi
+
 # -------------------------------------------------------------------- bilan
 
 say "Terminé"

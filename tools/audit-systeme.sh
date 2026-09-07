@@ -93,6 +93,18 @@ if [ "$ESSAI" -eq 1 ]; then
 fi
 
 # ==========================================================================
+sec "1 bis. L'écran de connexion"
+
+val "greetd installé"   "$(dpkg -l greetd 2>/dev/null | awk '/^ii/{print $3}' || echo 'NON')"
+val "greetd activé"     "$(systemctl is-enabled greetd 2>/dev/null || echo 'non')"
+val "lightdm installé"  "$(dpkg -l lightdm 2>/dev/null | awk '/^ii/{print $3}' || echo 'non')"
+val "lightdm activé"    "$(systemctl is-enabled lightdm 2>/dev/null || echo 'non')"
+val "claude-os-connexion" "$(command -v claude-os-connexion 2>/dev/null || echo 'ABSENT')"
+val "serveur X en mémoire" "$(pgrep -x Xorg >/dev/null 2>&1 && echo 'OUI' || echo 'non ✓')"
+[ -f /etc/greetd/config.toml ] && { echo "  --- /etc/greetd/config.toml ---"; sed 's/^/      /' /etc/greetd/config.toml; }
+[ -f /var/log/claude-os-connexion.log ] && { echo "  --- journal du greeter ---"; tail -15 /var/log/claude-os-connexion.log | sed 's/^/      /'; }
+
+# ==========================================================================
 sec "2. Ce qui tourne"
 
 val "mémoire utilisée" "$(free -m | awk '/^Mem:/{print $3 " Mo sur " $2}')"
