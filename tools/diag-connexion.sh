@@ -141,6 +141,54 @@ else
 	echo "      sudo mkdir -p /var/log/journal && sudo systemd-journald --flush"
 fi
 
+sec "8bis. LA SESSION QUI BOUCLE — écran de connexion présent, bureau jamais ouvert"
+#
+# Symptôme : le mot de passe est accepté, l'écran passe en mode texte quelques
+# secondes, puis l'écran de connexion revient. greetd a bien authentifié et
+# lancé la session ; c'est la session qui meurt, et greetd relance le greeter.
+#
+# LE PIÈGE EST UNE ASYMÉTRIE. Le greeter est lancé par
+# « labwc -C /etc/xdg/labwc-greeter » : le -C court-circuite la recherche XDG,
+# rien ne peut le masquer. La session lance « labwc » tout court, et labwc
+# cherche alors ~/.config/labwc AVANT /etc/xdg/labwc. Un reste dans le compte
+# de l'utilisateur casse donc la session SEULE, en laissant l'écran de
+# connexion parfaitement fonctionnel.
+CIBLE="$(cat /etc/claude-os/utilisateur 2>/dev/null || echo '')"
+CIBLE_HOME="$(getent passwd "$CIBLE" 2>/dev/null | cut -d: -f6)"
+val "compte" "${CIBLE:-<non défini>}"
+val "dossier personnel" "${CIBLE_HOME:-<introuvable>}"
+
+if [ -n "$CIBLE_HOME" ] && [ -e "$CIBLE_HOME/.config/labwc" ]; then
+	val "~/.config/labwc" "PRÉSENT <<<< masque /etc/xdg/labwc"
+	echo "  --- contenu ---"
+	ls -la "$CIBLE_HOME/.config/labwc" 2>/dev/null | sed 's/^/    /'
+	for f in "$CIBLE_HOME/.config/labwc/autostart" "$CIBLE_HOME/.config/labwc/environment"; do
+		[ -r "$f" ] || continue
+		echo "  --- $f ---"; sed 's/^/    /' "$f"
+	done
+else
+	val "~/.config/labwc" "absent ✓"
+fi
+
+# Le journal du shell, écrit par /etc/xdg/labwc/autostart à chaque ouverture.
+# S'il est vide ou absent alors que la session a été tentée, c'est que labwc
+# est mort AVANT de lancer l'autostart.
+SHELL_LOG="$CIBLE_HOME/.local/state/claude-os/shell.log"
+if [ -n "$CIBLE_HOME" ] && [ -f "$SHELL_LOG" ]; then
+	echo "  --- $SHELL_LOG ---"
+	sed 's/^/    /' "$SHELL_LOG"
+else
+	val "journal du shell" "absent — labwc n'a pas atteint son autostart"
+fi
+
+echo "  --- tentatives de session vues par greetd ---"
+journalctl -b -u greetd --no-pager 2>/dev/null \
+	| grep -iE "session|labwc|claude-os|error|fail|panic|refus" | tail -40 | sed 's/^/    /'
+
+echo "  --- ce que labwc a dit (toutes sources) ---"
+journalctl -b --no-pager 2>/dev/null \
+	| grep -iE "labwc|wlroots|drm|gbm|egl" | tail -30 | sed 's/^/    /'
+
 sec "8. Sortie de l'écran de connexion"
 sed 's/^/  /' /var/log/claude-os-connexion.log 2>/dev/null || echo "  (aucune)"
 

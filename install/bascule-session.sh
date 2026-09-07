@@ -157,6 +157,40 @@ verifier() {
 		ko "config.toml" "/etc/greetd/config.toml absent"
 	fi
 
+	say "La configuration de la SESSION (celle du bureau)"
+	# L'ASYMÉTRIE QUI TROMPE.
+	#
+	# Le greeter est lancé par « labwc -C /etc/xdg/labwc-greeter » : le -C
+	# court-circuite entièrement la recherche XDG, donc rien ne peut le
+	# masquer. La session, elle, lance « labwc » tout court — et labwc
+	# cherche alors ~/.config/labwc AVANT /etc/xdg/labwc.
+	#
+	# Un reste de configuration dans le compte de l'utilisateur prend donc la
+	# main sur celle du système pour la SESSION SEULEMENT. On obtient un écran
+	# de connexion parfait et un bureau qui ne s'ouvre jamais : greetd
+	# authentifie, la session meurt, le greeter revient. En boucle.
+	#
+	# provision.sh retire ce répertoire ; --deployer ne le fait pas, puisqu'il
+	# ne touche qu'à rootfs/. D'où ce contrôle.
+	CIBLE_HOME=""
+	if [ -r /etc/claude-os/utilisateur ]; then
+		CIBLE_HOME="$(getent passwd "$(head -n1 /etc/claude-os/utilisateur)" 2>/dev/null | cut -d: -f6)"
+	fi
+	if [ -n "$CIBLE_HOME" ] && [ -e "$CIBLE_HOME/.config/labwc" ]; then
+		ko "~/.config/labwc PRÉSENT" "masque /etc/xdg/labwc pour la session"
+		info "        Contenu : $(ls -A "$CIBLE_HOME/.config/labwc" 2>/dev/null | tr '\n' ' ')"
+		info "        Le retirer rend la main à la configuration système :"
+		info "            sudo mv $CIBLE_HOME/.config/labwc $CIBLE_HOME/.config/labwc.ancien"
+	else
+		ok "~/.config/labwc" "absent — /etc/xdg/labwc fait foi"
+	fi
+	for f in /etc/xdg/labwc/rc.xml /etc/xdg/labwc/environment; do
+		[ -r "$f" ] && ok "$(basename "$f") (session)" "$f" \
+		            || ko "$(basename "$f") (session)" "illisible : $f"
+	done
+	[ -x /etc/xdg/labwc/autostart ] && ok "autostart (session)" "exécutable" \
+	                               || ko "autostart (session)" "PAS exécutable"
+
 	say "Le compte à ouvrir"
 	if [ -r /etc/claude-os/utilisateur ]; then
 		COMPTE="$(head -n 1 /etc/claude-os/utilisateur)"
