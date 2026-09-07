@@ -48,6 +48,33 @@ run() {
 
 say "Vérification des préalables"
 
+# QUELLE VERSION DU DÉPÔT EST EN TRAIN DE TOURNER.
+#
+# Ce dépôt porte plusieurs branches « claude/… » et aucune branche par
+# défaut. Un « git pull » sur la mauvaise branche répond « Déjà à jour » sans
+# rien changer, et l'on relance alors une version périmée en croyant appliquer
+# un correctif. C'est arrivé : le correctif de la purge était poussé, la
+# machine tournait sur l'ancienne branche, et la purge a redésinstallé labwc.
+#
+# Trois lignes affichées ici, et l'on sait ce qu'on exécute.
+if command -v git >/dev/null 2>&1 && [ -d "$REPO_DIR/.git" ]; then
+	info "dépôt   : $REPO_DIR"
+	info "branche : $(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+	info "commit  : $(git -C "$REPO_DIR" log --oneline -1 2>/dev/null || echo '?')"
+
+	# Le garde-fou de la purge est la correction qui rend ce script sûr.
+	# S'il est absent, on tourne sur une version qui peut désinstaller le
+	# compositeur : on s'arrête plutôt que de la rejouer.
+	if ! grep -q 'VITAUX=' "$0"; then
+		die "cette copie de provision.sh est ANTÉRIEURE au correctif de la purge.
+      Elle peut désinstaller labwc et laisser la machine sans bureau.
+      Se placer sur la branche qui porte le correctif :
+          git -C $REPO_DIR fetch origin
+          git -C $REPO_DIR checkout claude/examine-project-qgnt80
+      puis relancer ce script."
+	fi
+fi
+
 # Message explicite : « lancer avec sudo » induisait en erreur quand sudo
 # n'est pas installé, ou quand un « su - » a échoué sans qu'on le remarque.
 [ "$(id -u)" -eq 0 ] || die "ce script doit tourner en root (identité actuelle : $(id -un)).
