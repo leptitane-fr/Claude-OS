@@ -4,10 +4,16 @@ Distribution Linux légère destinée à remplacer ChromeOS **en natif** sur un
 **HP Chromebook x360 14b-cb0000sf**, et construite autour de **Claude Desktop**
 comme environnement de travail principal, doté de privilèges étendus sur le système.
 
-> **État : en service.** Le firmware est flashé, Debian 13 installée, le
-> bureau tourne sur la machine — dock, barre d'état, lanceur, gestionnaire de
-> fichiers. Restent l'audio à valider et les touches de la rangée supérieure à
-> câbler.
+> **État : en cours de remise en route.** Le firmware est flashé, Debian 13
+> installée, et le bureau a tourné sur la machine — dock, barre d'état,
+> lanceur, gestionnaire de fichiers. Une purge de paquets fautive a ensuite
+> désinstallé le compositeur (`labwc` dépend de `xwayland`, que la purge
+> nommait), et la machine est repartie sur l'écran de connexion de secours.
+>
+> La cause est établie et corrigée, le greeter a été réessayé et fonctionne.
+> La remise en service tient en quatre commandes — voir
+> [Remettre le bureau en service](#remettre-le-bureau-en-service). Restent
+> ensuite l'audio à valider et les touches de la rangée supérieure à câbler.
 
 ---
 
@@ -53,14 +59,16 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`docs/03-write-protect-jumper.md`](docs/03-write-protect-jumper.md) | **Résolu.** Le cavalier de write-protect de MADOO est `J1`, confirmé par mesure (`wpsw_cur` = `0`). Méthode d'identification et protocole de pontage. |
 | [`docs/04-environnement-bureau.md`](docs/04-environnement-bureau.md) | La pile graphique, le rendu visuel, ce qui est volontairement absent, et les points à valider sur la machine. |
 | [`docs/05-energie.md`](docs/05-energie.md) | Économie d'énergie : ce qui compte vraiment, les réglages TLP et noyau, et ce qui est délibérément écarté. |
-| [`docs/06-journal-incident-wayland.md`](docs/06-journal-incident-wayland.md) | Journal factuel de l'incident de migration Wayland, du correctif et du retour d'urgence. |
+| [`docs/06-journal-incident-wayland.md`](docs/06-journal-incident-wayland.md) | **Résolu.** L'incident de migration Wayland : la purge nommait `xwayland`, dont `labwc` dépend, et désinstallait le compositeur. Cause établie, correctif, et le filet qui empêche que cela enferme à nouveau dehors. |
 
 ### Installation
 
 | Fichier | Rôle |
 |---|---|
 | [`install/provision.sh`](install/provision.sh) | Transforme une Debian 13 minimale en Claude OS. Idempotent, `--dry-run` disponible. |
-| [`install/packages.list`](install/packages.list) | Les 49 paquets, chacun justifié en commentaire. |
+| [`install/packages.list`](install/packages.list) | Les paquets, chacun justifié en commentaire. |
+| [`install/bascule-session.sh`](install/bascule-session.sh) | Met l'écran de connexion en service **par étapes** : vérifier, essayer sur un terminal virtuel libre, basculer, revenir. Les trois premières ne redémarrent rien. |
+| [`install/restore-session-x11-ssh.sh`](install/restore-session-x11-ssh.sh) | Retour d'urgence vers LightDM, depuis SSH. |
 | [`shell/`](shell/) | Le code du bureau : dock, barre d'état, lanceur, gestionnaire de fichiers, réglages, fond d'écran. Compilé sur la machine par `provision.sh`. |
 | [`rootfs/`](rootfs/) | Les fichiers déployés tels quels : configuration de labwc, session Wayland, lanceur Claude, fond d'écran. |
 
@@ -131,19 +139,48 @@ questions encore ouvertes : capacité exacte de l'eMMC, **chaîne audio**
 (principal risque de non-fonctionnement sous Linux), contrôleur Wi-Fi et
 firmware associé, état du write-protect et version du CR50.
 
-## Étapes suivantes
+## Remettre le bureau en service
 
-Le firmware UEFI est flashé, le cavalier retiré, la machine remontée.
+Le firmware est flashé et Debian 13 installée ; la machine est aujourd'hui sur
+l'écran de connexion de secours, **sans compositeur** — le script de retour
+d'urgence réinstalle Xorg et Xwayland, mais pas `labwc`.
 
-1. **Terminer l'installateur Debian 13.** Le choix décisif est l'écran de
-   sélection des logiciels : **tout décocher sauf « Utilitaires usuels du
-   système »**. « Environnement de bureau Debian » et « GNOME » y sont cochés
-   par défaut — les laisser installerait plusieurs gigaoctets dont Claude OS
-   n'a que faire.
-2. **Récupérer le dépôt** sur la machine, puis lancer
-   `sudo bash install/provision.sh`.
-3. **Valider** avec `bash tools/validate-install.sh` — l'audio en premier.
-4. **Relever les touches** avec `bash tools/probe-keys.sh`, pour en tirer les
+Depuis SSH, ou depuis un terminal de la session de secours :
+
+```sh
+cd ~/Claude-OS && git pull
+sudo bash install/provision.sh
+```
+
+`provision.sh` réinstalle `labwc`, recompile le shell, redéploie l'écran de
+connexion et **arme le filet de sécurité**. La purge ne peut plus emporter le
+compositeur : elle demande d'abord à apt ce qu'il retirerait, et renonce si un
+composant vital figure dans la réponse.
+
+Puis, par étapes — les trois premières ne redémarrent rien et ne changent pas
+le gestionnaire de session :
+
+```sh
+sudo bash install/bascule-session.sh --verifier   # tout est-il là ?
+sudo bash install/bascule-session.sh --essai      # ← REGARDER L'ÉCRAN
+sudo bash install/bascule-session.sh --basculer
+sudo systemctl reboot
+```
+
+`--essai` affiche le véritable champ de mot de passe sur un terminal virtuel
+libre pendant trente secondes, puis rend l'affichage tout seul. C'est l'étape
+qui manquait en septembre : on voit l'écran de connexion **avant** de confier
+le démarrage de la machine à greetd.
+
+En cas de doute au redémarrage, ne rien faire : le filet constate au bout de
+quatre minutes que personne ne peut entrer, écrit pourquoi dans
+`/var/log/claude-os-echec-*.txt`, et repart sur un écran où l'on se connecte.
+Pour défaire la bascule à la main : `sudo bash install/bascule-session.sh --revenir`.
+
+### Ensuite
+
+1. **Valider** avec `bash tools/validate-install.sh` — l'audio en premier.
+2. **Relever les touches** avec `bash tools/probe-keys.sh`, pour en tirer les
    liaisons labwc définitives.
 
 ### Mettre à jour

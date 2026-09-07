@@ -1,0 +1,10 @@
+[Unit]
+Description=Claude OS — filet de sécurité de l'écran de connexion
+Documentation=file:/usr/local/lib/claude-os/filet-session
+# Ce service constate ; il ne dépend donc de rien. Le lancer « After » de
+# greetd suffit à ce que le constat porte sur une session déjà tentée.
+After=greetd.service systemd-logind.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/claude-os/filet-session

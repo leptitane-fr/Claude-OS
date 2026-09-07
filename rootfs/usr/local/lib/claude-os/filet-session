@@ -1,0 +1,136 @@
+#!/bin/sh
+# Claude OS — filet de sécurité de l'écran de connexion.
+#
+# CE QUE CE PROGRAMME EMPÊCHE
+#
+# Le 7 septembre 2026, une purge de paquets a emporté labwc. greetd a
+# redémarré sur un compositeur absent : écran noir, pas de champ de mot de
+# passe, et aucun moyen d'entrer — ce Chromebook n'a pas de touches F pour
+# changer de terminal virtuel. Il a fallu SSH depuis une autre machine.
+#
+# Ce script est la réponse. Il s'exécute quelques minutes après le démarrage,
+# constate si l'écran de connexion est bien apparu, et si ce n'est pas le cas
+# il RANGE LE COMPOSITEUR, écrit pourquoi, et redémarre sur une console texte
+# où l'on peut se connecter au clavier. La machine se sort donc seule de la
+# panne, sans seconde machine et sans câble.
+#
+# Il ne s'exécute que s'il a été ARMÉ — voir install/bascule-session.sh — et
+# il se désarme tout seul dès que la session a fait ses preuves. Une fois
+# l'écran de connexion vu une fois, le risque est passé et ce script s'efface.
+set -u
+
+ARME=/etc/claude-os/filet-arme
+JOURNAL=/var/log/claude-os-filet.log
+
+dire() { printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$JOURNAL"; }
+
+desarmer() {
+	rm -f "$ARME"
+	systemctl disable claude-os-filet.timer >/dev/null 2>&1 || true
+}
+
+[ -e "$ARME" ] || exit 0
+
+# ------------------------------------------------------------------ constat
+#
+# Deux preuves suffisent, et l'une ou l'autre suffit :
+#
+#   — le greeter tourne : l'écran de connexion est AFFICHÉ. Que l'utilisateur
+#     ait tapé son mot de passe ou soit parti faire autre chose ne regarde pas
+#     ce script ;
+#   — une session Wayland est ouverte pour le compte : il est déjà entré.
+#
+# Ne guetter que la seconde condamnerait une machine allumée devant laquelle
+# personne ne s'est assis pendant quatre minutes.
+
+# pgrep -x compare au nom court du processus, TRONQUÉ À QUINZE CARACTÈRES par
+# le noyau. « claude-os-connexion » en fait dix-neuf : la comparaison exacte
+# ne trouve jamais rien. On interroge donc la ligne de commande complète.
+GREETER=0
+pgrep -f '/claude-os-connexion' >/dev/null 2>&1 && GREETER=1
+
+COMPTE=""
+[ -r /etc/claude-os/utilisateur ] && COMPTE="$(head -n 1 /etc/claude-os/utilisateur)"
+
+SESSION=0
+if [ -n "$COMPTE" ]; then
+	for sid in $(loginctl list-sessions --no-legend 2>/dev/null | awk '{print $1}'); do
+		nom="$(loginctl show-session "$sid" -p Name --value 2>/dev/null)"
+		typ="$(loginctl show-session "$sid" -p Type --value 2>/dev/null)"
+		if [ "$nom" = "$COMPTE" ] && [ "$typ" = "wayland" ]; then
+			SESSION=1
+			break
+		fi
+	done
+fi
+
+if [ "$GREETER" -eq 1 ] || [ "$SESSION" -eq 1 ]; then
+	dire "session graphique confirmée (greeter=$GREETER session=$SESSION) — filet retiré"
+	desarmer
+	exit 0
+fi
+
+# ------------------------------------------------------------------- échec
+#
+# LA TRACE D'ABORD, LE REDÉMARRAGE ENSUITE.
+#
+# La panne de septembre n'a pas pu être attribuée faute de journaux : le
+# retour en arrière avait été fait avant de rien collecter, et la cause est
+# restée inconnue pendant une semaine. On collecte donc AVANT de toucher à
+# quoi que ce soit, et le rapport survit au redémarrage.
+
+RAPPORT="/var/log/claude-os-echec-$(date '+%Y%m%d-%H%M%S').txt"
+dire "AUCUN écran de connexion après le délai — collecte dans $RAPPORT"
+
+{
+	echo "=== Échec d'ouverture de la session graphique ==="
+	echo "date            : $(date)"
+	echo "compte attendu  : ${COMPTE:-<inconnu>}"
+	echo
+	echo "--- le compositeur et l'écran de connexion sont-ils là ? ---"
+	for b in /usr/bin/labwc /usr/sbin/greetd /usr/bin/claude-os-connexion \
+	         /usr/local/bin/claude-os-greeter /usr/local/bin/claude-os-session; do
+		if [ -x "$b" ]; then echo "  $b : présent"; else echo "  $b : ABSENT  <<<<"; fi
+	done
+	echo
+	echo "--- paquets ---"
+	for p in labwc xwayland greetd; do
+		printf '  %-12s %s\n' "$p" \
+			"$(dpkg-query -W -f='${db:Status-Status} ${Version}' "$p" 2>/dev/null || echo 'NON INSTALLÉ')"
+	done
+	echo
+	echo "--- greetd ---";        journalctl -b -u greetd --no-pager 2>/dev/null | tail -60
+	echo "--- labwc ---";         journalctl -b _COMM=labwc --no-pager 2>/dev/null | tail -40
+	echo "--- erreurs du démarrage ---"
+	journalctl -b --priority=err..alert --no-pager 2>/dev/null | tail -60
+	echo "--- écran de connexion ---"
+	cat /var/log/claude-os-connexion.log 2>/dev/null || echo "  (aucun)"
+} > "$RAPPORT" 2>&1
+chmod 0644 "$RAPPORT"
+
+# --------------------------------------------------------------- repli
+#
+# On désactive greetd sans rien réinstaller. La machine redémarre alors sur
+# une console texte : c'est laid, mais on s'y connecte au clavier, sans
+# seconde machine — et c'est exactement ce qui a manqué en septembre.
+#
+# LightDM n'est PAS exigé ici. S'il est encore installé on le remet en
+# service, parce qu'un écran de connexion graphique vaut mieux qu'une
+# console ; s'il a été purgé, la console fait très bien l'affaire.
+systemctl disable greetd.service >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/display-manager.service
+
+if systemctl cat lightdm.service >/dev/null 2>&1; then
+	systemctl enable lightdm.service >/dev/null 2>&1 || true
+	systemctl set-default graphical.target >/dev/null 2>&1 || true
+	dire "greetd désactivé, LightDM remis en service"
+else
+	# Plus aucun gestionnaire de session : viser graphical.target ferait
+	# attendre systemd pour rien. On demande explicitement la console.
+	systemctl set-default multi-user.target >/dev/null 2>&1 || true
+	dire "greetd désactivé — la machine redémarre sur une console texte"
+fi
+
+desarmer
+dire "redémarrage"
+systemctl reboot

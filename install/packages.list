@@ -7,11 +7,34 @@
 
 #--- Session graphique ------------------------------------------------------
 #
-# Wayland de bout en bout. Il n'y a PAS de serveur X : le compositeur labwc
+# Wayland de bout en bout. Aucun SERVEUR X ne tourne : le compositeur labwc
 # parle directement à libinput et au noyau. C'est ce qui rend l'écran tactile
 # fonctionnel sans configuration, et ce qui évite de payer un serveur X
 # entier en mémoire sur une machine de 4 Go.
 labwc                          # compositeur wlroots (~2 Mo)
+#
+# XWAYLAND N'EST PAS FACULTATIF, ET LE RETIRER DÉSINSTALLE LE BUREAU.
+#
+# Dans Debian comme dans Ubuntu, le paquet labwc porte « Depends: xwayland ».
+# Ce n'est pas une recommandation : c'est une dépendance ferme. Retirer
+# xwayland — ou x11-common, dont xwayland dépend par xserver-common — emporte
+# donc labwc avec lui, et la machine se retrouve sans compositeur.
+#
+# C'est exactement ce qui est arrivé le 7 septembre 2026 : la purge de
+# l'ancienne pile X11 nommait « xwayland » et « x11-common », apt a retiré
+# labwc sans que personne le lise (la sortie partait dans /dev/null), et
+# greetd a redémarré sur un compositeur qui n'existait plus. Écran noir,
+# aucune connexion possible. Voir docs/06.
+#
+# Le paquet est donc nommé ICI, explicitement, pour deux raisons : il est
+# marqué « installé manuellement » par provision.sh et aucun autoremove ne
+# peut plus l'emporter, et sa présence dans cette liste dit à qui la relit
+# que le retirer n'est pas une économie mais une panne.
+#
+# Il n'est au demeurant jamais exécuté : Chromium, Claude Desktop et le shell
+# parlent Wayland nativement. Il reste le filet de sécurité décrit en
+# docs/02 §2.4, et le prix de la dépendance de labwc.
+xwayland                       # exigé par labwc — ne jamais purger
 #
 # LE BUS DE SESSION. Sans lui, RIEN NE S'AFFICHE.
 #
@@ -37,6 +60,21 @@ libglib2.0-bin                 # gapplication : la bascule dock/barre l'appelle
 greetd                         # démon d'ouverture de session (~1 Mo)
 libjson-glib-1.0-0             # protocole greetd-ipc, en JSON
 foot                           # terminal, natif Wayland (~1 Mo) — secours au clavier
+#
+# LE CLAVIER QUAND IL N'Y A PLUS D'ÉCRAN GRAPHIQUE.
+#
+# Deux usages, tous deux liés au rétablissement après panne :
+#
+#   — « chvt », dont bascule-session.sh --essai se sert pour montrer l'écran
+#     de connexion sur un terminal virtuel libre puis rendre l'affichage,
+#     sans jamais toucher à la session en cours ;
+#   — la disposition azerty sur la console texte, qui est le dernier recours
+#     quand le filet de sécurité range le compositeur. Une console en qwerty
+#     alors qu'on tape un mot de passe à l'aveugle ne rattrape rien.
+#
+# Debian l'installe déjà par l'intermédiaire de console-setup ; le nommer ici
+# le marque « installé manuellement » et le met hors de portée d'un autoremove.
+kbd                            # chvt, et l'azerty sur la console de secours
 
 #--- Compilation du shell ---------------------------------------------------
 #

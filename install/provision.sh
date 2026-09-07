@@ -288,26 +288,79 @@ run "rm -f /usr/local/share/applications/claude-os-notes.desktop"
 run "rm -f /usr/local/share/applications/claude-os-settings.desktop"
 run "rm -rf '$TARGET_HOME/.config/plank' '$TARGET_HOME/.config/pcmanfm'"
 
-# Le poste cible est maintenant valide en greetd/labwc. Laisser Xorg, LightDM
-# ou Xwayland en place permettrait a une ancienne session de reprendre la
-# main, et masquerait les regressions Wayland que l'on veut voir et corriger.
-# La purge ne touche a aucun document utilisateur ; les anciennes
-# configurations sont retirees plus haut et le terminal de secours est natif
-# Wayland (foot).
+# Le poste cible est maintenant valide en greetd/labwc. Laisser Xorg et
+# LightDM en place permettrait a une ancienne session de reprendre la main, et
+# masquerait les regressions Wayland que l'on veut voir et corriger. La purge
+# ne touche a aucun document utilisateur ; les anciennes configurations sont
+# retirees plus haut et le terminal de secours est natif Wayland (foot).
+#
+# DEUX NOMS SONT ABSENTS DE CETTE LISTE, ET C'EST LE POINT IMPORTANT.
+#
+# « xwayland » et « x11-common » y figuraient. Or labwc porte « Depends:
+# xwayland », et xwayland depend de x11-common par xserver-common : nommer
+# l'un ou l'autre ici desinstalle LE COMPOSITEUR. La machine redemarre alors
+# sur un greetd qui lance un labwc absent — ecran noir, aucune connexion
+# possible, et seul SSH pour s'en sortir. C'est la panne du 7 septembre 2026,
+# reproduite et mesuree depuis ; voir docs/06.
+#
+# « xserver-xorg-core », en revanche, ne porte rien de la pile Wayland : il
+# part sans dommage, et c'est l'essentiel du serveur X qui part avec lui.
 VIEUX="openbox plank tint2 picom rofi pcmanfm xcape xdotool dunst xwallpaper
         libnotify-bin python3-gi gir1.2-gtk-3.0 network-manager-gnome blueman
         x11-utils x11-xserver-utils gnome-terminal gnome-terminal-data
-        lightdm lightdm-gtk-greeter xserver-xorg-core xserver-xorg-input-libinput
-        x11-common xwayland"
+        lightdm lightdm-gtk-greeter xserver-xorg-core xserver-xorg-input-libinput"
+
+# CE QUE LA PURGE NE DOIT JAMAIS EMPORTER.
+#
+# Corriger la liste ci-dessus ne suffit pas : elle ne dit que ce qu'on NOMME,
+# jamais ce qu'apt va reellement retirer — il emporte aussi tout ce qui depend
+# de ce qu'on nomme. Un paquet ajoute ici dans six mois pourrait rouvrir la
+# meme panne sans que personne fasse le lien.
+#
+# On demande donc d'abord a apt ce qu'il ferait, on lit sa reponse, et on
+# n'execute que si le bureau y survit. Une simulation coute une seconde ; la
+# panne qu'elle evite a coute une soiree et un ecran noir.
+VITAUX="labwc xwayland greetd dbus-user-session libgtk4-layer-shell0 network-manager"
+
 A_PURGER=""
 for pkg in $VIEUX; do
 	dpkg -l "$pkg" 2>/dev/null | grep -q "^ii" && A_PURGER="$A_PURGER $pkg"
 done
 if [ -n "$A_PURGER" ]; then
-	info "purge de l'ancienne pile :$A_PURGER"
-	run "DEBIAN_FRONTEND=noninteractive apt-get purge -y $A_PURGER >/dev/null 2>&1 || true"
+	info "purge envisagée :$A_PURGER"
+
+	CASCADE="$(DEBIAN_FRONTEND=noninteractive apt-get -s purge -y $A_PURGER 2>/dev/null \
+	           | sed -n 's/^\(Purg\|Remv\) \([^ ]*\).*/\2/p' || true)"
+	MENACES=""
+	for v in $VITAUX; do
+		printf '%s\n' "$CASCADE" | grep -qx "$v" && MENACES="$MENACES $v"
+	done
+
+	if [ -n "$MENACES" ]; then
+		warn "PURGE ABANDONNÉE : apt retirerait aussi :$MENACES"
+		warn "Ces paquets portent la session graphique. RIEN n'a été retiré."
+		warn "Corriger la liste VIEUX de ce script avant de recommencer."
+	else
+		# La sortie n'est PAS avalée. Une purge silencieuse a déjà coûté
+		# Chromium à ce projet, puis le compositeur lui-même ; on lit
+		# désormais ce qui s'en va.
+		run "DEBIAN_FRONTEND=noninteractive apt-get purge -y $A_PURGER" \
+			|| warn "la purge a échoué — sans conséquence pour la suite"
+	fi
 else
 	info "aucun paquet de l'ancienne pile à retirer"
+fi
+
+# Contrôle final, indépendant de tout ce qui précède. Ce script ne doit jamais
+# rendre la main sur une machine dont le compositeur ou l'écran de connexion
+# ont disparu : c'est le seul état dont on ne se sort pas sans SSH.
+if [ "$DRY" -eq 0 ]; then
+	for v in labwc greetd; do
+		command -v "$v" >/dev/null 2>&1 || [ -x "/usr/sbin/$v" ] || \
+			die "« $v » a disparu du système — la machine n'a plus de bureau.
+      Réparer AVANT de redémarrer :  sudo apt-get install --reinstall $v"
+	done
+	info "compositeur et écran de connexion présents ✓"
 fi
 
 # ---------------------------------------------------- compilation du shell
@@ -337,6 +390,7 @@ info "copie de rootfs/ vers /"
 run "cp -a '$REPO_DIR/rootfs/.' /"
 run "chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer /usr/local/bin/claude-os-session /usr/local/bin/claude-os-greeter"
 run "chmod +x /etc/xdg/labwc/autostart /etc/xdg/labwc-greeter/autostart"
+run "chmod +x /usr/local/lib/claude-os/filet-session"
 
 # La session est WAYLAND, et l'écran de connexion aussi. L'ancienne session
 # X11 doit disparaître, sinon elle reste proposée à la connexion et un choix
@@ -410,6 +464,29 @@ if systemctl list-unit-files 2>/dev/null | grep -q '^greetd\.service'; then
 		run "systemctl enable lightdm >/dev/null 2>&1 || true"
 	else
 		info "greetd activé ; LightDM ne démarrera plus"
+
+		# LE FILET, ARMÉ POUR LE PREMIER DÉMARRAGE.
+		#
+		# C'est ici que la machine devient vulnérable : au prochain
+		# allumage, tout repose sur un greetd qui n'a encore jamais servi.
+		# Le 7 septembre 2026, ce démarrage-là s'est fait sur un
+		# compositeur désinstallé, et il a fallu SSH depuis une autre
+		# machine pour reprendre la main.
+		#
+		# Armé, le filet constate quatre minutes après le démarrage que
+		# l'écran de connexion est bien apparu. Sinon il écrit pourquoi
+		# dans /var/log/, range greetd et redémarre sur un écran où l'on
+		# peut entrer. Il se désarme seul dès que la session a fait ses
+		# preuves — voir rootfs/usr/local/lib/claude-os/filet-session.
+		run "mkdir -p /etc/claude-os"
+		run "date '+%Y-%m-%d %H:%M:%S' > /etc/claude-os/filet-arme"
+		run "systemctl daemon-reload"
+		if run "systemctl enable claude-os-filet.timer >/dev/null 2>&1"; then
+			info "filet de sécurité armé pour le premier démarrage"
+		else
+			warn "le filet de sécurité n'a pas pu être armé."
+			warn "Garder un accès SSH ouvert au premier redémarrage."
+		fi
 	fi
 else
 	warn "greetd n'est pas installé : l'écran de connexion reste celui de LightDM"

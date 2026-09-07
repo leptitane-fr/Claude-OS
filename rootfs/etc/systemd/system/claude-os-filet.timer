@@ -1,0 +1,16 @@
+[Unit]
+Description=Claude OS — vérifie après le démarrage que l'on peut se connecter
+
+[Timer]
+# QUATRE MINUTES, ET POURQUOI CE CHIFFRE.
+#
+# Assez pour que greetd, labwc et le greeter aient largement eu le temps
+# d'apparaître sur un N6000 démarrant depuis un eMMC lent — mesuré autour de
+# quarante secondes. Assez court pour que, si l'écran reste noir, la machine
+# se rétablisse avant qu'on ait fini d'aller chercher un câble réseau.
+OnBootSec=4min
+AccuracySec=5s
+Unit=claude-os-filet.service
+
+[Install]
+WantedBy=timers.target

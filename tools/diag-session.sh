@@ -56,9 +56,20 @@ val "dbus-x11"          "$(dpkg -l dbus-x11 2>/dev/null | awk '/^ii/{print $3}' 
 systemctl --user is-active dbus.socket 2>/dev/null | sed 's/^/  dbus.socket : /'
 
 sec "3. Ce qui tourne"
-for p in labwc claude-os-fond claude-os-dock claude-os-status foot lightdm; do
-	if pgrep -x "$p" >/dev/null 2>&1; then
-		val "$p" "en cours (pid $(pgrep -x "$p" | tr '\n' ' '))"
+# « pgrep -x » compare au nom court du processus, que le noyau TRONQUE À
+# QUINZE CARACTÈRES. « claude-os-status » en fait seize et « claude-os-connexion »
+# dix-neuf : la comparaison exacte ne les trouvait jamais, et ce diagnostic
+# les déclarait absents alors qu'ils tournaient. On interroge donc la ligne de
+# commande complète, ancrée sur « / » pour ne pas se reconnaître soi-même.
+for p in labwc claude-os-fond claude-os-dock claude-os-status \
+         claude-os-connexion foot lightdm; do
+	# Le motif accepte le nom en tête de ligne (« labwc -C … », lancé par son
+	# nom) comme en fin de chemin (« /usr/bin/claude-os-dock »), suivi d'un
+	# argument ou de rien. Ancrer sur la seule fin de ligne raterait le
+	# greeter, qui reçoit « --utilisateur ».
+	PIDS="$(pgrep -f "(^|/)$p( |\$)" 2>/dev/null | tr '\n' ' ')"
+	if [ -n "$PIDS" ]; then
+		val "$p" "en cours (pid $PIDS)"
 	else
 		val "$p" "absent"
 	fi

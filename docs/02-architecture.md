@@ -109,9 +109,15 @@ le prix payé, et il est payé en connaissance de cause. Un compositeur qui
 implémenterait `GlobalShortcuts` rouvrirait la question ; labwc ne le fait pas
 aujourd'hui.
 
-Xwayland reste installé en filet de sécurité, mais rien de ce qui est fourni
-ne s'en sert : Chromium (`--ozone-platform-hint=auto`), Claude Desktop
-(`--ozone-platform=wayland`) et le shell parlent Wayland nativement.
+Xwayland reste installé, et **ce n'est pas un choix** : le paquet `labwc` porte
+`Depends: xwayland`. Le retirer désinstalle le compositeur, donc le bureau et
+l'écran de connexion avec lui — c'est la panne du 7 septembre 2026, décrite en
+`docs/06`. Il ne doit figurer dans aucune liste de purge, pas plus que
+`x11-common`, dont il dépend à son tour.
+
+Rien de ce qui est fourni ne s'en sert pour autant : Chromium
+(`--ozone-platform-hint=auto`), Claude Desktop (`--ozone-platform=wayland`) et
+le shell parlent Wayland nativement. Xwayland est présent, jamais exécuté.
 
 > **Une leçon qui vaut au-delà de ce point.** La décision X11 avait été prise
 > sur documentation, sans matériel. Elle tenait debout sur le papier pendant
