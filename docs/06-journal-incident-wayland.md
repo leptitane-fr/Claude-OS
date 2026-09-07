@@ -304,3 +304,77 @@ autopsie complète dans `/var/log/claude-os-essai-<date>.txt`.
 | `ldd` sur les six binaires | Une bibliothèque manquante tue le programme avant sa première ligne : aucun processus, rien à l'écran, aucun message. Symptôme : fond noir et pointeur. |
 | `libgtk4-layer-shell0` | Sans lui, aucun composant ne peut s'ancrer à l'écran. |
 | Branche et commit affichés par `provision.sh` | Ce dépôt porte trois branches `claude/…` et aucune branche par défaut ; `git pull` sur la mauvaise répond « Déjà à jour ». `provision.sh` refuse en outre de tourner s'il est antérieur au correctif de la purge. |
+
+---
+
+# La session qui boucle : `/tmp/.X11-unix`
+
+Date : 2026-09-07, quatrième séance. **Résolu.**
+
+L'écran de connexion s'affichait, le mot de passe était accepté, l'écran
+passait en mode texte une seconde — « de nombreuses lignes rouges » illisibles
+— puis l'écran de connexion revenait. Indéfiniment. Le bureau ne s'ouvrait
+jamais.
+
+## Ce que disait le journal de session
+
+```
+[ERROR] [xwayland/sockets.c:100] /tmp/.X11-unix not owned by root or us
+[ERROR] [xwayland/sockets.c:217] No display available in the first 33
+[ERROR] [../src/xwayland.c:1117] cannot create xwayland server
+=== labwc s'est arrêté — code de retour 1 ===
+```
+
+labwc est compilé avec Xwayland — Debian le lui impose, `labwc Depends:
+xwayland` — et il le démarre à l'ouverture. Xwayland refuse de créer sa socket
+si `/tmp/.X11-unix` n'appartient ni à root ni à l'utilisateur courant, et
+**labwc traite cet échec comme fatal**.
+
+Or l'écran de connexion tourne sous `_greetd` (uid 102). C'est lui qui créait
+le répertoire en premier, et il en devenait propriétaire. La session de `stef`,
+ouverte ensuite, ne pouvait plus s'en servir.
+
+## L'asymétrie, qui rendait la panne déroutante
+
+Le greeter fonctionnait parfaitement — il possédait le répertoire. La session
+seule échouait. Trois hypothèses ont été écartées avant celle-ci : la
+configuration `~/.config/labwc` (absente), les actions de `rc.xml` (toutes
+connues de labwc 0.8.4, vérifié dans la source), le siège et la carte
+graphique (`seat0`, VT 1, i915 chargé, `[MASTER] drm:card0`).
+
+C'est le même paquet `xwayland` qui aura causé les deux pannes de ce projet :
+en le purgeant on désinstallait labwc, en le gardant on héritait de ce
+répertoire. Il n'est jamais exécuté par le bureau, et il aura coûté deux
+soirées.
+
+## Le correctif
+
+`rootfs/etc/tmpfiles.d/claude-os-x11.conf` :
+
+```
+d /tmp/.X11-unix 1777 root root -
+```
+
+Créé par root avec le bit collant, le répertoire sert aux deux comptes.
+`/etc/tmpfiles.d` prime sur `/usr/lib/tmpfiles.d` : la règle vaut même si le
+paquet qui la fournissait d'ordinaire a été retiré — ce qui, dans ce projet,
+n'est pas une hypothèse d'école.
+
+`tmpfiles` ne s'exécutant qu'au démarrage, `provision.sh` et `--deployer`
+appliquent aussi la correction immédiatement, et `--verifier` contrôle le
+propriétaire et le mode.
+
+## Ce qui a permis de trouver
+
+`claude-os-session` ne conservait pas sa sortie. Lancée par greetd, elle
+écrivait sur le terminal virtuel ; greetd réaffichait l'écran de connexion
+par-dessus en une seconde, et le message n'atteignait ni le journal systemd ni
+aucun fichier. On voyait des lignes rouges défiler, illisibles.
+
+C'était la même faute que pour le greeter, un étage plus bas, et elle avait
+été corrigée à un seul étage. Les deux consignent maintenant leur contexte,
+leur sortie complète et leur code de retour — le greeter dans le premier
+emplacement où l'écriture réussit, la session dans
+`~/.local/state/claude-os/session.log`, la tentative précédente gardée en `.1`.
+
+**La panne a été identifiée au premier essai qui a suivi.**

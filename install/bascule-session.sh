@@ -191,6 +191,27 @@ verifier() {
 	[ -x /etc/xdg/labwc/autostart ] && ok "autostart (session)" "exécutable" \
 	                               || ko "autostart (session)" "PAS exécutable"
 
+	# LE RÉPERTOIRE QUI TUE LA SESSION SANS TOUCHER AU GREETER.
+	#
+	# labwc démarre Xwayland à l'ouverture et traite son échec comme FATAL.
+	# Xwayland refuse /tmp/.X11-unix s'il n'appartient ni à root ni à
+	# l'utilisateur courant. L'écran de connexion tourne sous « _greetd » : si
+	# c'est lui qui a créé le répertoire, la session de l'utilisateur ne peut
+	# plus s'en servir, et elle seule échoue.
+	if [ -d /tmp/.X11-unix ]; then
+		P="$(stat -c '%U:%G %a' /tmp/.X11-unix 2>/dev/null)"
+		case "$P" in
+			"root:root 1777") ok "/tmp/.X11-unix" "root:root 1777" ;;
+			*) ko "/tmp/.X11-unix" "$P — la SESSION mourra, pas le greeter"
+			   info "        sudo bash $0 --deployer  le remet à root" ;;
+		esac
+	else
+		ok "/tmp/.X11-unix" "absent — sera créé par tmpfiles au démarrage"
+	fi
+	[ -e /etc/tmpfiles.d/claude-os-x11.conf ] \
+		&& ok "règle tmpfiles" "/etc/tmpfiles.d/claude-os-x11.conf" \
+		|| ko "règle tmpfiles" "absente — le problème reviendra au prochain démarrage"
+
 	say "Le compte à ouvrir"
 	if [ -r /etc/claude-os/utilisateur ]; then
 		COMPTE="$(head -n 1 /etc/claude-os/utilisateur)"
@@ -294,6 +315,25 @@ deployer() {
 		ok "journal du greeter" "accessible à _greetd"
 	else
 		ko "compte _greetd" "absent — greetd est-il installé ?"
+	fi
+
+	# /tmp/.X11-unix REMIS À ROOT, MAINTENANT ET AU PROCHAIN DÉMARRAGE.
+	#
+	# La règle tmpfiles vient d'être copiée, mais tmpfiles ne s'exécute qu'au
+	# démarrage : un répertoire déjà mal possédé le resterait jusque-là, et la
+	# session continuerait d'échouer. On applique donc la règle tout de suite.
+	if [ -e /etc/tmpfiles.d/claude-os-x11.conf ]; then
+		systemd-tmpfiles --create /etc/tmpfiles.d/claude-os-x11.conf 2>/dev/null || true
+		# Repli explicite : systemd-tmpfiles refuse parfois de reprendre un
+		# répertoire existant selon sa version. chown/chmod, eux, ne discutent pas.
+		mkdir -p /tmp/.X11-unix 2>/dev/null || true
+		chown root:root /tmp/.X11-unix 2>/dev/null || true
+		chmod 1777 /tmp/.X11-unix 2>/dev/null || true
+		PROPRIO="$(stat -c '%U:%G %a' /tmp/.X11-unix 2>/dev/null || echo '?')"
+		case "$PROPRIO" in
+			"root:root 1777") ok "/tmp/.X11-unix" "root:root 1777" ;;
+			*) ko "/tmp/.X11-unix" "$PROPRIO — labwc refusera de démarrer" ;;
+		esac
 	fi
 
 	systemctl daemon-reload 2>/dev/null || true

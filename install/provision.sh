@@ -419,6 +419,23 @@ run "chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-bas
 run "chmod +x /etc/xdg/labwc/autostart /etc/xdg/labwc-greeter/autostart"
 run "chmod +x /usr/local/lib/claude-os/filet-session"
 
+# /tmp/.X11-unix À ROOT, TOUT DE SUITE ET AU PROCHAIN DÉMARRAGE.
+#
+# labwc démarre Xwayland à l'ouverture de session et traite son échec comme
+# FATAL. Xwayland refuse /tmp/.X11-unix s'il n'appartient ni à root ni à
+# l'utilisateur courant. Or l'écran de connexion tourne sous « _greetd » : si
+# c'est lui qui crée le répertoire, la session de l'utilisateur ne peut plus
+# s'en servir, labwc meurt en une seconde et greetd réaffiche l'écran de
+# connexion — indéfiniment. Constaté sur la machine, voir docs/06.
+#
+# La règle tmpfiles vient d'être déployée, mais tmpfiles ne s'exécute qu'au
+# démarrage : on l'applique aussi maintenant.
+run "systemd-tmpfiles --create /etc/tmpfiles.d/claude-os-x11.conf >/dev/null 2>&1 || true"
+run "mkdir -p /tmp/.X11-unix"
+run "chown root:root /tmp/.X11-unix"
+run "chmod 1777 /tmp/.X11-unix"
+info "/tmp/.X11-unix appartient à root (Xwayland l'exige, labwc en dépend)"
+
 # La session est WAYLAND, et l'écran de connexion aussi. L'ancienne session
 # X11 doit disparaître, sinon elle reste proposée à la connexion et un choix
 # malheureux ramène une interface qui n'existe plus.
