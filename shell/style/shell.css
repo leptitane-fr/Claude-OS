@@ -170,6 +170,100 @@ popover.qs-popover > contents {
    connecté donne une impression d'instabilité. */
 .qs { min-width: 296px; }
 
+/* --- Curseurs : son et luminosité ---------------------------------------
+ *
+ * Les deux réglages qu'on vient chercher plusieurs fois par jour, donc les
+ * deux premières lignes de la Console. Ce sont aussi les seuls éléments
+ * qu'on manipule au doigt : la piste est épaisse et la poignée large, sur
+ * un écran tactile de 14 pouces un curseur de 4 px est intouchable. */
+
+.qs-rangee { padding: 2px 2px; }
+
+/* Le bouton porte l'icône ; il ne doit rien peindre de lui-même. Adwaita
+   pose un background-image sur tout GtkButton — même remise à zéro que
+   pour les pastilles, même raison. */
+.qs-curseur-bouton {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 6px;
+  min-width: 26px;
+  min-height: 26px;
+  border-radius: 10px;
+}
+.qs-curseur-bouton:hover  { background-color: @surface-sunk; }
+.qs-curseur-bouton.inerte { background-color: transparent; }
+.qs-curseur-bouton:disabled.inerte { opacity: 1; }
+
+.qs-curseur-icone { color: @text; }
+
+.qs-curseur trough {
+  min-height: 8px;
+  border-radius: 6px;
+  background-color: @surface-sunk;
+  border: none;
+}
+.qs-curseur highlight {
+  min-height: 8px;
+  border-radius: 6px;
+  background-color: @accent;
+}
+.qs-curseur slider {
+  min-width: 18px;
+  min-height: 18px;
+  border-radius: 10px;
+  background-color: @text;
+  border: none;
+  box-shadow: 0 1px 3px @shadow-close;
+  /* Marge négative : sans elle GTK réserve la hauteur de la poignée pour la
+     piste, et la rangée gagne dix pixels de vide. */
+  margin: -6px;
+}
+.qs-curseur:disabled highlight { background-color: @text-dim; }
+.qs-curseur:disabled slider    { background-color: @text-dim; }
+
+.qs-curseur-valeur {
+  font-size: 12px;
+  color: @text-dim;
+  font-feature-settings: "tnum";   /* chiffres de largeur fixe : plus de tremblement */
+}
+
+/* --- Alimentation --------------------------------------------------------
+ *
+ * En bas, après un trait, et jamais sur le chemin du pouce qui vise le
+ * volume : c'est le seul endroit de la Console où un clic ne se rattrape
+ * pas. Le premier clic arme et affiche « Confirmer ? », le second agit. */
+
+.qs-trait {
+  background-color: @border;
+  min-height: 1px;
+  margin: 2px 0;
+}
+
+.qs-alim-rangee { padding: 0; }
+
+.qs-alim {
+  background: none;
+  background-color: @surface-alt;
+  border: none;
+  box-shadow: none;
+  border-radius: 12px;
+  padding: 9px 6px;
+  transition: background-color 120ms ease-out;
+}
+.qs-alim:hover { background-color: @surface-sunk; }
+
+/* Armé : rouge franc. Une action irréversible doit se voir avant le second
+   clic, pas après. */
+.qs-alim.arme         { background-color: @danger; }
+.qs-alim.arme:hover   { background-color: @danger; }
+.qs-alim.arme image,
+.qs-alim.arme .qs-alim-nom { color: @on-accent; }
+
+.qs-alim image      { color: @text; }
+.qs-alim-nom        { font-size: 12px; font-weight: 500; color: @text; }
+
 /* --- Bascules ----------------------------------------------------------- */
 
 .qs-tile {

@@ -1,0 +1,18 @@
+# Claude OS — réglages par défaut du terminal.
+#
+# ColorUseTheme est le point important : sans lui, xfce4-terminal peint le
+# fond et le texte avec sa propre palette, et reste clair sur un bureau
+# sombre quoi que dise le thème GTK. Avec, il prend les couleurs du thème —
+# c'est-à-dire celles du reste du bureau.
+#
+# Ce fichier est un DÉFAUT SYSTÈME : xfce4-terminal lit d'abord
+# ~/.config/xfce4/terminal/terminalrc. Ce que l'utilisateur règle dans les
+# préférences du terminal l'emporte donc, et une mise à jour ne l'écrase pas.
+[Configuration]
+ColorUseTheme=TRUE
+FontUseSystem=TRUE
+MiscMenubarDefault=FALSE
+MiscToolbarDefault=FALSE
+MiscAlwaysShowTabs=FALSE
+MiscDefaultGeometry=100x28
+ScrollingUnlimited=TRUE

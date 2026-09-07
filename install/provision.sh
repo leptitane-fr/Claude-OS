@@ -436,6 +436,31 @@ run "chown root:root /tmp/.X11-unix"
 run "chmod 1777 /tmp/.X11-unix"
 info "/tmp/.X11-unix appartient à root (Xwayland l'exige, labwc en dépend)"
 
+# LA LUMINOSITÉ DE L'ÉCRAN, RÉGLABLE DEPUIS LA CONSOLE.
+#
+# /sys/class/backlight/*/brightness appartient à root. La règle udev déposée
+# par rootfs/ l'ouvre au groupe « video » au branchement, mais udev ne rejoue
+# pas les périphériques déjà présents : sans les trois lignes qui suivent, le
+# curseur ne fonctionnerait qu'après le prochain démarrage.
+#
+# L'appartenance au groupe, elle, ne prend effet qu'à la prochaine ouverture
+# de session — c'est ainsi que fonctionnent les groupes sous Unix, et il vaut
+# mieux le dire que de laisser chercher.
+run "udevadm control --reload-rules"
+run "udevadm trigger --subsystem-match=backlight"
+for b in /sys/class/backlight/*; do
+	[ -e "$b/brightness" ] || continue
+	run "chgrp video '$b/brightness'"
+	run "chmod g+w '$b/brightness'"
+done
+if id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx video; then
+	info "« $TARGET_USER » est déjà dans le groupe video"
+else
+	run "usermod -aG video '$TARGET_USER'"
+	warn "« $TARGET_USER » ajouté au groupe video : effectif à la PROCHAINE"
+	warn "ouverture de session. D'ici là le curseur de luminosité reste inerte."
+fi
+
 # La session est WAYLAND, et l'écran de connexion aussi. L'ancienne session
 # X11 doit disparaître, sinon elle reste proposée à la connexion et un choix
 # malheureux ramène une interface qui n'existe plus.

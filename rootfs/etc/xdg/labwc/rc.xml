@@ -8,10 +8,17 @@
 <labwc_config>
 
   <core>
-    <!-- Le dock et la barre dessinent déjà tout ce qu'il faut ; les
-         décorations de labwc feraient double emploi visuellement. Les
-         fenêtres gardent leurs propres décorations côté client. -->
-    <decoration>client</decoration>
+    <!-- SERVEUR, ET C'EST LE DÉFAUT DE labwc.
+         Le projet avait choisi « client » en pensant que le dock et la barre
+         suffisaient. Mais « client » demande à chaque application de dessiner
+         sa propre barre de titre — et celles qui implémentent le protocole de
+         décoration, Chromium et Claude Desktop en tête, n'en dessinent alors
+         aucune : plus de bouton réduire ni agrandir, plus rien à saisir pour
+         déplacer la fenêtre.
+         En « serveur », labwc pose une barre de titre à toute fenêtre qui n'en
+         fournit pas. Les applications GTK gardent la leur, elles ne sont pas
+         concernées ; vérifié au banc d'essai sur les fenêtres du projet. -->
+    <decoration>server</decoration>
     <gap>0</gap>
   </core>
 

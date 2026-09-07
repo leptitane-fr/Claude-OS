@@ -31,7 +31,26 @@ if command -v dbus-run-session >/dev/null 2>&1 && [ -z "${DBUS_SESSION_BUS_ADDRE
     exec dbus-run-session -- "$0" "$@"
 fi
 
-labwc >/tmp/labwc-test.log 2>&1 &
+# CONFIGURATION NUE, ET C'EST INDISPENSABLE.
+#
+# Lance sans -C, labwc lit /etc/xdg/labwc — donc l'autostart de Claude OS,
+# qui demarre le fond, le dock ET la barre d'etat. Le composant qu'on voulait
+# juger arrive alors en second : les composants du shell sont des
+# GtkApplication mono-instance, le nouveau passe la main a celui deja lance et
+# quitte aussitot. On capture le bureau normal, le panneau ne s'ouvre pas, et
+# le banc rend « le composant s'est arrete avant la capture » sans qu'on
+# comprenne pourquoi. Constate sur une machine ou rootfs/ etait deploye.
+CFG_NU="$(mktemp -d)"
+cat > "$CFG_NU/rc.xml" <<'XML'
+<?xml version="1.0"?>
+<labwc_config>
+  <core><decoration>server</decoration><gap>0</gap></core>
+  <theme><dropShadows>no</dropShadows></theme>
+</labwc_config>
+XML
+trap 'cleanup; rm -rf "$CFG_NU"' EXIT
+
+labwc -C "$CFG_NU" >/tmp/labwc-test.log 2>&1 &
 LABWC_PID=$!
 
 for _ in $(seq 1 40); do

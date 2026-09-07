@@ -59,7 +59,20 @@ libglib2.0-bin                 # gapplication : la bascule dock/barre l'appelle
 # savait démarrer que sur X, et c'était son DERNIER usage sur cette machine.
 greetd                         # démon d'ouverture de session (~1 Mo)
 libjson-glib-1.0-0             # protocole greetd-ipc, en JSON
-foot                           # terminal, natif Wayland (~1 Mo) — secours au clavier
+#
+# LE TERMINAL DU BUREAU, ET CELUI DE SECOURS — DEUX RÔLES DISTINCTS.
+#
+# xfce4-terminal est celui qu'on ouvre au quotidien : il est en GTK 3, donc
+# il suit le thème GTK que provision.sh écrit, onglets et menus compris.
+# C'est ce qui manquait à gnome-terminal, qui restait clair sur un bureau
+# sombre. Il est épinglé au dock et proposé au lanceur.
+xfce4-terminal                 # terminal du bureau, suit le thème GTK
+#
+# foot reste, et uniquement pour le secours. Il est lié au raccourci clavier
+# de labwc, celui qu'on tape quand le dock ET le lanceur refusent de
+# démarrer : natif Wayland, sans GTK, sans D-Bus, il s'ouvre là où tout le
+# reste a échoué. Un mégaoctet pour ne jamais se retrouver sans invite.
+foot                           # secours au clavier — jamais le terminal courant
 #
 # LE CLAVIER QUAND IL N'Y A PLUS D'ÉCRAN GRAPHIQUE.
 #

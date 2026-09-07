@@ -1,0 +1,16 @@
+# Claude OS — laisser le bureau régler la luminosité de l'écran.
+#
+# /sys/class/backlight/*/brightness appartient à root et n'est pas
+# inscriptible autrement. Sans cette règle, le curseur de la Console lit la
+# valeur, l'affiche, et échoue en silence à l'écrire.
+#
+# Deux voies existaient : passer par logind (SetBrightness sur le bus) ou
+# ouvrir le fichier au groupe « video ». La seconde est retenue parce qu'elle
+# tient en une ligne, ne demande aucune dépendance, et se vérifie d'un
+# « ls -l ». provision.sh ajoute le compte au groupe.
+#
+# La portée est étroite : ce groupe ne donne accès qu'au rétro-éclairage,
+# jamais au reste de sysfs.
+ACTION=="add", SUBSYSTEM=="backlight", \
+  RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness", \
+  RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness"

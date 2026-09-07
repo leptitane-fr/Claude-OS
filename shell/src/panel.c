@@ -24,6 +24,7 @@
 
 #include "panel.h"
 #include "bluetooth.h"
+#include "console.h"
 #include "sysfs.h"
 #include "wifi.h"
 
@@ -60,6 +61,8 @@ typedef struct {
     GtkWidget *bat_pct;
     GtkWidget *bat_detail;
     GtkWidget *bat_icon;
+    GtkWidget *son;             /* rangee volume                             */
+    GtkWidget *lumiere;         /* rangee luminosite                         */
     guint      watt_timer;      /* 0 quand le panneau est ferme              */
     gboolean   services_sondes; /* NetworkManager et BlueZ deja contactes ?  */
     gboolean   apercu;
@@ -552,6 +555,14 @@ on_panel_show (GtkWidget *popover, gpointer data)
         bluetooth_setup (&p->bluetooth);
     }
 
+    /* Le son et la luminosite se relisent a chaque ouverture : ils changent
+     * par les touches du clavier et par les applications, sans que la Console
+     * en soit avertie. Deux lectures a l'ouverture coutent moins qu'une
+     * surveillance permanente, et c'est tout l'interet de n'afficher ces
+     * valeurs qu'au clic. */
+    console_son_relire (p->son);
+    console_lumiere_relire (p->lumiere);
+
     battery_refresh (p);
     if (p->watt_timer == 0)
         p->watt_timer = g_timeout_add (WATT_REFRESH_MS, on_watt_tick, p);
@@ -594,6 +605,17 @@ panel_new (gboolean apercu)
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_add_css_class (box, "qs");
 
+    /* --- ce qu'on regle le plus souvent, donc en premier ---
+     *
+     * Le son et la luminosite sont les deux reglages qu'on vient chercher
+     * plusieurs fois par jour. Ils sont en haut, atteignables sans lire le
+     * reste, et ce sont les seuls elements de la Console qu'on manipule au
+     * doigt plutot qu'au clic. */
+    p->son = console_son_new (apercu);
+    p->lumiere = console_lumiere_new (apercu);
+    gtk_box_append (GTK_BOX (box), p->son);
+    gtk_box_append (GTK_BOX (box), p->lumiere);
+
     /* --- bascules, cote a cote --- */
     GtkWidget *tiles = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_append (GTK_BOX (tiles),
@@ -630,6 +652,13 @@ panel_new (gboolean apercu)
     gtk_box_append (GTK_BOX (box), card);
 
     gtk_box_append (GTK_BOX (box), reglages_build (p));
+
+    /* L'alimentation ferme la Console, en bas, apres un separateur : c'est
+     * le seul endroit ou un clic ne se rattrape pas, et il ne doit pas se
+     * trouver sur le chemin du pouce qui vise le volume. */
+    GtkWidget *trait = gtk_separator_new (GTK_ORIENTATION_HORIZONTAL);
+    gtk_widget_add_css_class (trait, "qs-trait");
+    gtk_box_append (GTK_BOX (box), trait);
 
     if (apercu) {
         tile_apply (&p->wifi, TRUE, TRUE);
@@ -672,6 +701,8 @@ panel_new (gboolean apercu)
      * centre : sinon il deborderait de l'ecran, la barre etant deja collee
      * au bord. */
     gtk_widget_set_halign (popover, GTK_ALIGN_END);
+
+    gtk_box_append (GTK_BOX (box), console_alimentation_new (popover, apercu));
 
     g_signal_connect (popover, "show",   G_CALLBACK (on_panel_show),   p);
     g_signal_connect (popover, "closed", G_CALLBACK (on_panel_closed), p);

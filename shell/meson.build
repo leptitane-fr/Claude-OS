@@ -53,7 +53,7 @@ executable('claude-os-dock',
   install : true)
 
 executable('claude-os-status',
-  'src/status.c', 'src/panel.c', 'src/wifi.c', 'src/bluetooth.c', commun,
+  'src/status.c', 'src/panel.c', 'src/console.c', 'src/wifi.c', 'src/bluetooth.c', commun,
   dependencies : [gtk, layershell, giounix, pangocairo],
   install : true)
 
