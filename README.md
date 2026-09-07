@@ -53,6 +53,7 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`docs/03-write-protect-jumper.md`](docs/03-write-protect-jumper.md) | **Résolu.** Le cavalier de write-protect de MADOO est `J1`, confirmé par mesure (`wpsw_cur` = `0`). Méthode d'identification et protocole de pontage. |
 | [`docs/04-environnement-bureau.md`](docs/04-environnement-bureau.md) | La pile graphique, le rendu visuel, ce qui est volontairement absent, et les points à valider sur la machine. |
 | [`docs/05-energie.md`](docs/05-energie.md) | Économie d'énergie : ce qui compte vraiment, les réglages TLP et noyau, et ce qui est délibérément écarté. |
+| [`docs/06-journal-incident-wayland.md`](docs/06-journal-incident-wayland.md) | Journal factuel de l'incident de migration Wayland, du correctif et du retour d'urgence. |
 
 ### Installation
 
