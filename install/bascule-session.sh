@@ -173,6 +173,91 @@ verifier() {
 	return 1
 }
 
+# ---------------------------------------------------------------------------
+#  Ce qu'il faut savoir quand l'essai échoue.
+#
+#  Collecté PENDANT que greetd tourne encore : la moitié de ces
+#  renseignements — la session logind de « _greetd », les droits sur la carte
+#  graphique — disparaissent à la seconde où le service s'arrête. Les
+#  demander après coup ne rend que des lignes vides.
+# ---------------------------------------------------------------------------
+postmortem_essai() {
+	warn "L'essai a échoué. Voici de quoi en établir la cause."
+
+	echo
+	info "── journal complet du service d'essai ──"
+	journalctl -u claude-os-essai-greeter -b --no-pager 2>/dev/null | sed 's/^/        /'
+
+	echo
+	info "── la session logind de « _greetd » existe-t-elle ? ──"
+	# Sans session logind, pas de siège ; sans siège, pas de maîtrise du DRM,
+	# et labwc ne peut pas dessiner. C'est pam_systemd qui la crée.
+	loginctl list-sessions --no-legend 2>/dev/null | sed 's/^/        /' \
+		|| echo "        (aucune)"
+	SID_G="$(loginctl list-sessions --no-legend 2>/dev/null | awk '$3=="_greetd"{print $1; exit}')"
+	if [ -n "$SID_G" ]; then
+		ok "session _greetd" "$SID_G"
+		loginctl show-session "$SID_G" -p Type -p Class -p Active -p State \
+			-p VTNr -p Seat -p Remote 2>/dev/null | sed 's/^/        /'
+	else
+		ko "AUCUNE session logind pour _greetd"
+		info "        C'est la piste n°1 : sans session, aucun accès à l'écran."
+		info "        pam_systemd.so est-il appelé ? Voir le fichier PAM ci-dessous."
+	fi
+
+	echo
+	info "── /etc/pam.d/greetd-greeter ──"
+	if [ -r /etc/pam.d/greetd-greeter ]; then
+		sed 's/^/        /' /etc/pam.d/greetd-greeter
+		# CHERCHER pam_systemd DANS LE SEUL FICHIER EST UN FAUX NÉGATIF.
+		#
+		# Debian écrit couramment « @include login » : pam_systemd est alors
+		# tiré par le fichier inclus, et le mot n'apparaît nulle part dans
+		# celui-ci. Annoncer « ABSENT » enverrait chercher une panne qui
+		# n'existe pas — précisément ce qu'un outil de diagnostic ne doit
+		# jamais faire. On suit donc les inclusions.
+		pam_contient() {          # $1 = fichier, $2 = profondeur restante
+			[ -r "$1" ] || return 1
+			[ "${2:-3}" -gt 0 ] || return 1
+			grep -qE '^[^#]*pam_systemd' "$1" && return 0
+			inc="$(sed -n 's/^[[:space:]]*@include[[:space:]]\+\([^[:space:]]*\).*/\1/p' "$1")"
+			for f in $inc; do
+				pam_contient "/etc/pam.d/$f" "$(( ${2:-3} - 1 ))" && return 0
+			done
+			return 1
+		}
+		if pam_contient /etc/pam.d/greetd-greeter 3; then
+			ok "pam_systemd" "atteint (directement ou par @include)"
+		else
+			ko "pam_systemd INTROUVABLE, inclusions suivies"
+			info "        Sans lui, aucune session logind : pas de siège, pas d'écran."
+		fi
+	else
+		ko "/etc/pam.d/greetd-greeter" "absent"
+	fi
+
+	echo
+	info "── la carte graphique, et qui peut y toucher ──"
+	val_dri="$(ls -A /dev/dri 2>/dev/null | tr '\n' ' ')"
+	[ -n "$val_dri" ] && ok "/dev/dri" "$val_dri" || ko "/dev/dri" "vide ou absent"
+	for n in /dev/dri/card*; do
+		[ -e "$n" ] || continue
+		info "        $(ls -l "$n" | awk '{print $1, $3, $4, $NF}')"
+		getfacl -p "$n" 2>/dev/null | grep -E '^user:' | sed 's/^/          /'
+	done
+	info "        groupes de _greetd : $(id -nG _greetd 2>/dev/null || echo '<compte absent>')"
+	info "        pilote i915 : $(lsmod 2>/dev/null | awk '$1=="i915"{print "chargé"}' || echo 'non chargé')"
+
+	echo
+	info "── sortie du greeter, si elle a pu être écrite ──"
+	sed 's/^/        /' /var/log/claude-os-connexion.log 2>/dev/null \
+		|| echo "        (aucune — normal : _greetd n'écrit pas dans /var/log)"
+
+	echo
+	info "── terminal virtuel ──"
+	info "        actif : $(fgconsole 2>/dev/null || echo '?')   attendu : $VT_ESSAI"
+}
+
 # ===========================================================================
 #  ESSAI — le vrai écran de connexion, sur un terminal virtuel libre
 # ===========================================================================
@@ -229,17 +314,33 @@ EOF
 
 	# Le constat automatique, en parallèle du constat visuel. Les deux
 	# comptent : le processus peut tourner sans que rien ne s'affiche.
-	sleep 5
-	if pgrep -f '/claude-os-connexion' >/dev/null 2>&1; then
-		ok "le greeter tourne" "$(pgrep -f '/claude-os-connexion' | tr '\n' ' ')"
-	else
-		ko "le greeter NE TOURNE PAS"
-		warn "Journal de l'essai :"
-		journalctl -u claude-os-essai-greeter --no-pager 2>/dev/null | tail -25 | sed 's/^/        /'
-		cat /var/log/claude-os-connexion.log 2>/dev/null | sed 's/^/        /'
+	#
+	# DOUZE SECONDES DE PLUS, ET POURQUOI. Juger au bout de cinq secondes
+	# était trop tôt : sur un N6000 démarrant depuis un eMMC, labwc puis un
+	# greeter GTK4 mettent plusieurs secondes à ouvrir leur fenêtre. Un
+	# verdict rendu trop tôt déclare mort ce qui est seulement lent.
+	sleep 12
+
+	# LA DISTINCTION QUI ORIENTE TOUT LE RESTE.
+	#
+	# « Pas de champ de mot de passe » recouvre deux pannes opposées :
+	# le compositeur n'a pas démarré — c'est alors un problème de siège, de
+	# carte graphique ou de droits de « _greetd » — ou bien il tourne et
+	# c'est le greeter qui meurt dessus. Les chercher ensemble fait perdre
+	# une soirée ; les séparer prend une ligne.
+	LABWC_PID="$(pgrep -f 'labwc -C /etc/xdg/labwc-greeter' 2>/dev/null | tr '\n' ' ')"
+	GREETER_PID="$(pgrep -f '/claude-os-connexion' 2>/dev/null | tr '\n' ' ')"
+
+	[ -n "$LABWC_PID" ]   && ok "le compositeur tourne" "pid $LABWC_PID" \
+	                      || ko "le COMPOSITEUR n'a pas démarré"
+	[ -n "$GREETER_PID" ] && ok "le greeter tourne" "pid $GREETER_PID" \
+	                      || ko "le GREETER ne tourne pas"
+
+	if [ -z "$GREETER_PID" ]; then
+		postmortem_essai
 	fi
 
-	RESTE=$((DUREE - 8))
+	RESTE=$((DUREE - 15))
 	[ "$RESTE" -gt 0 ] && sleep "$RESTE"
 
 	nettoyer_essai
@@ -251,7 +352,7 @@ EOF
 	fi
 	info "Si le champ de mot de passe s'est affiché, la bascule est sûre :"
 	info "    sudo bash $0 --basculer"
-	info "Sinon, ne rien basculer et transmettre le journal ci-dessus."
+	info "Sinon, ne rien basculer et transmettre TOUT le texte ci-dessus."
 }
 
 # ===========================================================================
