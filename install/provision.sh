@@ -288,18 +288,17 @@ run "rm -f /usr/local/share/applications/claude-os-notes.desktop"
 run "rm -f /usr/local/share/applications/claude-os-settings.desktop"
 run "rm -rf '$TARGET_HOME/.config/plank' '$TARGET_HOME/.config/pcmanfm'"
 
-# Le serveur X et LightDM ne sont PAS purgés ici, et c'est délibéré : tant
-# que greetd n'a pas fait ses preuves sur cette machine, ils sont le seul
-# retour en arrière possible. Un écran de connexion qui refuse de s'afficher
-# enferme dehors, et ce Chromebook n'a pas de touches F pour changer de
-# terminal virtuel.
-#
-# Leur purge est le dernier geste, une fois greetd confirmé :
-#   sudo apt purge lightdm lightdm-gtk-greeter xserver-xorg-core xinit \
-#                  xserver-xorg-input-libinput x11-common
+# Le poste cible est maintenant valide en greetd/labwc. Laisser Xorg, LightDM
+# ou Xwayland en place permettrait a une ancienne session de reprendre la
+# main, et masquerait les regressions Wayland que l'on veut voir et corriger.
+# La purge ne touche a aucun document utilisateur ; les anciennes
+# configurations sont retirees plus haut et le terminal de secours est natif
+# Wayland (foot).
 VIEUX="openbox plank tint2 picom rofi pcmanfm xcape xdotool dunst xwallpaper
-       libnotify-bin python3-gi gir1.2-gtk-3.0 network-manager-gnome blueman
-       x11-utils x11-xserver-utils gnome-terminal gnome-terminal-data"
+        libnotify-bin python3-gi gir1.2-gtk-3.0 network-manager-gnome blueman
+        x11-utils x11-xserver-utils gnome-terminal gnome-terminal-data
+        lightdm lightdm-gtk-greeter xserver-xorg-core xserver-xorg-input-libinput
+        x11-common xwayland"
 A_PURGER=""
 for pkg in $VIEUX; do
 	dpkg -l "$pkg" 2>/dev/null | grep -q "^ii" && A_PURGER="$A_PURGER $pkg"

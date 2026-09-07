@@ -11,10 +11,18 @@ XKB_DEFAULT_LAYOUT=fr
 # Xwayland, ce qui ajoute un serveur entier en mémoire pour rien.
 GDK_BACKEND=wayland
 
+# Une session ouverte par greetd ne passe pas par un fichier .desktop lu par
+# un gestionnaire X11. Ces trois marqueurs doivent donc etre presents dans
+# l'environnement du compositeur lui-meme, sinon certains clients Electron et
+# certains portails concluent a tort qu'ils doivent chercher Xwayland.
+XDG_SESSION_TYPE=wayland
+XDG_CURRENT_DESKTOP=labwc
+XDG_SESSION_DESKTOP=claude-os
+
 # Qt, au cas où une application en amènerait une bibliothèque.
 QT_QPA_PLATFORM=wayland
 
-# Ce que les portails XDG annoncent aux applications. Chromium et Electron
-# s'en servent pour choisir leur intégration de bureau.
-XDG_CURRENT_DESKTOP=labwc
-XDG_SESSION_DESKTOP=claude-os
+# Electron/Chromium : preference Wayland meme avant que le lanceur dedie ne
+# soit pris en compte.
+ELECTRON_OZONE_PLATFORM_HINT=wayland
+MOZ_ENABLE_WAYLAND=1

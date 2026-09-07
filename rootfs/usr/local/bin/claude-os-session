@@ -17,6 +17,19 @@ set -u
 : "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
 export XDG_RUNTIME_DIR
 
+# Cette entree est aussi utilisable depuis un ancien gestionnaire de session.
+# On impose donc Wayland ici, plutot que de dependre uniquement du fichier
+# environment de labwc. DISPLAY est volontairement retire : le bureau Claude
+# OS ne doit jamais heriter d'un serveur X de la session precedente.
+unset DISPLAY
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=labwc
+export XDG_SESSION_DESKTOP=claude-os
+export GDK_BACKEND=wayland
+export QT_QPA_PLATFORM=wayland
+export ELECTRON_OZONE_PLATFORM_HINT=wayland
+export MOZ_ENABLE_WAYLAND=1
+
 if [ -S "$XDG_RUNTIME_DIR/bus" ] || [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
 	exec labwc "$@"
 fi

@@ -36,10 +36,6 @@ libglib2.0-bin                 # gapplication : la bascule dock/barre l'appelle
 # savait démarrer que sur X, et c'était son DERNIER usage sur cette machine.
 greetd                         # démon d'ouverture de session (~1 Mo)
 libjson-glib-1.0-0             # protocole greetd-ipc, en JSON
-# Filet de sécurité, et rien d'autre : toute application Wayland d'ici s'en
-# passe. Il ne coûte rien tant qu'aucun client X11 ne démarre, et il évite de
-# se retrouver bloqué par un programme qui ne saurait pas parler Wayland.
-xwayland
 foot                           # terminal, natif Wayland (~1 Mo) — secours au clavier
 
 #--- Compilation du shell ---------------------------------------------------
