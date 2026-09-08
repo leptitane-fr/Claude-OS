@@ -314,11 +314,33 @@ shell_styles_load (const char *theme)
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
+/* LES ICONES LIVREES AVEC LE SHELL.
+ *
+ * Adwaita n'a pas de cloche, et Papirus n'est pas garanti d'etre le theme
+ * actif : le shell fournit donc la sienne. Elle vit dans son propre
+ * repertoire plutot que dans /usr/share/icons/hicolor, ou le cache du theme
+ * — deja present — l'emportait sur le repertoire et la rendait introuvable
+ * meme apres regeneration.
+ *
+ * Ajoute en tete : GTK cherche d'abord ici, puis dans le theme choisi. Nos
+ * icones ne masquent rien puisqu'elles portent toutes le prefixe
+ * « claude-os- ». */
+static void
+shell_icones_load (void)
+{
+    GtkIconTheme *theme = gtk_icon_theme_get_for_display (gdk_display_get_default ());
+    if (theme == NULL)
+        return;
+    g_autofree char *dir = g_build_filename (SHELL_DATA_DIR, "icons", NULL);
+    gtk_icon_theme_add_search_path (theme, dir);
+}
+
 void
 shell_styles_startup (GtkApplication *app, gpointer cfg)
 {
     (void) app;
     shell_styles_load (((const ShellConfig *) cfg)->theme);
+    shell_icones_load ();
 }
 
 void

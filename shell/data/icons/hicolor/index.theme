@@ -1,0 +1,23 @@
+# Claude OS — l'index qui rend nos icônes visibles.
+#
+# gtk_icon_theme_add_search_path() ne parcourt pas un répertoire au hasard :
+# il y cherche un thème, c'est-à-dire un sous-répertoire portant un
+# index.theme. Sans ce fichier, le chemin était ajouté et purement ignoré —
+# constaté le 8 septembre 2026, la cloche restait un carré « image
+# manquante » alors que le SVG était bien installé et bien formé.
+#
+# Le thème s'appelle « hicolor » à dessein : c'est le seul que GTK consulte
+# quel que soit le thème d'icônes choisi par l'utilisateur. Nos icônes s'y
+# ajoutent sans masquer celles du système, toutes préfixées « claude-os- ».
+[Icon Theme]
+Name=Claude OS
+Comment=Icônes livrées avec le shell Claude OS
+Hidden=true
+Directories=scalable/status
+
+[scalable/status]
+Context=Status
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable

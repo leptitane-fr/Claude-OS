@@ -53,7 +53,8 @@ executable('claude-os-dock',
   install : true)
 
 executable('claude-os-status',
-  'src/status.c', 'src/panel.c', 'src/console.c', 'src/wifi.c', 'src/bluetooth.c', commun,
+  'src/status.c', 'src/panel.c', 'src/console.c', 'src/notifications.c',
+  'src/wifi.c', 'src/bluetooth.c', commun,
   dependencies : [gtk, layershell, giounix, pangocairo],
   install : true)
 
@@ -86,6 +87,25 @@ executable('claude-os-reglages',
 install_data(['data/claude-os-reglages.desktop',
               'data/claude-os-fichiers.desktop'],
   install_dir : get_option('prefix') / get_option('datadir') / 'applications')
+
+# L'icône de la cloche, livrée avec le shell.
+#
+# DANS NOTRE PROPRE RÉPERTOIRE, ET PAS DANS /usr/share/icons/hicolor.
+#
+# Posée dans hicolor, elle dépendait de « gtk4-update-icon-cache » : le cache
+# du thème existait déjà, GTK le lisait de préférence au répertoire, et
+# l'icône restait introuvable — mesuré le 8 septembre 2026, la cloche
+# s'affichait en carré « image manquante » même après régénération du cache.
+#
+# Le shell ajoute donc ce chemin lui-même au démarrage (config.c). Le même
+# mécanisme que pour la feuille de style : l'asset voyage avec le binaire, et
+# aucune étape d'installation ne peut l'oublier.
+install_data(
+  'data/icons/hicolor/index.theme',
+  install_dir : data_dir / 'icons' / 'hicolor')
+install_data(
+  'data/icons/hicolor/scalable/status/claude-os-cloche-symbolic.svg',
+  install_dir : data_dir / 'icons' / 'hicolor' / 'scalable' / 'status')
 
 install_subdir('style',
   install_dir : data_dir,

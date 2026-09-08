@@ -35,6 +35,34 @@ pas seulement au banc d'essai :
 | **Thème global** | La bascule clair/sombre des Réglages est suivie par **toutes** les applications — Chromium, Claude Desktop, le terminal, les barres de titre — sans qu'aucune soit relancée. |
 | **Luminosité** | Le curseur de la Console commande l'écran immédiatement, par logind, sans appartenance au groupe `video` ni réouverture de session. |
 
+### Le centre de notifications
+
+Écrit le 8 septembre 2026. La machine n'avait **aucun** démon : ni dunst, ni
+mako, ni notification-daemon, et `NameHasOwner org.freedesktop.Notifications`
+répondait `false`. Chromium et Claude Desktop émettaient donc dans le vide,
+sans erreur visible.
+
+`shell/src/notifications.c` **est** le serveur, pas seulement l'affichage : il
+prend le nom sur le bus de session et implémente les quatre méthodes de la
+spécification freedesktop plus ses deux signaux. Toute application capable de
+notifier passe par là, sans rien à configurer de son côté.
+
+Il vit dans `claude-os-status` parce que la cloche est dans la barre et que le
+centre doit s'aligner sur la Console : un processus séparé aurait demandé un
+protocole pour transporter une hauteur en pixels. Contrepartie assumée — si la
+barre d'état tombe, les notifications tombent avec elle.
+
+Trois pièges payés, tous documentés dans le code :
+
+- un **popover s'ouvre vers le bas** par défaut ; né au ras de l'écran, GTK le
+  retournait, et ce retournement annulait le décalage vertical. `GTK_POS_TOP`
+  est obligatoire ici.
+- `gtk_icon_theme_add_search_path()` **ignore un répertoire sans
+  `index.theme`** : l'icône était installée, bien formée, et introuvable.
+- un **commentaire XML placé avant `<svg>`** repousse la balise hors de la
+  fenêtre de détection de format de gdk-pixbuf : « Format d'image non
+  reconnu » sur un fichier parfaitement valide.
+
 ### Ce qui reste ouvert
 
 | Sujet | État |
@@ -42,7 +70,7 @@ pas seulement au banc d'essai :
 | **Audio** | **Réparé le 8 septembre 2026**, cette ligne ne décrit plus la machine. Le `probe failed with error -22` a disparu des journaux, PipeWire énumère cinq sorties dont « Jasper Lake HD Audio » par défaut, et les touches de volume la commandent — confirmé à l'oreille. L'historique de la panne reste dans `docs/07`. |
 | Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le conflit de terminal virtuel de l'invariant n°5 — **à reconfirmer** maintenant que greetd est sur le tty7, et à ne pas déclarer résolu sans l'avoir revu. |
 | Luminosité automatique | Non implémentée : elle suppose un capteur de luminosité ambiante dont la présence sur MADOO n'a pas été constatée. À vérifier avec `ls /sys/bus/iio/devices/` avant d'écrire quoi que ce soit. |
-| Reports | rclone (Drive, OneDrive), notifications, icônes sur le bureau. |
+| Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
 
 ---
 

@@ -23,6 +23,7 @@
 
 #include "config.h"
 #include "visibility.h"
+#include "notifications.h"
 #include "panel.h"
 #include "sysfs.h"
 
@@ -31,6 +32,7 @@
 #define BAT_LOW_PERCENT 20      /* seuil d'alerte visuelle                   */
 
 typedef struct {
+    Notifs    *notifs;
     GtkWidget *clock;
     GtkWidget *bat_icon;
     GtkWidget *bat_level;
@@ -312,12 +314,35 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_menu_button_set_has_frame (GTK_MENU_BUTTON (button), FALSE);
     gtk_menu_button_set_child (GTK_MENU_BUTTON (button), bar);
     gtk_menu_button_set_direction (GTK_MENU_BUTTON (button), GTK_ARROW_UP);
-    gtk_menu_button_set_popover (GTK_MENU_BUTTON (button), panel_new (opt->apercu));
+    GtkWidget *console = panel_new (opt->apercu);
+    gtk_menu_button_set_popover (GTK_MENU_BUTTON (button), console);
     gtk_widget_add_css_class (button, "status");
     gtk_widget_set_halign (button, GTK_ALIGN_END);
     gtk_widget_set_valign (button, GTK_ALIGN_END);
 
-    gtk_window_set_child (GTK_WINDOW (window), button);
+    /* LA CLOCHE, A GAUCHE ET DETACHEE.
+     *
+     * Elle ne fait pas partie de la pilule : ronde, separee par un ecart,
+     * elle se lit comme un objet distinct — ce qu'elle est. Cliquer la
+     * pilule ouvre la Console, cliquer la cloche ouvre les notifications, et
+     * rien dans le dessin ne laisse croire que les deux gestes se
+     * confondent.
+     *
+     * Les deux surfaces du centre sont accrochees a `button`, l'ancre de la
+     * Console, et non a la cloche : c'est ce qui leur donne exactement son
+     * bord droit. Accrochees a la cloche, elles se seraient alignees sur le
+     * bord gauche de la barre. */
+    st->notifs = notifs_new (opt->apercu);
+    notifs_ancrer (st->notifs, button);
+    notifs_suivre_console (st->notifs, console);
+
+    GtkWidget *rangee = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_halign (rangee, GTK_ALIGN_END);
+    gtk_widget_set_valign (rangee, GTK_ALIGN_END);
+    gtk_box_append (GTK_BOX (rangee), notifs_cloche (st->notifs));
+    gtk_box_append (GTK_BOX (rangee), button);
+
+    gtk_window_set_child (GTK_WINDOW (window), rangee);
     gtk_window_present (GTK_WINDOW (window));
 
     g_action_map_add_action_entries (G_ACTION_MAP (app), actions,

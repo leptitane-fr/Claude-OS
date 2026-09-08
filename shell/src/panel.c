@@ -62,9 +62,9 @@
  * avoir toujours ete large, et l'on cherche ce qui a change. */
 #define REVEAL_MS 160
 
-/* Ce que la Console laisse sous elle pour que la barre d'etat reste
- * entierement visible. Voir le commentaire de gtk_popover_set_offset. */
-#define ECART_BARRE_PX 12
+/* L'ecart avec la barre d'etat est defini dans panel.h : le centre de
+ * notifications s'en sert aussi, et deux valeurs qui doivent rester egales
+ * ne s'ecrivent pas deux fois. */
 
 /* Largeur de la colonne de detail. La meme que la Console — « .qs
  * { min-width: 296px } » dans shell.css — pour que le panneau deplie ait
@@ -104,7 +104,58 @@ typedef struct {
     guint      suivi_timer;     /* idem : son et luminosite                  */
     gboolean   services_sondes; /* NetworkManager et BlueZ deja contactes ?  */
     gboolean   apercu;
+
+    GtkWidget     *rangee;      /* enfant du popover : sa hauteur fait foi   */
+    GtkWidget     *box_console; /* la Console seule : sa largeur fait foi    */
+    gboolean       ouverte;
+    PanelGeometrieFn geo_fn;
+    gpointer         geo_data;
+    int              hauteur_dite;  /* dernieres valeurs annoncees           */
+    int              largeur_dite;
 } Panel;
+
+/* -------------------------------------------------------------------------
+ * Hauteur annoncee au centre de notifications
+ * ------------------------------------------------------------------------- */
+/* La hauteur NATURELLE de l'enfant, et non celle du popover : la surface du
+ * popover englobe l'ombre portee — mesuree a 768x491 pour une Console qui
+ * n'occupe que 400 px a l'ecran — et poser le centre de notifications
+ * au-dessus de l'ombre l'aurait decolle de la Console de pres de cent
+ * pixels. La naturelle, elle, ne depend pas de l'allocation, donc pas du
+ * moment ou on la demande. */
+static void
+annoncer_hauteur (Panel *p)
+{
+    if (p->geo_fn == NULL)
+        return;
+
+    int ignore, largeur = 0, hauteur = 0;
+    /* La largeur se mesure toujours, ouverte ou fermee : le centre de
+     * notifications s'aligne dessus meme quand la Console est repliee. */
+    gtk_widget_measure (p->box_console, GTK_ORIENTATION_HORIZONTAL, -1,
+                        &ignore, &largeur, &ignore, &ignore);
+    if (p->ouverte)
+        gtk_widget_measure (p->rangee, GTK_ORIENTATION_VERTICAL, -1,
+                            &ignore, &hauteur, &ignore, &ignore);
+
+    if (hauteur == p->hauteur_dite && largeur == p->largeur_dite)
+        return;                     /* rien de neuf : pas de repositionnement */
+    p->hauteur_dite = hauteur;
+    p->largeur_dite = largeur;
+    p->geo_fn (largeur, hauteur, p->geo_data);
+}
+
+void
+panel_observer_geometrie (GtkWidget *popover, PanelGeometrieFn fn, gpointer data)
+{
+    Panel *p = g_object_get_data (G_OBJECT (popover), "panel");
+    g_return_if_fail (p != NULL);
+    p->geo_fn       = fn;
+    p->geo_data     = data;
+    p->hauteur_dite = -1;           /* force la premiere annonce             */
+    p->largeur_dite = -1;
+    annoncer_hauteur (p);
+}
 
 /* -------------------------------------------------------------------------
  * Bascules
@@ -635,6 +686,11 @@ on_page_changee (GObject *pile, GParamSpec *ps, gpointer data)
      * mise en page, ce qui est leur contrat. */
     if (g_strcmp0 (page, "vide") == 0)
         gtk_revealer_set_reveal_child (GTK_REVEALER (p->reveleur), FALSE);
+
+    /* La colonne de detail est plus haute que la Console seule : la deplier
+     * la fait grandir vers le haut, et le centre de notifications doit
+     * suivre sous peine de se retrouver recouvert. */
+    annoncer_hauteur (p);
 }
 
 static void
@@ -665,6 +721,9 @@ on_panel_show (GtkWidget *popover, gpointer data)
         p->watt_timer = g_timeout_add (WATT_REFRESH_MS, on_watt_tick, p);
     if (!p->apercu && p->suivi_timer == 0)
         p->suivi_timer = g_timeout_add (SUIVI_REFRESH_MS, on_suivi_tick, p);
+
+    p->ouverte = TRUE;
+    annoncer_hauteur (p);
 }
 
 static void
@@ -695,6 +754,9 @@ on_panel_closed (GtkPopover *popover, gpointer data)
         g_source_remove (p->suivi_timer);
         p->suivi_timer = 0;
     }
+
+    p->ouverte = FALSE;
+    annoncer_hauteur (p);
 }
 
 static void
@@ -715,6 +777,7 @@ panel_new (gboolean apercu)
 
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_add_css_class (box, "qs");
+    p->box_console = box;
 
     /* --- ce qu'on regle le plus souvent, donc en premier ---
      *
@@ -839,6 +902,7 @@ panel_new (gboolean apercu)
     gtk_revealer_set_reveal_child (GTK_REVEALER (p->reveleur), FALSE);
 
     GtkWidget *rangee = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
+    p->rangee = rangee;
     gtk_box_append (GTK_BOX (rangee), p->reveleur);
     gtk_box_append (GTK_BOX (rangee), box);
     /* La colonne de detail est plus haute que la Console (une liste de
@@ -874,7 +938,7 @@ panel_new (gboolean apercu)
      * 12 px, parce que c'est deja l'ecart que le dock et la barre gardent
      * avec le bord de l'ecran (« margin: 0 12px 12px 0 » dans shell.css).
      * La Console se pose donc sur la meme trame que le reste du bureau. */
-    gtk_popover_set_offset (GTK_POPOVER (popover), 0, -ECART_BARRE_PX);
+    gtk_popover_set_offset (GTK_POPOVER (popover), 0, -PANEL_ECART_BARRE_PX);
 
     gtk_box_append (GTK_BOX (box), console_alimentation_new (popover, apercu));
 

@@ -1067,3 +1067,122 @@ window.fichiers-progres { background-color: @surface; }
   font-size: 13px;
   color: @text-dim;
 }
+
+/* --- Notifications -------------------------------------------------------
+ *
+ * La cloche reprend exactement la matière de la barre d'état — même fond,
+ * même bordure, même ombre — mais ronde et détachée. Elle se lit comme un
+ * objet distinct posé à côté, et non comme un bouton de plus dans la
+ * pilule : les deux gestes sont différents, le dessin doit le dire.
+ * ------------------------------------------------------------------------- */
+
+.cloche {
+  /* « background: none » d'abord, pour la même raison que .qs-tile : Adwaita
+     peint les boutons avec un background-image qui recouvrirait la couleur. */
+  background: none;
+  background-color: @surface;
+  border: 1px solid @border;
+  box-shadow: 0 8px 28px @shadow,
+              0 2px  6px @shadow-close;
+  color: @text-dim;
+  /* Rond : min-width = min-height, et un rayon qui dépasse la moitié. */
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  border-radius: 999px;
+  /* L'écart avec la pilule, et le même retrait du bord bas qu'elle. */
+  margin: 0 10px 12px 0;
+  transition: background-color 140ms ease-out, color 140ms ease-out;
+}
+
+.cloche:hover { background-color: @surface-alt; color: @text; }
+
+/* Du non-lu. La couleur d'accent est la même que celle des pastilles
+   allumées : dans ce shell, l'accent veut dire « actif, et c'est à toi de
+   voir ». Elle suit le thème, clair comme sombre. */
+.cloche.nouvelles        { background-color: @accent; color: @on-accent; }
+.cloche.nouvelles:hover  { background-color: @accent-hover; color: @on-accent; }
+
+/* Le centre reprend la largeur de la Console — même valeur que « .qs ». */
+.notif-centre { min-width: 296px; }
+
+.notif-carte {
+  background-color: @surface-alt;
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+/* Urgence critique : un liseré d'accent, pas un fond criard. La carte doit
+   se distinguer sans rendre le reste du centre illisible. */
+.notif-carte.critique { border-left: 3px solid @accent; }
+
+.notif-app    { font-size: 12px; font-weight: 500; color: @text; }
+.notif-quand  { font-size: 11px; color: @text-dim; }
+.notif-icone  { color: @text-dim; }
+.notif-resume { font-size: 13px; color: @text; }
+.notif-corps  { font-size: 12px; color: @text-dim; }
+
+/* Le bouton d'effacement d'une carte, et celui qui vide le centre : discrets
+   au repos, francs au survol. Effacer ne doit jamais être le geste qu'on
+   fait par inadvertance en visant autre chose. */
+.notif-rejet {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border-radius: 999px;
+  color: @text-dim;
+}
+.notif-rejet:hover { background-color: @surface-sunk; color: @text; }
+
+.notif-effacer {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: @text-dim;
+}
+.notif-effacer:hover { background-color: @surface-sunk; color: @text; }
+
+.notif-actions { margin-top: 2px; }
+
+.notif-action {
+  background: none;
+  background-color: @surface-sunk;
+  border: none;
+  box-shadow: none;
+  padding: 4px 10px;
+  border-radius: 10px;
+  font-size: 12px;
+  color: @text;
+}
+.notif-action:hover { background-color: @border; }
+
+/* Une carte cliquable ne doit pas ressembler à un bouton posé sur une carte :
+   le bouton disparaît, seule la carte reste, et le survol l'éclaircit. */
+.notif-cliquable {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  border-radius: 14px;
+}
+.notif-cliquable:hover .notif-carte { background-color: @surface-sunk; }
+
+/* La bannière reprend la largeur de la Console, et ne s'ajuste pas à son
+   texte : demandé explicitement, et de toute façon préférable — une surface
+   qui change de largeur à chaque notification donnerait au coin de l'écran
+   un tremblement permanent. Le fond est transparent : c'est le popover qui
+   dessine déjà la surface, une carte par-dessus ferait deux fonds empilés. */
+.notif-banniere .notif-carte {
+  background-color: transparent;
+  padding: 2px;
+  min-width: 296px;
+}
