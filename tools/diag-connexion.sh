@@ -171,8 +171,22 @@ CIBLE_HOME="$(getent passwd "$CIBLE" 2>/dev/null | cut -d: -f6)"
 val "compte" "${CIBLE:-<non défini>}"
 val "dossier personnel" "${CIBLE_HOME:-<introuvable>}"
 
-if [ -n "$CIBLE_HOME" ] && [ -e "$CIBLE_HOME/.config/labwc" ]; then
-	val "~/.config/labwc" "PRÉSENT <<<< masque /etc/xdg/labwc"
+#
+# MAIS LA RÉSOLUTION EST FICHIER PAR FICHIER, PAS PAR RÉPERTOIRE. Mesuré : un
+# themerc-override seul chez l'utilisateur colore bien la barre de titre SANS
+# empêcher la lecture du rc.xml système. C'est même le mécanisme du thème
+# global — claude-os-theme réécrit ce fichier à chaque changement. Ne sont
+# donc signalés que les fichiers homonymes de /etc/xdg/labwc.
+if [ -n "$CIBLE_HOME" ] && [ -d "$CIBLE_HOME/.config/labwc" ]; then
+	MASQ=""
+	for f in rc.xml autostart environment menu.xml; do
+		[ -e "$CIBLE_HOME/.config/labwc/$f" ] && MASQ="$MASQ $f"
+	done
+	if [ -n "$MASQ" ]; then
+		val "~/.config/labwc" "MASQUE /etc/xdg/labwc :$MASQ <<<<"
+	else
+		val "~/.config/labwc" "présent, ne masque rien ✓"
+	fi
 	echo "  --- contenu ---"
 	ls -la "$CIBLE_HOME/.config/labwc" 2>/dev/null | sed 's/^/    /'
 	for f in "$CIBLE_HOME/.config/labwc/autostart" "$CIBLE_HOME/.config/labwc/environment"; do

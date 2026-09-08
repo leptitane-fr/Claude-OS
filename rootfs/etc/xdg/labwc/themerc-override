@@ -15,12 +15,18 @@
 # labwc 0.8.4 : en inventer un ne provoque aucune erreur, il est simplement
 # ignoré, et l'on croit avoir thémé ce qui ne l'est pas.
 #
-# LIMITE CONNUE, ET ASSUMÉE POUR L'INSTANT
+# CE FICHIER EST LE REPLI, PLUS LA VÉRITÉ
 #
-# Ce fichier est statique. Le shell, lui, change de thème à chaud par
-# shell.conf. Passer le bureau en thème clair laissera donc les barres de
-# titre sombres jusqu'à ce que ce fichier soit engendré depuis le thème
-# courant — voir « ce qui reste ouvert » dans CLAUDE.md.
+# Il était statique, et le bureau passé en thème clair gardait des barres de
+# titre sombres. C'est réglé : claude-os-theme engendre désormais le MÊME
+# fichier dans ~/.config/labwc, depuis la feuille de style du thème courant,
+# et labwc — qui résout ses fichiers un par un — préfère celui de
+# l'utilisateur à celui-ci.
+#
+# Celui-ci sert donc quand l'autre n'existe pas encore : premier démarrage,
+# compte fraîchement créé, ou session ouverte avant que provision.sh soit
+# passé. Ses couleurs sont celles de claude-sombre, le thème par défaut ;
+# elles évitent une barre de titre blanche pendant la seconde qui précède.
 
 # --- Barre de titre -------------------------------------------------------
 # Active : la surface surélevée du shell, celle des pastilles de la Console.

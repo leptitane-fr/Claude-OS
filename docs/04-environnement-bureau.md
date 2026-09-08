@@ -143,6 +143,65 @@ profondeur de ChromeOS, là où une ombre unique paraît plate. Elle est calcul�
 une fois par le compositeur, jamais réévaluée — rien à voir avec un flou
 permanent, qui aurait coûté un rendu par image.
 
+### Le thème ne s'arrête pas au shell
+
+La feuille de style habille les six programmes du shell. Elle ne dit rien à
+Chromium, à Claude Desktop, au terminal, aux dialogues GTK ni aux barres de
+titre que labwc dessine depuis que `rc.xml` demande `decoration server`. On
+avait donc un bureau sombre entouré de fenêtres claires — constaté à l'écran
+le 8 septembre 2026, photo à l'appui.
+
+Toutes ces applications lisent la même chose, et une seule : `color-scheme`
+dans l'espace `org.freedesktop.appearance`, publié par le **portail XDG**.
+C'est là, et nulle part ailleurs, que Chromium va chercher de quoi honorer son
+option « suivre le thème du système ».
+
+`/usr/local/bin/claude-os-theme` est le seul programme qui écrit tout cela :
+
+| Il écrit | Qui le lit |
+|---|---|
+| `gsettings org.gnome.desktop.interface color-scheme` | `xdg-desktop-portal-gtk`, qui le republie en `org.freedesktop.appearance` |
+| `~/.config/gtk-3.0/settings.ini` et `gtk-4.0/` | GTK 3 et GTK 4, à chaud, sans redémarrage |
+| `~/.config/labwc/themerc-override` | labwc, au SIGHUP qui suit |
+
+Il prend ses couleurs **dans la feuille de style du thème courant**, pas dans
+une table à lui : `style/theme-<id>.css` reste la source unique. Il en déduit
+même « clair ou sombre » par la luminosité de `@surface`, plutôt que par le
+nom du thème — un thème nommé « nuit » fonctionnerait sans qu'on y touche.
+
+Le panneau de réglages l'appelle à chaque changement, l'autostart une fois à
+l'ouverture de session pour que Chromium démarre déjà de la bonne couleur au
+lieu d'apparaître clair puis de basculer.
+
+**Mesuré, dans une session labwc réelle avec le portail :** le portail répond
+`uint32 1` sur les deux thèmes sombres et `uint32 2` sur les deux clairs ; le
+signal `SettingChanged ('org.freedesktop.appearance', 'color-scheme', …)` part
+à chaque bascule — c'est lui qui fait suivre les fenêtres **déjà ouvertes** ;
+et la barre de titre d'une fenêtre laissée en place passe de `#2a2a27` à
+`#f0eee6` sans qu'elle soit relancée, vérifié pixel par pixel sur deux
+captures.
+
+Trois écueils y sont enterrés, chacun décrit en tête du script : `UseIn=gnome`
+dans `gtk.portal` (voir juste dessous), `gsettings set` qui rend 0 sans
+conserver, et `labwc --reconfigure` qui exige `LABWC_PID`.
+
+### `portals.conf`, sans quoi rien de tout cela n'existe
+
+`xdg-desktop-portal-gtk` sait publier `color-scheme`, mais son fichier
+`gtk.portal` déclare `UseIn=gnome`. Notre session s'annonce `labwc` : le
+portail frontal ne retenait donc aucun fournisseur, l'interface `Settings`
+n'apparaissait pas sur le bus, et l'appel répondait « No such interface ».
+
+`/etc/xdg-desktop-portal/portals.conf` le désigne explicitement :
+
+```
+[preferred]
+default=gtk
+```
+
+Quatre lignes dont dépend toute l'harmonie du bureau. Les retirer ne provoque
+aucune erreur : les fenêtres redeviennent simplement claires.
+
 ---
 
 ## 4.4 Le cahier des charges, point par point
@@ -150,7 +209,7 @@ permanent, qui aurait coûté un rendu par image.
 | # | Demande | État |
 |---|---|---|
 | 1 | Esthétique ChromeOS, dock macOS centré | fait |
-| 2 | Fenêtres sans cadre latéral ni inférieur | fait — décorations côté client, `decoration=client` |
+| 2 | Fenêtres sans cadre latéral ni inférieur | revu — voir « Les décorations ont changé de camp » ci-dessous |
 | 3 | Pas de flou d'arrière-plan | fait — aucun flou nulle part |
 | 4 | Ombres légères sur fenêtres, icônes, dock, barre | fait |
 | 5 | Bouton du lanceur sur le dock | fait |
@@ -175,12 +234,32 @@ en sections ; il n'y aura qu'à en déclarer une de plus, alimentée par la
 configuration de rclone. Rien ne s'affichera tant que rien n'est configuré :
 une entrée qui ne mène nulle part serait pire que son absence.
 
+### Les décorations ont changé de camp
+
+Le cahier des charges demandait des fenêtres sans cadre, et `rc.xml` disait
+donc `decoration=client` : chaque application dessinait la sienne. Sur la
+machine, le résultat n'était pas celui qu'on attendait — **beaucoup de
+fenêtres n'avaient aucun bouton réduire ni agrandir**, parce que toutes les
+applications ne dessinent pas de barre de titre quand le compositeur leur
+laisse la main. Le mousepad, les dialogues GTK, plusieurs fenêtres de Chromium
+étaient simplement impossibles à réduire à la souris.
+
+`rc.xml` dit maintenant `decoration=server` : labwc pose lui-même une barre de
+titre à celles qui n'en dessinent pas, et les autres gardent la leur. Les
+boutons sont revenus partout.
+
+Le prix de ce choix était une barre de titre dessinée avec le thème par défaut
+de labwc, qui est clair — des bandeaux blancs sur un bureau sombre. C'est ce
+que `themerc-override` corrige, et depuis `claude-os-theme` il suit le thème
+courant plutôt que d'être figé (voir §4.3).
+
 ### Reporté sans regret
 
-Les **boutons de barre de titre stylisés** « coup de crayon » : les fenêtres
-portent des décorations côté client, dessinées par chaque application. Les
-imposer voudrait dire les reprendre au compositeur, donc redessiner soi-même
-la barre de titre de Chromium et de Claude Desktop.
+Les **boutons de barre de titre stylisés** « coup de crayon ». La barre est
+maintenant dessinée par labwc, donc atteignable ; mais `themerc` ne sait
+colorer que des boutons, pas en changer le dessin. Il faudrait fournir des
+images à labwc, thème par thème. Le gain est esthétique et le coût réel :
+reporté.
 
 ---
 

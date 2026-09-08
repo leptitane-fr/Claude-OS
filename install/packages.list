@@ -182,7 +182,25 @@ libsecret-1-0                  # bibliothèque cliente
 
 #--- Portails XDG -----------------------------------------------------------
 xdg-desktop-portal             # requis par Electron
-xdg-desktop-portal-gtk         # sélecteurs de fichiers
+#
+# C'EST LUI QUI PUBLIE LE THÈME CLAIR/SOMBRE À TOUT LE BUREAU.
+#
+# Il ne sert pas qu'aux sélecteurs de fichiers : il traduit le réglage
+# « color-scheme » en org.freedesktop.appearance, l'espace que Chromium,
+# Claude Desktop et GTK 4 interrogent — et il émet SettingChanged, ce qui
+# fait suivre les fenêtres DÉJÀ OUVERTES sans les relancer.
+#
+# Il déclare « UseIn=gnome » : sous labwc il ne serait jamais choisi.
+# /etc/xdg-desktop-portal/portals.conf le désigne explicitement.
+xdg-desktop-portal-gtk         # sélecteurs de fichiers ET thème clair/sombre
+#
+# Le schéma qui porte la clé « org.gnome.desktop.interface color-scheme »,
+# et le magasin qui la conserve d'une session à l'autre. Sans le premier,
+# gsettings refuse la clé ; sans le second, il l'accepte en mémoire et
+# l'oublie à la fermeture — le thème reviendrait au défaut à chaque
+# ouverture de session, sans qu'on comprenne pourquoi.
+gsettings-desktop-schemas      # la clé color-scheme
+dconf-gsettings-backend        # sans lui, le réglage ne survit pas à la session
 
 #--- Applications -----------------------------------------------------------
 chromium                       # navigateur — usage principal

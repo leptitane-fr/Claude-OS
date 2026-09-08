@@ -25,11 +25,11 @@ xwayland 2:24.1.6, libgtk4-layer-shell0 1.0.4, dbus-user-session 1.16.2.
 |---|---|
 | **Audio** | **EN ÉCHEC.** `sof_rt5682 jsl_rt5682_def: probe with driver sof_rt5682 failed with error -22`, précédé de `ipc tx timed out` et `failed to load DSP topology`. Le DSP démarre mais la topologie ne se charge pas. C'est le risque n°1 identifié dès `docs/01`. |
 | Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le même conflit de terminal virtuel que l'invariant n°5 — à reconfirmer maintenant que greetd est sur le tty7. |
+| Thème global | **Fait, mesuré au banc d'essai, pas encore vu sur la machine.** Le portail publie 1 en sombre et 2 en clair, `SettingChanged` part à chaque bascule, et la barre de titre d'une fenêtre DÉJÀ OUVERTE change de couleur. Reste à confirmer à l'écran que Chromium et Claude Desktop suivent — l'option « suivre le thème du système » doit être active dans Chromium. |
 | Rangée supérieure du clavier | Non câblée. `tools/probe-keys.sh` relève les codes, les liaisons labwc restent à écrire. |
 | Reports | rclone (Drive, OneDrive), notifications, icônes sur le bureau. |
 | Volume dans la Console | Le curseur est en place mais **ne commande rien tant que l'audio est en panne** : sans carte son, `wpctl` ne trouve aucune sortie et la rangée se désactive d'elle-même en le disant. |
 | Luminosité dans la Console | Exige que le compte soit dans le groupe `video` — `provision.sh` l'y ajoute, mais **l'appartenance ne prend effet qu'à la session suivante**. D'ici là le curseur se désactive et l'explique. |
-| Barres de titre et thème clair | `rootfs/etc/xdg/labwc/themerc-override` habille les décorations serveur aux couleurs de `theme-claude-sombre`. Le fichier est **statique** : passer le bureau en thème clair laissera les barres de titre sombres, jusqu'à ce qu'il soit engendré depuis le thème courant. |
 | Luminosité automatique | Non implémentée : elle suppose un capteur de luminosité ambiante dont la présence sur MADOO n'a pas été constatée. À vérifier avec `ls /sys/bus/iio/devices/` avant d'écrire quoi que ce soit. |
 
 ---
@@ -113,6 +113,43 @@ branche et son commit, et **refuse de tourner** s'il est antérieur au
 correctif de la purge. La branche de référence est
 `claude/examine-project-qgnt80`.
 
+### 7. Le thème sort du shell par le portail XDG, et par lui seul
+
+Chromium, Claude Desktop, le terminal, les dialogues GTK et les barres de
+titre ne lisent pas la feuille de style du shell. Ils lisent tous la même
+chose : `color-scheme` de `org.freedesktop.appearance`, publié par le portail.
+
+La chaîne, mesurée de bout en bout :
+
+```
+gsettings org.gnome.desktop.interface color-scheme
+  └─> xdg-desktop-portal-gtk
+       └─> org.freedesktop.appearance/color-scheme  (+ signal SettingChanged)
+            └─> Chromium, Claude Desktop, GTK 4
+```
+
+`claude-os-theme` l'alimente, écrit les réglages GTK, engendre
+`~/.config/labwc/themerc-override` et envoie SIGHUP au compositeur. Le panneau
+de réglages l'appelle à chaque changement, l'autostart une fois à l'ouverture.
+
+Trois pièges, chacun payé :
+
+- **`xdg-desktop-portal-gtk` déclare `UseIn=gnome`.** Sous labwc il n'est
+  jamais choisi, l'interface `Settings` n'existe pas sur le bus, et rien ne
+  suit le thème. C'est `/etc/xdg-desktop-portal/portals.conf` qui le désigne.
+  **Retirer ce fichier suffit à tout casser, sans le moindre message.**
+- **`gsettings set` rend 0 sans conserver la valeur** quand dconf ou le bus
+  manquent. Le script relit donc ce qu'il vient d'écrire.
+- **`labwc --reconfigure` ne marche que depuis un enfant de labwc** : il prend
+  le destinataire dans `LABWC_PID`, que labwc ne pose que dans l'environnement
+  des programmes qu'il lance. Appelé par SSH ou par `provision.sh`, il répond
+  « LABWC_PID not set ». Le script envoie donc SIGHUP lui-même.
+
+`~/.config/labwc` **n'est plus une anomalie** : la résolution de labwc se fait
+fichier par fichier, pas par répertoire — mesuré. Un `themerc-override` y est
+normal et attendu ; ce sont les homonymes de `/etc/xdg/labwc` (`rc.xml`,
+`autostart`, `environment`, `menu.xml`) qui masquent et cassent la session.
+
 ---
 
 ## Intervenir sur la session graphique
@@ -135,6 +172,20 @@ sans rien purger, sans toucher à la session en cours. En cas d'échec il verse
 son autopsie dans `/var/log/claude-os-essai-<date>.txt`.
 
 `--revenir` défait la bascule.
+
+### Après un déploiement qui touche au thème
+
+Le portail choisit son fournisseur **au démarrage** : `portals.conf` déployé
+pendant une session ouverte ne sert à rien tant qu'il n'est pas relancé. Sous
+le compte de l'utilisateur, pas en root :
+
+```sh
+systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk
+claude-os-theme          # repose color-scheme, GTK, themerc, et signale labwc
+```
+
+Sans cela, `--verifier` dit que tout est en place et les fenêtres restent
+claires.
 
 ### Le filet de sécurité
 

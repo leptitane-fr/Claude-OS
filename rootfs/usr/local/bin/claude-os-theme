@@ -1,0 +1,258 @@
+#!/bin/sh
+# Claude OS — applique le thème à TOUT l'environnement, immédiatement.
+#
+#   claude-os-theme [<identifiant-de-thème>]
+#
+# Sans argument, lit le thème dans shell.conf. Appelé par le panneau de
+# réglages à chaque changement, et une fois à l'ouverture de session pour que
+# l'état de départ soit cohérent.
+#
+# LE PROBLÈME QU'IL RÉSOUT
+#
+# Le shell se thème lui-même par sa feuille de style. Mais Chromium, Claude
+# Desktop, le terminal, les dialogues GTK et les barres de titre dessinées par
+# labwc ne la lisent pas. On obtenait un bureau sombre entouré de fenêtres
+# claires.
+#
+# Ces applications lisent toutes la même chose, et une seule : le réglage
+# « color-scheme » de l'espace « org.freedesktop.appearance », publié par le
+# PORTAIL XDG. Chromium et Electron s'y abonnent et réagissent au signal
+# SettingChanged sans être relancés — mesuré sur le portail réel.
+#
+# La chaîne est donc :
+#
+#   gsettings org.gnome.desktop.interface color-scheme
+#        └─> xdg-desktop-portal-gtk
+#             └─> org.freedesktop.appearance/color-scheme  (+ SettingChanged)
+#                  └─> Chromium, Claude Desktop, GTK 4
+#
+# ATTENTION : le portail GTK déclare « UseIn=gnome ». Sous labwc il ne serait
+# donc jamais choisi, et personne ne publierait la couleur. C'est
+# /etc/xdg-desktop-portal/portals.conf qui le désigne explicitement — sans ce
+# fichier, tout ce script ne sert à rien.
+set -u
+
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/claude-os/shell.conf"
+STYLE=/usr/share/claude-os-shell/style
+CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}"
+
+THEME="${1:-}"
+[ -n "$THEME" ] || THEME="$(sed -n 's/^[[:space:]]*theme[[:space:]]*=[[:space:]]*//p' "$CONF" 2>/dev/null | head -1)"
+[ -n "$THEME" ] || THEME="claude-sombre"
+
+CSS="$STYLE/theme-$THEME.css"
+if [ ! -r "$CSS" ]; then
+	echo "claude-os-theme : thème « $THEME » inconnu ($CSS absent)" >&2
+	exit 1
+fi
+
+# Un jeton de la feuille de style, par son nom. C'EST ELLE LA SOURCE DE
+# VÉRITÉ : les couleurs ne sont écrites qu'à un seul endroit dans ce projet,
+# et tout ce qui les utilise les y lit.
+jeton() {
+	sed -n "s/^@define-color[[:space:]]\+$1[[:space:]]\+\(#[0-9a-fA-F]\{6\}\).*/\1/p" "$CSS" | head -1
+}
+
+ACCENT="$(jeton accent)"
+SURFACE="$(jeton surface)"
+SURFACE_ALT="$(jeton surface-alt)"
+SURFACE_SUNK="$(jeton surface-sunk)"
+TEXTE="$(jeton text)"
+TEXTE_DIM="$(jeton text-dim)"
+SUR_ACCENT="$(jeton on-accent)"
+DANGER="$(jeton danger)"
+
+[ -n "$SURFACE" ] || { echo "claude-os-theme : $CSS illisible" >&2; exit 1; }
+
+# SOMBRE OU CLAIR : CALCULÉ, PAS DEVINÉ.
+#
+# On pourrait se fier au nom — « claude-sombre » finit par « sombre ». Mais un
+# thème ajouté demain s'appellerait peut-être « nuit », et le mécanisme
+# tomberait en silence. La luminosité de la surface de fond, elle, ne ment
+# jamais : c'est la définition même de « sombre ».
+R=$(printf '%d' "0x$(echo "$SURFACE" | cut -c2-3)")
+V=$(printf '%d' "0x$(echo "$SURFACE" | cut -c4-5)")
+B=$(printf '%d' "0x$(echo "$SURFACE" | cut -c6-7)")
+if [ $(( (R + V + B) / 3 )) -lt 128 ]; then
+	SOMBRE=1; SCHEMA="prefer-dark";  GTK_THEME="Adwaita-dark"
+else
+	SOMBRE=0; SCHEMA="prefer-light"; GTK_THEME="Adwaita"
+fi
+
+# LA POLICE — MÊME RÈGLE QUE LE SHELL, ET ÉCRITE DEUX FOIS À DESSEIN.
+#
+# Le shell résout la police ainsi : « font » de shell.conf s'il est renseigné,
+# sinon celle du thème. La table thème → police vit dans shell/src/config.c ;
+# ce script ne peut pas lire du C, et la police n'est PAS dans la feuille de
+# style (le panneau de réglages doit pouvoir la nommer et vérifier qu'elle est
+# installée, ce qu'une règle CSS ne permet pas).
+#
+# Ces quatre lignes sont donc un MIROIR de shell/src/config.c. Toucher l'une
+# sans l'autre donne un bureau dont les fenêtres extérieures n'ont pas la même
+# police que le shell — un commentaire le rappelle des deux côtés.
+POLICE="$(sed -n 's/^[[:space:]]*font[[:space:]]*=[[:space:]]*//p' "$CONF" 2>/dev/null | head -1)"
+if [ -z "$POLICE" ]; then
+	case "$THEME" in
+		claude-clair|claude-sombre) POLICE="Lato" ;;
+		*)                          POLICE="Inter" ;;
+	esac
+fi
+
+# ------------------------------------------------------------- le portail
+#
+# Les deux lignes qui font tout le travail pour Chromium et Claude Desktop.
+#
+# HORS SESSION, ON NE PEUT PAS ÉCRIRE — ET CE N'EST PAS UNE PANNE.
+#
+# provision.sh appelle ce script alors qu'aucune session graphique n'est
+# ouverte : il n'y a alors pas de bus, dconf n'a personne à qui parler, et
+# « gsettings set » échouerait. Le distinguer du vrai défaut compte : sinon
+# la fourniture affiche une alerte rouge à chaque passage, on apprend à
+# l'ignorer, et le jour où elle dit vrai on ne la lit plus.
+#
+# Les fichiers GTK et le themerc, eux, s'écrivent dans tous les cas : ils
+# n'ont besoin de rien. Le color-scheme sera posé par l'autostart à la
+# prochaine ouverture de session.
+BUS=0
+[ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] && BUS=1
+[ -S "/run/user/$(id -u)/bus" ] && BUS=1
+
+if [ "$BUS" -eq 0 ]; then
+	echo "claude-os-theme : hors session (aucun bus) — color-scheme sera posé à l'ouverture"
+elif command -v gsettings >/dev/null 2>&1; then
+	# La sortie d'erreur reste OUVERTE : ce projet a perdu trois soirées sur
+	# des commandes muettes. Ce que gsettings a à dire, on le lit.
+	gsettings set org.gnome.desktop.interface color-scheme "$SCHEMA" || true
+	gsettings set org.gnome.desktop.interface gtk-theme   "$GTK_THEME" || true
+
+	# ON RELIT CE QU'ON VIENT D'ÉCRIRE, ET CE N'EST PAS DE LA PARANOÏA.
+	#
+	# « gsettings set » rend 0 même quand la valeur n'est pas conservée :
+	# sans dconf, ou sans bus de session, l'écriture part en mémoire et
+	# disparaît. Le script se serait déclaré satisfait, les fenêtres
+	# seraient restées claires, et l'on aurait cherché la panne ailleurs.
+	# Constaté au banc d'essai, dans un environnement sans bus.
+	RELU="$(gsettings get org.gnome.desktop.interface color-scheme | tr -d \"\'\")"
+	if [ "$RELU" != "$SCHEMA" ]; then
+		echo "claude-os-theme : color-scheme NON CONSERVÉ (relu « ${RELU:-rien} », voulu « $SCHEMA »)." >&2
+		echo "  Les applications extérieures au shell ne suivront pas le thème." >&2
+		echo "  Vérifier : gsettings-desktop-schemas et dconf-gsettings-backend installés," >&2
+		echo "  et un bus de session présent (\$DBUS_SESSION_BUS_ADDRESS)." >&2
+	fi
+else
+	echo "claude-os-theme : gsettings absent — les applications ne suivront pas" >&2
+fi
+
+# ----------------------------------------------------------------- GTK
+#
+# GTK 3 et GTK 4 surveillent ce fichier et l'appliquent SANS redémarrage. Il
+# double le réglage gsettings à dessein : les applications GTK 3 anciennes ne
+# lisent que celui-ci.
+# Un « gtk-icon-theme-name= » vide n'est pas neutre : GTK le prend au mot et
+# perd Papirus. On ne l'écrit donc que si shell.conf le renseigne vraiment.
+ICONES="$(sed -n 's/^[[:space:]]*icon_theme[[:space:]]*=[[:space:]]*//p' "$CONF" 2>/dev/null | head -1)"
+[ -n "$ICONES" ] || ICONES="Papirus"
+
+for v in 3.0 4.0; do
+	mkdir -p "$CFG_DIR/gtk-$v"
+	cat > "$CFG_DIR/gtk-$v/settings.ini" <<EOF
+[Settings]
+gtk-theme-name=$GTK_THEME
+gtk-icon-theme-name=$ICONES
+gtk-font-name=$POLICE 10
+gtk-application-prefer-dark-theme=$SOMBRE
+gtk-cursor-theme-name=Adwaita
+EOF
+done
+
+# ------------------------------------------------------- barres de titre
+#
+# Écrit chez l'utilisateur, et c'est SANS DANGER : labwc résout ses fichiers
+# de configuration UN PAR UN, pas par répertoire. Un themerc-override ici ne
+# masque donc pas /etc/xdg/labwc/rc.xml — vérifié en posant les deux et en
+# constatant que la barre de titre apparaissait (rc.xml système) ET prenait
+# la couleur demandée (themerc utilisateur).
+mkdir -p "$CFG_DIR/labwc"
+cat > "$CFG_DIR/labwc/themerc-override" <<EOF
+# Engendré par claude-os-theme depuis $CSS — ne pas modifier à la main :
+# le prochain changement de thème réécrit ce fichier.
+window.active.title.bg.color:       $SURFACE_ALT
+window.inactive.title.bg.color:     $SURFACE
+window.active.label.text.color:     $TEXTE
+window.inactive.label.text.color:   $TEXTE_DIM
+window.label.text.justify:          center
+
+border.width:                       1
+window.active.border.color:         $SURFACE_SUNK
+window.inactive.border.color:       $SURFACE_ALT
+
+window.active.button.unpressed.image.color:       $TEXTE
+window.inactive.button.unpressed.image.color:     $TEXTE_DIM
+window.active.button.close.unpressed.image.color: $DANGER
+
+titlebar.height:                    30
+window.button.width:                24
+window.button.height:               24
+window.button.spacing:              4
+window.titlebar.padding.width:      8
+
+menu.items.bg.color:                $SURFACE_ALT
+menu.items.text.color:              $TEXTE
+menu.items.active.bg.color:         $ACCENT
+menu.items.active.text.color:       $SUR_ACCENT
+menu.border.color:                  $SURFACE_SUNK
+menu.border.width:                  1
+menu.separator.color:               $SURFACE_SUNK
+
+osd.bg.color:                       $SURFACE
+osd.label.text.color:               $TEXTE
+osd.border.color:                   $SURFACE_SUNK
+osd.border.width:                   1
+EOF
+
+# LE SIGNAL, ET POURQUOI PAS « labwc --reconfigure ».
+#
+# labwc relit toute sa configuration sur SIGHUP : les barres de titre changent
+# de couleur sans qu'aucune fenêtre ne bouge. « --reconfigure » ne fait rien
+# d'autre que cet envoi — mais il prend le destinataire dans la variable
+# LABWC_PID, que labwc ne pose QUE dans l'environnement des programmes qu'il
+# lance lui-même.
+#
+# Mesuré : appelé depuis une session labwc bien vivante mais par un chemin qui
+# n'en descend pas — un terminal SSH, provision.sh — il répond
+# « LABWC_PID not set » et rend 1, sans rien signaler à personne. Le panneau
+# de réglages, lui, hérite bien de la variable ; on aurait donc eu un thème
+# qui suit au clic et pas à l'ouverture de session, sans comprendre pourquoi.
+#
+# On envoie donc le signal nous-mêmes, à LABWC_PID s'il est là, sinon au
+# compositeur de CE compte — jamais à celui de l'écran de connexion, qui
+# tourne sous « _greetd » et ne nous appartient pas.
+# On ne le lui demande QUE s'il tourne. Hors session — pendant la fourniture,
+# par exemple — « --reconfigure » ne trouverait aucune instance et se
+# plaindrait pour rien ; le themerc ci-dessus sera lu au prochain démarrage.
+# Et quand il tourne, sa sortie d'erreur reste ouverte : si la reconfiguration
+# échoue, on veut le savoir plutôt que de chercher pourquoi les barres de
+# titre gardent l'ancienne couleur.
+CIBLES="${LABWC_PID:-}"
+[ -n "$CIBLES" ] || CIBLES="$(pgrep -x -u "$(id -u)" labwc | tr '\n' ' ')"
+if [ -n "$CIBLES" ]; then
+	for pid in $CIBLES; do
+		kill -HUP "$pid" || echo "claude-os-theme : SIGHUP refusé au compositeur $pid" >&2
+	done
+else
+	# Hors session — pendant la fourniture, par exemple. Le themerc écrit
+	# ci-dessus sera lu tel quel au prochain démarrage de labwc.
+	echo "claude-os-theme : aucun compositeur à prévenir — themerc lu au prochain démarrage"
+fi
+
+# --------------------------------------------------------------- terminal
+#
+# xfce4-terminal suit le thème GTK quand ColorUseTheme est vrai. Le défaut
+# système le pose déjà ; on ne réécrit ici que si l'utilisateur a un fichier
+# à lui où le réglage manque, pour ne pas écraser ses propres couleurs.
+TERMRC="$CFG_DIR/xfce4/terminal/terminalrc"
+if [ -f "$TERMRC" ] && ! grep -q '^ColorUseTheme=' "$TERMRC"; then
+	printf 'ColorUseTheme=TRUE\n' >> "$TERMRC"
+fi
+
+echo "claude-os-theme : « $THEME » appliqué ($SCHEMA, $GTK_THEME)"

@@ -93,7 +93,15 @@ RESTE="$(ls /usr/local/bin/claude-os-* 2>/dev/null | grep -vE 'claude-os-(claude
 
 sec "5. La configuration de labwc"
 val "/etc/xdg/labwc"   "$(ls /etc/xdg/labwc 2>/dev/null | tr '\n' ' ' || echo 'ABSENT')"
-val "~/.config/labwc"  "$(ls "$HOME/.config/labwc" 2>/dev/null | tr '\n' ' ' || echo 'absent ✓')"
+# themerc-override y est NORMAL : c'est claude-os-theme qui l'engendre à
+# chaque changement de thème, et labwc résout ses fichiers un par un — il ne
+# masque donc pas /etc/xdg/labwc/rc.xml. Ce sont les homonymes qui comptent.
+MASQ=""
+for f in rc.xml autostart environment menu.xml; do
+	[ -e "$HOME/.config/labwc/$f" ] && MASQ="$MASQ $f"
+done
+val "~/.config/labwc"  "$(ls "$HOME/.config/labwc" 2>/dev/null | tr '\n' ' ')"
+[ -n "$MASQ" ] && val "  masque /etc/xdg" "$MASQ <<<<" || true
 val "XDG_CONFIG_DIRS"  "${XDG_CONFIG_DIRS:-<vide, défaut /etc/xdg>}"
 echo "  --- autostart réellement lu ---"
 for d in "$HOME/.config" ${XDG_CONFIG_DIRS:-/etc/xdg}; do

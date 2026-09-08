@@ -217,15 +217,42 @@ verifier() {
 	#
 	# provision.sh retire ce répertoire ; --deployer ne le fait pas, puisqu'il
 	# ne touche qu'à rootfs/. D'où ce contrôle.
+	#
+	# MAIS LA RÉSOLUTION SE FAIT FICHIER PAR FICHIER, PAS PAR RÉPERTOIRE.
+	#
+	# Mesuré : rc.xml posé dans /etc/xdg/labwc et themerc-override seul chez
+	# l'utilisateur — la barre de titre apparaît (donc le rc.xml système a
+	# bien été lu) ET prend la couleur du themerc utilisateur. Les deux
+	# fichiers viennent de deux répertoires différents.
+	#
+	# Ce répertoire n'est donc plus une anomalie en soi : claude-os-theme y
+	# écrit themerc-override à chaque changement de thème, et c'est ainsi que
+	# les barres de titre suivent. Seuls les fichiers qui masquent VRAIMENT
+	# la configuration système sont signalés.
 	CIBLE_HOME=""
 	if [ -r /etc/claude-os/utilisateur ]; then
 		CIBLE_HOME="$(getent passwd "$(head -n1 /etc/claude-os/utilisateur)" 2>/dev/null | cut -d: -f6)"
 	fi
-	if [ -n "$CIBLE_HOME" ] && [ -e "$CIBLE_HOME/.config/labwc" ]; then
-		ko "~/.config/labwc PRÉSENT" "masque /etc/xdg/labwc pour la session"
-		info "        Contenu : $(ls -A "$CIBLE_HOME/.config/labwc" 2>/dev/null | tr '\n' ' ')"
-		info "        Le retirer rend la main à la configuration système :"
-		info "            sudo mv $CIBLE_HOME/.config/labwc $CIBLE_HOME/.config/labwc.ancien"
+	if [ -n "$CIBLE_HOME" ] && [ -d "$CIBLE_HOME/.config/labwc" ]; then
+		MASQUANTS=""
+		# « || true » sur le test : sans lui, une dernière itération sans
+		# fichier rendrait 1, et « set -e » emporterait le vérificateur au
+		# milieu de son propre rapport.
+		for f in rc.xml autostart environment menu.xml shutdown; do
+			[ -e "$CIBLE_HOME/.config/labwc/$f" ] && MASQUANTS="$MASQUANTS $f" || true
+		done
+		if [ -n "$MASQUANTS" ]; then
+			ko "~/.config/labwc" "masque la configuration système :$MASQUANTS"
+			info "        labwc lit ces fichiers-LÀ chez l'utilisateur et ignore"
+			info "        ceux de /etc/xdg/labwc. Les retirer rend la main :"
+			for f in $MASQUANTS; do
+				info "            sudo mv $CIBLE_HOME/.config/labwc/$f $CIBLE_HOME/.config/labwc/$f.ancien"
+			done
+		elif [ -e "$CIBLE_HOME/.config/labwc/themerc-override" ]; then
+			ok "~/.config/labwc" "themerc-override seul — engendré par claude-os-theme"
+		else
+			ok "~/.config/labwc" "présent mais ne masque rien"
+		fi
 	else
 		ok "~/.config/labwc" "absent — /etc/xdg/labwc fait foi"
 	fi
@@ -306,6 +333,43 @@ verifier() {
 		&& ok "polkitd" "présent" \
 		|| ko "polkitd" "absent — montage de volumes et siège non autorisés"
 
+	# CE QUI FAIT SUIVRE LE THÈME AUX FENÊTRES QUI NE SONT PAS LE SHELL.
+	#
+	# Le shell se thème par sa feuille de style. Chromium, Claude Desktop, le
+	# terminal et les barres de titre ne la lisent pas : ils lisent tous la
+	# même chose, « color-scheme » dans org.freedesktop.appearance, publié
+	# par le portail XDG. La chaîne complète est décrite en tête de
+	# /usr/local/bin/claude-os-theme. Chaque maillon manquant se traduit par
+	# un bureau sombre entouré de fenêtres claires — sans aucun message.
+	say "L'harmonie du thème"
+	[ -x /usr/local/bin/claude-os-theme ] \
+		&& ok "claude-os-theme" "/usr/local/bin/claude-os-theme" \
+		|| ko "claude-os-theme" "absent ou non exécutable — rien ne propagera le thème"
+	if [ -r /etc/xdg-desktop-portal/portals.conf ] \
+	   && grep -q '^default=.*gtk' /etc/xdg-desktop-portal/portals.conf; then
+		ok "portals.conf" "désigne le fournisseur gtk"
+	else
+		ko "portals.conf" "absent ou ne nomme pas gtk"
+		info "        xdg-desktop-portal-gtk déclare « UseIn=gnome » : sous labwc"
+		info "        il n'est jamais choisi, l'interface Settings n'existe pas"
+		info "        sur le bus, et aucune fenêtre extérieure ne suit le thème."
+	fi
+	dpkg-query -W -f='${db:Status-Status}' xdg-desktop-portal-gtk 2>/dev/null | grep -qx installed \
+		&& ok "xdg-desktop-portal-gtk" "présent" \
+		|| ko "xdg-desktop-portal-gtk" "absent — personne ne publie le clair/sombre"
+	# Le schéma DOIT être connu de gsettings : sans lui l'écriture est rejetée.
+	# On interroge la liste plutôt que d'écrire, pour ne rien changer ici.
+	if gsettings list-schemas 2>/dev/null | grep -qx org.gnome.desktop.interface; then
+		ok "schéma org.gnome.desktop.interface" "connu de gsettings"
+	else
+		ko "schéma org.gnome.desktop.interface" "INCONNU — installer gsettings-desktop-schemas"
+	fi
+	# Sans magasin dconf, « gsettings set » rend 0 et oublie la valeur à la
+	# fermeture de session : le thème reviendrait au défaut à chaque ouverture.
+	dpkg-query -W -f='${db:Status-Status}' dconf-gsettings-backend 2>/dev/null | grep -qx installed \
+		&& ok "dconf-gsettings-backend" "le réglage survivra à la session" \
+		|| ko "dconf-gsettings-backend" "absent — le thème serait oublié à chaque fermeture"
+
 	say "État actuel du gestionnaire de session"
 	# « systemctl is-enabled » écrit « not-found » sur sa sortie standard ET
 	# rend un code d'erreur : un « || echo » afficherait les deux.
@@ -357,6 +421,7 @@ deployer() {
 	cp -a "$DEPOT/rootfs/." /
 	chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer \
 	         /usr/local/bin/claude-os-session /usr/local/bin/claude-os-greeter \
+	         /usr/local/bin/claude-os-theme \
 	         /etc/xdg/labwc/autostart /etc/xdg/labwc-greeter/autostart \
 	         /usr/local/lib/claude-os/filet-session 2>/dev/null || true
 	ok "fichiers copiés" "/usr/local/bin, /etc/xdg, /usr/local/lib"
@@ -393,7 +458,18 @@ deployer() {
 
 	systemctl daemon-reload 2>/dev/null || true
 	echo
-	info "Déployé. L'essai peut être relancé :"
+	# LE PORTAIL NE RELIT PAS portals.conf TOUT SEUL.
+	#
+	# Il choisit son fournisseur au démarrage. Déployé pendant une session
+	# ouverte, le fichier ne sert donc à rien jusqu'à ce que le portail soit
+	# relancé — et l'on chercherait pourquoi les fenêtres restent claires
+	# alors que « --verifier » dit que tout est en place.
+	info "Déployé. Pour que le thème prenne SANS rouvrir la session, depuis le"
+	info "compte de l'utilisateur (pas en root) :"
+	info "    systemctl --user restart xdg-desktop-portal xdg-desktop-portal-gtk"
+	info "    claude-os-theme"
+	echo
+	info "L'essai de l'écran de connexion peut être relancé :"
 	info "    sudo bash $0 --essai"
 }
 

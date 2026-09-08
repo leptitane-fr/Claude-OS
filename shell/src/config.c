@@ -21,7 +21,13 @@ static const char *default_pinned[] = {
 /* La police est ICI et non dans le fichier CSS du theme, pour qu'elle ait une
  * source unique : le panneau de reglages doit pouvoir la nommer et verifier
  * qu'elle est installee, ce qu'il ne saurait pas faire en lisant une regle
- * CSS. */
+ * CSS.
+ *
+ * MIROIR : /usr/local/bin/claude-os-theme refait la meme resolution en shell,
+ * pour ecrire « gtk-font-name » a l'usage des applications qui ne sont pas le
+ * shell. Il ne sait pas lire du C ; sa table est donc une copie de celle-ci,
+ * et un theme ajoute ici doit l'etre la-bas aussi -- sans quoi les fenetres
+ * exterieures n'auront pas la police du bureau. */
 static const ShellTheme themes[] = {
     { "clair",         "Clair",         FALSE, "Inter" },
     { "sombre",        "Sombre",        TRUE,  "Inter" },

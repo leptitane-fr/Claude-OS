@@ -28,6 +28,18 @@ lancer() {
 	"$@" >> "$JOURNAL/shell.log" 2>&1 &
 }
 
+# LE THÈME, AVANT TOUT LE RESTE.
+#
+# Il pose « color-scheme » pour le portail XDG, écrit les réglages GTK et
+# engendre le themerc de labwc. Chromium et Claude Desktop, lancés ensuite,
+# démarrent donc déjà de la bonne couleur — au lieu d'apparaître clairs puis
+# de basculer sous les yeux.
+#
+# En synchrone, et c'est voulu : c'est une fraction de seconde, et l'ordre
+# compte plus ici que le parallélisme.
+printf '=== %s : claude-os-theme ===\n' "$(date '+%H:%M:%S')" >> "$JOURNAL/shell.log"
+/usr/local/bin/claude-os-theme >> "$JOURNAL/shell.log" 2>&1
+
 # Noms nus plutôt que chemins absolus : le PATH décide, ce qui permet de
 # tester une version compilée à la main sans toucher à ce fichier.
 lancer claude-os-fond

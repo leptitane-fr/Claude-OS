@@ -61,7 +61,15 @@ export MOZ_ENABLE_WAYLAND=1
 	echo "labwc            : $(command -v labwc || echo 'INTROUVABLE <<<<')"
 	echo "siège            : ${XDG_SEAT:-<vide>}   VT : ${XDG_VTNR:-<vide>}"
 	echo "config lue       : ${XDG_CONFIG_HOME:-$HOME/.config}/labwc puis /etc/xdg/labwc"
-	echo "  ~/.config/labwc : $([ -e "${XDG_CONFIG_HOME:-$HOME/.config}/labwc" ] && echo 'PRÉSENT — masque /etc/xdg <<<<' || echo absent)"
+	# La résolution de labwc se fait FICHIER PAR FICHIER : un
+	# themerc-override chez l'utilisateur ne masque pas le rc.xml système —
+	# c'est même ainsi que claude-os-theme colore les barres de titre. Seuls
+	# les fichiers homonymes de /etc/xdg/labwc sont une anomalie.
+	MASQ=""
+	for f in rc.xml autostart environment menu.xml; do
+		[ -e "${XDG_CONFIG_HOME:-$HOME/.config}/labwc/$f" ] && MASQ="$MASQ $f"
+	done
+	echo "  ~/.config/labwc : $([ -n "$MASQ" ] && echo "MASQUE /etc/xdg :$MASQ <<<<" || echo 'rien de masquant')"
 	echo "--- sortie de labwc ---"
 } >> "$JOURNAL" 2>&1
 

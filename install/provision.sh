@@ -276,6 +276,9 @@ run "rm -rf /usr/local/share/claude-os-shell"
 run "rm -f /usr/local/share/applications/claude-os-reglages.desktop"
 run "rm -f /usr/local/share/applications/claude-os-fichiers.desktop"
 
+# Le themerc-override du thème global vit lui aussi ici, et il est emporté :
+# c'est sans conséquence, claude-os-theme le réécrit plus bas dans ce même
+# script, depuis le thème réellement configuré.
 if [ -d "$TARGET_HOME/.config/labwc" ]; then
 	info "retrait de ~/.config/labwc — la configuration système reprend la main"
 	run "rm -rf '$TARGET_HOME/.config/labwc'"
@@ -415,7 +418,7 @@ say "Déploiement de l'environnement"
 
 info "copie de rootfs/ vers /"
 run "cp -a '$REPO_DIR/rootfs/.' /"
-run "chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer /usr/local/bin/claude-os-session /usr/local/bin/claude-os-greeter"
+run "chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer /usr/local/bin/claude-os-session /usr/local/bin/claude-os-greeter /usr/local/bin/claude-os-theme"
 run "chmod +x /etc/xdg/labwc/autostart /etc/xdg/labwc-greeter/autostart"
 run "chmod +x /usr/local/lib/claude-os/filet-session"
 
@@ -666,21 +669,28 @@ EOF"
 	info "dock épinglé sur : $PINNED"
 fi
 
-# Les applications ordinaires — Chromium, le bloc-notes, les dialogues de
-# Claude Desktop — ne sont pas redessinées par la feuille de style du shell.
-# Sans ceci elles resteraient claires au milieu d'un bureau sombre.
-info "thème GTK sombre pour les applications"
-run "mkdir -p '$TARGET_HOME/.config/gtk-3.0' '$TARGET_HOME/.config/gtk-4.0'"
-for v in 3.0 4.0; do
-	run "cat > '$TARGET_HOME/.config/gtk-$v/settings.ini' <<'EOF'
-[Settings]
-gtk-theme-name=Adwaita-dark
-gtk-icon-theme-name=Papirus
-gtk-font-name=Inter 10
-gtk-application-prefer-dark-theme=1
-gtk-cursor-theme-name=Adwaita
-EOF"
-done
+# LE THÈME, POUR TOUT CE QUI N'EST PAS LE SHELL.
+#
+# Chromium, le bloc-notes, le terminal, les dialogues de Claude Desktop et les
+# barres de titre dessinées par labwc ne lisent pas la feuille de style du
+# shell. Sans quoi ils resteraient clairs au milieu d'un bureau sombre — c'est
+# exactement ce qu'on voyait sur la machine.
+#
+# Ces réglages étaient jadis écrits ICI, en dur, avec « Adwaita-dark » et
+# « Inter 10 » gravés dans le script. Ils dérivaient donc du thème réellement
+# choisi dès qu'on en changeait. C'est claude-os-theme qui les engendre
+# maintenant, depuis la feuille de style du thème courant, et le panneau de
+# réglages appelle le même programme à chaque changement : une seule source.
+#
+# Appelé SOUS LE COMPTE DE L'UTILISATEUR : il écrit dans son ~/.config, et
+# lancé en root il poserait des fichiers que l'intéressé ne pourrait plus
+# réécrire. Il dit lui-même qu'il est hors session et que le color-scheme sera
+# posé à la première ouverture — ce n'est pas un défaut.
+info "thème des applications (claude-os-theme, depuis le thème configuré)"
+# HOME posé explicitement : le script lit shell.conf sous « $HOME/.config »,
+# et l'on ne veut pas dépendre de ce que runuser transmet ou non.
+run "runuser -u '$TARGET_USER' -- env HOME='$TARGET_HOME' XDG_CONFIG_HOME= \
+     /usr/local/bin/claude-os-theme || true"
 run "chown -R '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.config'"
 
 # -------------------------------------------------------------------- énergie

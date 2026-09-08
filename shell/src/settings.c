@@ -65,6 +65,32 @@ static struct {
 
 static void mettre_a_jour_police_detail (const ShellConfig *cfg);
 
+/* LE THEME NE S'ARRETE PAS AU SHELL.
+ *
+ * Chromium, Claude Desktop, le terminal et les barres de titre dessinees par
+ * labwc ne lisent pas notre feuille de style. Ils lisent tous la meme chose,
+ * et une seule : « color-scheme » de org.freedesktop.appearance, publie par
+ * le portail XDG. claude-os-theme alimente ce reglage, engendre le themerc
+ * de labwc et lui demande de se reconfigurer.
+ *
+ * Lance en ASYNCHRONE : la chaine passe par gsettings, dconf et le portail,
+ * ce qui prend quelques dizaines de millisecondes. Bloquer dessus figerait
+ * la liste deroulante sous le doigt a chaque changement de theme.
+ *
+ * Sans attendre le resultat non plus : le script dit lui-meme ce qui a
+ * echoue, sur sa sortie d'erreur, et la fenetre des Reglages n'est pas
+ * l'endroit ou l'on diagnostique un portail absent. */
+static void
+propager_theme (const char *theme)
+{
+    g_autoptr(GError) err = NULL;
+    g_autoptr(GSubprocess) proc = g_subprocess_new (
+        G_SUBPROCESS_FLAGS_NONE, &err,
+        "/usr/local/bin/claude-os-theme", theme, NULL);
+    if (proc == NULL)
+        g_message ("propagation du theme impossible : %s", err->message);
+}
+
 static void
 reappliquer (const ShellConfig *cfg)
 {
@@ -74,6 +100,7 @@ reappliquer (const ShellConfig *cfg)
                   "gtk-application-prefer-dark-theme",
                   shell_theme_actif (cfg)->sombre, NULL);
     mettre_a_jour_police_detail (cfg);
+    propager_theme (cfg->theme);
 }
 
 /* -------------------------------------------------------------------------
