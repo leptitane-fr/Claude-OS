@@ -299,8 +299,83 @@ else
 	note "aucun capteur IIO : pas de rotation automatique"
 fi
 
+# --------------------------------------------------------------- accès root
+sec "9. Accès root de Claude Desktop"
+
+# C'est l'exigence n°2 du projet. Voir docs/07.
+if [ -x /usr/local/bin/claude-os-root ]; then
+	ok "guichet claude-os-root présent"
+
+	# Le lien de niveau 3. Sans lui, une commande sensible n'a aucun chemin
+	# vers la confirmation humaine : elle échouerait, tout simplement.
+	[ -L /usr/local/bin/claude-os-sensible ] \
+		&& ok "porte de niveau 3 (claude-os-sensible)" \
+		|| bad "claude-os-sensible absent : le niveau 3 ne peut pas être confirmé"
+
+	if [ -f /etc/sudoers.d/99-claude-os-root ]; then
+		M="$(stat -c %a /etc/sudoers.d/99-claude-os-root 2>/dev/null)"
+		[ "$M" = "440" ] \
+			&& ok "règle sudo en place (0440)" \
+			|| bad "règle sudo en $M au lieu de 440 : sudo IGNORE ce fichier"
+	else
+		bad "règle sudo absente — relancer install/patch-acces-root-claude.sh"
+	fi
+
+	# askpass : c'est /etc/sudo.conf qui fait foi, pas sudoers.
+	grep -qE '^Path askpass /usr/local/bin/claude-os-askpass$' /etc/sudo.conf 2>/dev/null \
+		&& ok "fenêtre de confirmation déclarée dans /etc/sudo.conf" \
+		|| bad "/etc/sudo.conf ne déclare pas claude-os-askpass : le niveau 3 échouera sans terminal"
+
+	# Le compte contrôlé est celui du bureau, pas celui qui lance le script :
+	# lancé sous sudo, ou depuis root, « id -un » ne dirait rien d'utile.
+	QUI="${SUDO_USER:-$(id -un)}"
+	[ "$QUI" = "root" ] && [ -r /etc/claude-os/utilisateur ] && \
+		QUI="$(head -n1 /etc/claude-os/utilisateur)"
+	if [ "$QUI" = "root" ]; then
+		note "compte du bureau non identifié : appartenance au groupe non vérifiée"
+	elif id -nG "$QUI" 2>/dev/null | tr ' ' '\n' | grep -qx claude-os-root; then
+		ok "$QUI est membre du groupe claude-os-root"
+	else
+		bad "$QUI n'est pas membre de claude-os-root — se déconnecter puis se reconnecter"
+	fi
+
+	# Le classement, vérifié sur trois commandes témoins. Rien n'est exécuté.
+	N1="$(claude-os-root --dry-run journalctl -b 2>/dev/null | sed -n 's/^niveau *: //p')"
+	N2="$(claude-os-root --dry-run apt-get install tree 2>/dev/null | sed -n 's/^niveau *: //p')"
+	N3="$(claude-os-root --dry-run parted /dev/mmcblk0 print 2>/dev/null | sed -n 's/^niveau *: //p')"
+	if [ "$N1:$N2:$N3" = "1:2:3" ]; then
+		ok "classement des niveaux conforme (lecture 1, écriture 2, sensible 3)"
+	else
+		bad "classement inattendu : journalctl=$N1 apt-get=$N2 parted=$N3 (attendu 1/2/3)"
+	fi
+
+	if [ "$(stat -f -c %T / 2>/dev/null)" = "btrfs" ]; then
+		if findmnt -n /.snapshots >/dev/null 2>&1; then
+			ok "dépôt d'instantanés : /.snapshots (hors de @, il survit à un rollback)"
+		elif [ -d /.instantanes ]; then
+			warn "instantanés dans /.instantanes : un rollback les emporterait"
+			note "monter le sous-volume @snapshots sur /.snapshots"
+		else
+			bad "racine btrfs, mais aucun dépôt d'instantanés"
+		fi
+		have btrfs && ok "btrfs-progs présent" || bad "btrfs-progs absent : aucun instantané possible"
+	else
+		bad "racine en $(stat -f -c %T / 2>/dev/null) : les actions de Claude ne sont PAS annulables"
+		note "c'est la fonction que btrfs porte dans ce projet (docs/02 §2.5)"
+	fi
+
+	if [ -e /var/log/claude-os/actions.log ]; then
+		ok "journal des actions : $(wc -l < /var/log/claude-os/actions.log 2>/dev/null || echo '?') lignes"
+	else
+		note "journal vide : aucune action privilégiée enregistrée à ce jour"
+	fi
+else
+	bad "claude-os-root absent : Claude Desktop n'a aucun accès root"
+	note "sudo bash install/patch-acces-root-claude.sh"
+fi
+
 # ---------------------------------------------------------------- firmware
-sec "9. Firmware manquant"
+sec "10. Firmware manquant"
 MISS="$(dmesg 2>/dev/null | grep -i 'firmware.*fail\|Direct firmware load.*failed' | tail -12)"
 if [ -z "$MISS" ]; then
 	ok "aucun échec de chargement de firmware signalé"
@@ -310,7 +385,7 @@ else
 fi
 
 # ------------------------------------------------------------------ verdict
-sec "10. Verdict"
+sec "11. Verdict"
 w "| | |"
 w "|---|---|"
 w "| Conforme | $PASS |"

@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+#-------------------------------------------------------------------------------
+# Claude OS — Commande d'administration
+#
+# Le pendant du guichet : ce qu'il a fait, ce qu'il a gardé, et comment
+# revenir en arrière.
+#
+#   claude-os etat                  ce qui est en place, et ce qui manque
+#   claude-os root <commande…>      exécution privilégiée (alias du guichet)
+#   claude-os journal [-n 40]       les dernières actions privilégiées
+#   claude-os instantanes           les instantanés disponibles, du plus récent
+#   claude-os rollback <id>         restaure l'instantané, puis redémarrage
+#   claude-os oublier <id>          supprime un instantané
+#
+# « rollback » est le mot du document d'architecture (docs/02 §2.6) : il est
+# gardé tel quel pour que la documentation et la commande coïncident.
+#-------------------------------------------------------------------------------
+set -uo pipefail
+
+POLITIQUE=/etc/claude-os/politique.conf
+journal=/var/log/claude-os/actions.log
+instantanes_dir=/.instantanes
+# shellcheck source=/dev/null
+[ -r "$POLITIQUE" ] && . "$POLITIQUE"
+
+GROUPE=claude-os-root
+REGLE=/etc/sudoers.d/99-claude-os-root
+GUICHET=/usr/local/bin/claude-os-root
+
+usage() { sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'; }
+die()   { printf 'claude-os : %s\n' "$*" >&2; exit 2; }
+ok()    { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+warn()  { printf '  \033[33m!\033[0m %s\n' "$*"; }
+bad()   { printf '  \033[31m✗\033[0m %s\n' "$*"; }
+
+depot() {
+	if [ -d /.snapshots ] && [ "$(stat -f -c %T /.snapshots 2>/dev/null)" = "btrfs" ]; then
+		printf '/.snapshots'
+	else
+		printf '%s' "$instantanes_dir"
+	fi
+}
+
+# ---------------------------------------------------------------------- etat
+cmd_etat() {
+	printf '\n\033[1mAccès root de Claude Desktop\033[0m\n\n'
+
+	if [ -x "$GUICHET" ]; then ok "guichet : $GUICHET"
+	else bad "guichet absent : $GUICHET — relancer install/patch-acces-root-claude.sh"; fi
+
+	if [ -f "$REGLE" ]; then
+		ok "règle sudo : $REGLE"
+		[ "$(stat -c %a "$REGLE" 2>/dev/null)" = "440" ] \
+			|| warn "  droits $(stat -c %a "$REGLE" 2>/dev/null) au lieu de 440 : sudo IGNORE ce fichier"
+	else
+		bad "règle sudo absente : $REGLE"
+	fi
+
+	if getent group "$GROUPE" >/dev/null 2>&1; then
+		MEMBRES="$(getent group "$GROUPE" | cut -d: -f4)"
+		ok "groupe $GROUPE : ${MEMBRES:-aucun membre}"
+		# « id -un » et non $USER : la variable peut manquer sous runuser, sous
+		# un service systemd, ou dans le shell qu'ouvre Claude Desktop.
+		QUI="${SUDO_USER:-$(id -un)}"
+		if [ "$QUI" != "root" ] && ! id -nG "$QUI" 2>/dev/null | tr ' ' '\n' | grep -qx "$GROUPE"; then
+			warn "  $QUI n'est pas membre dans la session courante"
+			warn "  (l'appartenance ne prend effet qu'à la prochaine ouverture de session)"
+		fi
+	else
+		bad "groupe $GROUPE inexistant"
+	fi
+
+	if [ "$(stat -f -c %T / 2>/dev/null)" = "btrfs" ]; then
+		D="$(depot)"
+		if [ -d "$D" ]; then
+			# -type d : la fiche « <id>.info » de chaque instantané répond au
+			# même motif, et le compte serait double.
+			N="$(find "$D" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*-*' 2>/dev/null | wc -l)"
+			ok "instantanés : $N dans $D"
+		else
+			warn "racine btrfs, mais aucun dépôt d'instantanés ($D)"
+		fi
+	else
+		warn "racine en $(stat -f -c %T / 2>/dev/null) et non btrfs : AUCUN instantané possible"
+		warn "les actions de niveau 2 s'exécuteront, mais ne seront pas annulables"
+	fi
+
+	if [ -r "$journal" ]; then
+		ok "journal : $journal ($(wc -l < "$journal") lignes)"
+	elif [ -e "$journal" ]; then
+		warn "journal présent mais illisible depuis ce compte : $journal"
+		warn "  le lire avec « sudo claude-os journal »"
+	else
+		warn "journal absent : $journal (il naîtra à la première action)"
+	fi
+	printf '\n'
+}
+
+# ------------------------------------------------------------------- journal
+cmd_journal() {
+	N=40
+	[ "${1:-}" = "-n" ] && { N="${2:-40}"; }
+	if [ ! -r "$journal" ]; then
+		[ -e "$journal" ] || die "aucune action privilégiée n'a encore été journalisée."
+		[ "$(id -u)" -eq 0 ] && die "journal illisible : $journal"
+		exec sudo -- "$0" journal ${1:+"$1"} ${2:+"$2"}
+	fi
+	# Le journal est en champs separes par des tabulations, dans l'ordre ecrit
+	# par le guichet : date, niveau, porte, instantane, code, demandeur,
+	# motif, commande.
+	tail -n "$N" "$journal" | while IFS=$'\t' read -r d niv porte inst code dem mot cmd; do
+		printf '%s  n%-2s %-20s %-6s  %s\n' \
+			"${d%%+*}" "${niv#niveau=}" "${inst#instantane=}" "${code#code=}" "${cmd#commande=}"
+		DETAIL="${dem#demandeur=}"
+		[ "${porte#porte=}" = "sensible" ] && DETAIL="$DETAIL, accord humain"
+		[ "${mot#motif=}" != "-" ] && DETAIL="« ${mot#motif=} » — $DETAIL"
+		printf '%*s%s\n' 21 "" "$DETAIL"
+	done
+	return 0
+}
+
+# --------------------------------------------------------------- instantanés
+cmd_instantanes() {
+	D="$(depot)"
+	[ -d "$D" ] || die "aucun dépôt d'instantanés ($D)"
+	TROUVE=0
+	for s in $(find "$D" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*-*' 2>/dev/null | sort -r); do
+		TROUVE=1
+		ID="$(basename "$s")"
+		CMD="-"; QUAND="-"
+		if [ -r "$s.info" ]; then
+			CMD="$(sed -n 's/^commande=//p' "$s.info")"
+			QUAND="$(sed -n 's/^date=//p' "$s.info")"
+		fi
+		printf '\033[1m%s\033[0m  %s\n    %s\n' "$ID" "$QUAND" "$CMD"
+	done
+	[ "$TROUVE" -eq 1 ] || echo "  aucun instantané."
+	return 0
+}
+
+cmd_oublier() {
+	ID="${1:-}"; [ -n "$ID" ] || die "usage : claude-os oublier <id>"
+	[ "$(id -u)" -eq 0 ] || exec sudo -- "$0" oublier "$ID"
+	CIBLE="$(depot)/$ID"
+	[ -d "$CIBLE" ] || die "instantané inconnu : $ID"
+	btrfs subvolume delete "$CIBLE" >/dev/null || die "suppression refusée"
+	rm -f "$CIBLE.info"
+	echo "instantané $ID supprimé."
+}
+
+# ---------------------------------------------------------------- rollback
+#
+# COMMENT ÇA MARCHE, ET POURQUOI CE N'EST PAS UNE COPIE DE FICHIERS
+#
+# La racine est le sous-volume « @ ». Restaurer, c'est le remplacer : on
+# monte la racine réelle du système de fichiers (subvolid=5, celle que le
+# montage normal cache), on met « @ » de côté sous un autre nom, et on
+# recrée « @ » à partir de l'instantané. Le montage courant, lui, continue
+# de vivre sur l'ancien @ jusqu'au redémarrage — d'où le redémarrage.
+#
+# L'ancien « @ » n'est JAMAIS détruit : il est renommé. Si le retour arrière
+# est lui-même une erreur, il est encore là, et « claude-os rollback » sait
+# le reprendre comme n'importe quel autre instantané.
+cmd_rollback() {
+	ID="${1:-}"; [ -n "$ID" ] || die "usage : claude-os rollback <id>   (voir « claude-os instantanes »)"
+	[ "$(id -u)" -eq 0 ] || exec sudo -- "$0" rollback "$ID"
+
+	D="$(depot)"
+	SRC="$D/$ID"
+	[ -d "$SRC" ] || die "instantané inconnu : $ID"
+	command -v btrfs >/dev/null 2>&1 || die "btrfs-progs absent."
+	[ "$(stat -f -c %T / 2>/dev/null)" = "btrfs" ] || die "la racine n'est pas en btrfs."
+
+	# Le périphérique et le sous-volume réellement montés sur /.
+	DEV="$(findmnt -no SOURCE / | sed 's/\[.*//')"
+	SUBVOL="$(findmnt -no FSROOT / | sed 's#^/##')"
+	[ -n "$DEV" ] || die "périphérique de la racine introuvable."
+	[ "$SUBVOL" = "@" ] || die "la racine est le sous-volume « ${SUBVOL:-/} », et non « @ ».
+      Cette disposition n'est pas celle de Claude OS : le retour arrière
+      automatique est refusé pour ne pas improviser sur un système inconnu."
+
+	CMD="-"; [ -r "$SRC.info" ] && CMD="$(sed -n 's/^commande=//p' "$SRC.info")"
+	cat <<MSG
+
+  Retour arrière sur l'instantané $ID
+  pris avant : $CMD
+
+  Tout ce qui a été écrit sur le système DEPUIS cet instantané sera perdu :
+  paquets installés, configurations modifiées, et les fichiers de /root.
+  /home est un sous-volume distinct : il n'est PAS touché.
+
+  L'état actuel est conservé sous « @-remplace-<date> ». Rien n'est détruit.
+  La machine redémarrera à la fin.
+
+MSG
+	printf '  Taper exactement « restaurer » pour confirmer : '
+	read -r REPONSE
+	[ "$REPONSE" = "restaurer" ] || die "annulé."
+
+	POINT="$(mktemp -d /run/claude-os-rollback.XXXXXX)"
+	mount -o subvolid=5 "$DEV" "$POINT" || die "impossible de monter la racine du système de fichiers."
+	# Ce trap ne libère que le montage de travail : il ne défait rien.
+	trap 'umount "$POINT" 2>/dev/null; rmdir "$POINT" 2>/dev/null' EXIT
+
+	[ -d "$POINT/@" ] || die "« @ » introuvable à la racine du système de fichiers."
+	GARDE="@-remplace-$(date +%Y%m%d-%H%M%S)"
+	mv "$POINT/@" "$POINT/$GARDE" || die "impossible de mettre « @ » de côté."
+	if ! btrfs subvolume snapshot "$SRC" "$POINT/@" >/dev/null; then
+		# Remise en place immédiate : mieux vaut échouer que laisser la
+		# machine sans racine au prochain démarrage.
+		mv "$POINT/$GARDE" "$POINT/@"
+		die "la restauration a échoué — l'état d'origine est remis en place."
+	fi
+
+	printf '\nÉtat précédent conservé sous « %s ».\n' "$GARDE"
+	printf 'Redémarrage dans 5 secondes (Ctrl+C pour rester ici).\n'
+	sleep 5
+	systemctl reboot
+}
+
+# ------------------------------------------------------------------ aiguillage
+case "${1:-}" in
+	etat|état|status)          shift; cmd_etat "$@" ;;
+	root)                      shift; exec "$GUICHET" "$@" ;;
+	journal|log)               shift; cmd_journal "$@" ;;
+	instantanes|instantanés|snapshots) shift; cmd_instantanes "$@" ;;
+	rollback|restaurer)        shift; cmd_rollback "$@" ;;
+	oublier|purger)            shift; cmd_oublier "$@" ;;
+	-h|--help|"")              usage ;;
+	*) die "sous-commande inconnue : $1
+      claude-os --help" ;;
+esac

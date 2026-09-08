@@ -1,0 +1,544 @@
+#!/usr/bin/env bash
+#-------------------------------------------------------------------------------
+# Claude OS — Guichet d'exécution privilégiée
+#
+# POURQUOI CE PROGRAMME
+#
+# L'exigence n°2 du projet demande que Claude Desktop dispose de pleins
+# pouvoirs sur la machine. La contrainte n°3 exige que chaque action
+# privilégiée reste tracée et annulable.
+#
+# Donner le mot de passe root à l'application ne répond ni à l'une ni à
+# l'autre : rien ne serait tracé, rien ne serait annulable, et l'application
+# elle-même — un Electron qui ouvre des pages web — tournerait en root. Ce
+# n'est pas le pouvoir de Claude qu'on veut élever, c'est celui de ses
+# commandes.
+#
+# Claude Desktop reste donc NON PRIVILÉGIÉ. Il obtient root en passant par
+# cette porte, qui est le seul composant élevé, et qui est petit.
+#
+#   claude-os-root apt-get install -y foo                      # niveau 2
+#   claude-os-root -c 'apt-get update && apt-get upgrade -y'    # avec un shell
+#   claude-os-root journalctl -b -p err                        # niveau 1
+#   claude-os-root parted /dev/mmcblk0 print                    # niveau 3
+#
+# LES TROIS NIVEAUX (docs/02 §2.6, docs/07)
+#
+#   1. Lecture             exécution directe, journalisée.
+#   2. Écriture réversible instantané btrfs, exécution, journalisation.
+#                          Annulable par « claude-os rollback <id> ».
+#   3. Sensible            une fenêtre s'ouvre sur la session, montre la
+#      ou irréversible     commande, et attend le mot de passe de l'humain.
+#
+# Le niveau 3 n'est pas une bride : c'est ce qui permet d'accorder les deux
+# premiers sans réserve.
+#
+# COMMENT LE NIVEAU 3 EST RÉELLEMENT IMPOSÉ
+#
+# Le programme s'appelle par DEUX chemins, et la règle sudo les distingue :
+#
+#   /usr/local/bin/claude-os-root      NOPASSWD — niveaux 1 et 2 seulement
+#   /usr/local/bin/claude-os-sensible  (lien vers le même fichier) : absent
+#                                      de la règle NOPASSWD, donc soumis au
+#                                      mot de passe, donc à un humain.
+#
+# Ce n'est pas le programme qui s'interdit le niveau 3 : c'est sudo qui le
+# lui refuse par le chemin sans mot de passe. Un contournement supposerait
+# de modifier /etc/sudoers.d, qui est lui-même de niveau 3.
+#-------------------------------------------------------------------------------
+set -uo pipefail
+
+BIN_NOM="$(basename -- "$0")"
+GUICHET=/usr/local/bin/claude-os-root
+SENSIBLE=/usr/local/bin/claude-os-sensible
+POLITIQUE=/etc/claude-os/politique.conf
+
+# Par quelle porte sommes-nous entrés ? C'est la seule chose qui autorise le
+# niveau 3, et elle n'est pas falsifiable : sudo a réclamé un mot de passe
+# pour l'un des deux chemins, et pas pour l'autre.
+PORTE=guichet
+[ "$BIN_NOM" = "claude-os-sensible" ] && PORTE=sensible
+
+# ------------------------------------------------------------------- réglages
+# Valeurs par défaut. /etc/claude-os/politique.conf les remplace au besoin ;
+# le fichier de référence commenté est
+# /usr/share/claude-os/politique/politique.conf.
+instantanes=auto            # auto | toujours | jamais
+instantanes_garder=20
+instantanes_dir=/.instantanes
+journal=/var/log/claude-os/actions.log
+niveau3_supplementaire=""
+niveau1_supplementaire=""
+
+# shellcheck source=/dev/null
+[ -r "$POLITIQUE" ] && . "$POLITIQUE"
+
+usage() {
+	sed -n '3,3p;19,34p' "$0" | sed 's/^# \{0,1\}//'
+	cat <<'USAGE'
+
+OPTIONS
+  -c 'commande'     exécute la ligne par un shell (redirections, pipes, &&)
+  --pourquoi TEXTE  motif consigné dans le journal, à côté de la commande
+  --niveau N        force un niveau SUPÉRIEUR à celui calculé (jamais inférieur)
+  --dry-run         montre le niveau et l'instantané prévu, et n'exécute rien
+  --expliquer       comme --dry-run, mais dit aussi pourquoi ce niveau
+  -h, --help        cette aide
+USAGE
+}
+
+die() { printf '%s : %s\n' "$BIN_NOM" "$*" >&2; exit 2; }
+
+# ------------------------------------------------------------------ arguments
+MODE_SHELL=0
+POURQUOI=""
+NIVEAU_FORCE=0
+SIMULATION=0
+EXPLIQUER=0
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		-c)           MODE_SHELL=1; shift; break ;;
+		--pourquoi)   POURQUOI="${2:-}"; shift 2 ;;
+		--niveau)     NIVEAU_FORCE="${2:-0}"; shift 2 ;;
+		--dry-run)    SIMULATION=1; shift ;;
+		--expliquer)  SIMULATION=1; EXPLIQUER=1; shift ;;
+		-h|--help)    usage; exit 0 ;;
+		--)           shift; break ;;
+		-*)           die "option inconnue : $1" ;;
+		*)            break ;;
+	esac
+done
+
+[ $# -gt 0 ] || { usage >&2; exit 2; }
+
+case "$NIVEAU_FORCE" in
+	0|1|2|3) ;;
+	*) die "--niveau attend 1, 2 ou 3" ;;
+esac
+
+# ---------------------------------------------------------------- présentation
+DEMANDEUR="${SUDO_USER:-$(id -un)}"
+LIGNE="$*"
+# Le nom du programme appelé, même en mode shell : « -c 'passwd stef' » doit
+# se classer comme « passwd stef ».
+PREMIER="${LIGNE%% *}"
+BASE="$(basename -- "$PREMIER")"
+
+# --------------------------------------------------------------- classement
+#
+# Le classement se fait sur la commande ENTIÈRE, jamais sur le seul nom du
+# programme : « btrfs subvolume list » se lit, « btrfs subvolume delete »
+# détruit.
+#
+# Principe de prudence : le niveau 1 est une liste blanche courte, le niveau 3
+# une liste de motifs, et TOUT LE RESTE tombe au niveau 2. Se tromper au
+# niveau 2 coûte un instantané inutile ; se tromper au niveau 1 coûterait un
+# instantané manquant.
+#
+# Il a lieu AVANT toute élévation — il n'a besoin d'aucun privilège — et il
+# est refait à l'identique côté root. Le classement du côté utilisateur ne
+# sert qu'à choisir la porte ; c'est celui du côté root qui décide.
+
+RAISON=""
+
+est_lecture() {
+	# Un shell peut rediriger, donc écrire : jamais de niveau 1 avec -c.
+	[ "$MODE_SHELL" -eq 1 ] && return 1
+
+	case "$BASE" in
+		journalctl|dmesg|lsblk|blkid|findmnt|free|uptime|lscpu|lsusb|lspci|lsmod|\
+		id|uname|vainfo|tlp-stat|sensors|hostnamectl|dpkg-query|apt-cache|\
+		cat|head|tail|wc|file|stat|readlink|realpath|du|df|ls|grep|zgrep|\
+		sha256sum|sha1sum|md5sum|hexdump|xxd|strings|nproc|arch|whoami)
+			RAISON="programme en lecture seule"; return 0 ;;
+		systemctl)
+			case " $LIGNE " in
+				*" status "*|*" show "*|*" cat "*|*" list-units "*|*" list-unit-files "*|\
+				*" is-active "*|*" is-enabled "*|*" is-failed "*|*" get-default "*)
+					RAISON="systemctl en consultation"; return 0 ;;
+			esac ;;
+		dpkg)
+			case " $LIGNE " in
+				*" -l "*|*" -L "*|*" -s "*|*" -S "*|*" --list "*|*" --status "*|\
+				*" --listfiles "*|*" --get-selections "*)
+					RAISON="dpkg en consultation"; return 0 ;;
+			esac ;;
+		apt|apt-get)
+			case " $LIGNE " in
+				*" list "*|*" show "*|*" policy "*|*" search "*|*" depends "*)
+					RAISON="apt en consultation"; return 0 ;;
+			esac ;;
+		btrfs)
+			case " $LIGNE " in
+				*" list "*|*" show "*|*" usage "*|*" df "*)
+					RAISON="btrfs en consultation"; return 0 ;;
+			esac ;;
+		ip|nmcli|bluetoothctl|wpctl|aplay|arecord)
+			case " $LIGNE " in
+				*" show "*|*" status "*|*" list "*|*" -l "*|*" get "*)
+					RAISON="interrogation d'état"; return 0 ;;
+			esac ;;
+	esac
+
+	# Compléments locaux, motifs glob séparés par des espaces.
+	for motif in $niveau1_supplementaire; do
+		case "$LIGNE" in $motif) RAISON="liste blanche locale ($motif)"; return 0 ;; esac
+	done
+	return 1
+}
+
+# Les programmes dont aucun instantané ne rattrape l'effet : ils écrivent sous
+# le système de fichiers, dans le firmware, ou touchent aux identités.
+programme_sensible() {
+	case "$(basename -- "$1")" in
+		mkfs|mkfs.*|mkswap|fdisk|sfdisk|cfdisk|gdisk|sgdisk|parted|partprobe|\
+		wipefs|cryptsetup|dd|shred|badblocks|blkdiscard|dmsetup|\
+		lvremove|vgremove|pvremove|mdadm|\
+		flashrom|cbfstool|efibootmgr|fwupdmgr|chromeos-firmwareupdate|\
+		passwd|chpasswd|usermod|userdel|groupdel|gpasswd|adduser|deluser|\
+		visudo|ssh-keygen|gpg|apt-key|secret-tool)
+			return 0 ;;
+	esac
+	return 1
+}
+
+est_sensible() {
+	# a. Le programme appelé. En mode shell, la ligne peut en enchaîner
+	#    plusieurs : on les regarde TOUS. « apt-get update && passwd stef »
+	#    est une commande de niveau 3, pas une mise à jour de paquets.
+	if programme_sensible "$PREMIER"; then
+		RAISON="programme irréversible ou touchant aux identités : $BASE"; return 0
+	fi
+	if [ "$MODE_SHELL" -eq 1 ]; then
+		local mot trouve=""
+		# set -f : sans lui, un « * » dans la ligne se développerait en noms
+		# de fichiers du répertoire courant avant d'être examiné.
+		set -f
+		for mot in $(printf '%s' "$LIGNE" | tr '|&;()<>`' ' \n'); do
+			programme_sensible "$mot" && { trouve="$mot"; break; }
+		done
+		set +f
+		[ -n "$trouve" ] && {
+			RAISON="programme irréversible enchaîné dans la ligne : $trouve"; return 0
+		}
+	fi
+
+	# b. Chemins qu'on ne modifie pas sans qu'un humain l'ait voulu. La règle
+	#    sudo et la politique en font partie : ce sont elles qui définissent
+	#    les niveaux, elles ne peuvent pas être de niveau 2.
+	case "$LIGNE" in
+		*/etc/shadow*|*/etc/gshadow*|*/etc/sudoers*|*/etc/sudo.conf*|\
+		*/etc/ssh/*|*/.ssh/*|\
+		*/etc/claude-os/politique.conf*|*/usr/local/bin/claude-os-root*|\
+		*/usr/local/bin/claude-os-sensible*|*/usr/local/bin/claude-os-askpass*|\
+		*/dev/sd[a-z]*|*/dev/nvme[0-9]*|*/dev/mmcblk[0-9]*|*/dev/mapper/*|\
+		*/sys/firmware/efi/efivars/*|*/boot/efi/*)
+			RAISON="cible sensible : identifiants, disque brut, amorçage ou politique"; return 0 ;;
+	esac
+
+	# c. La destruction d'un sous-volume : c'est le filet lui-même qu'on
+	#    coupe, et aucun instantané ne rattrape la perte d'un instantané.
+	case "$BASE" in
+		btrfs)
+			case " $LIGNE " in
+				*" subvolume delete "*|*" device "*|*" replace "*)
+					RAISON="opération btrfs destructrice"; return 0 ;;
+			esac ;;
+	esac
+
+	# d. Le réseau distant : ce qui sort de la machine n'est pas annulable.
+	case "$BASE" in
+		ssh|scp|sftp|rsync)
+			case "$LIGNE" in *@*:*|*::*) RAISON="transfert vers une machine distante"; return 0 ;; esac ;;
+		nmcli)
+			case " $LIGNE " in
+				*" add "*|*" modify "*|*" delete "*|*" connect "*|*password*)
+					RAISON="modification du réseau ou d'un secret Wi-Fi"; return 0 ;;
+			esac ;;
+	esac
+
+	# e. Le tuyau vers un shell : le contenu exécuté n'est pas lisible ici.
+	if [ "$MODE_SHELL" -eq 1 ]; then
+		case "$LIGNE" in
+			*curl*\|*sh*|*wget*\|*sh*|*curl*\|*bash*|*wget*\|*bash*)
+				RAISON="script distant exécuté sans être lu"; return 0 ;;
+		esac
+	fi
+
+	# f. Effacement récursif dans l'arborescence système.
+	case "$BASE" in
+		rm)
+			case "$LIGNE" in
+				*" -rf /"*|*" -fr /"*|*" -r /"*|*" --recursive /"*)
+					case "$LIGNE" in
+						*" /home/"*|*" /tmp/"*|*" /var/tmp/"*|*" /run/"*) ;;
+						*) RAISON="effacement récursif dans l'arborescence système"; return 0 ;;
+					esac ;;
+			esac ;;
+	esac
+
+	for motif in $niveau3_supplementaire; do
+		case "$LIGNE" in $motif) RAISON="liste locale de commandes sensibles ($motif)"; return 0 ;; esac
+	done
+	return 1
+}
+
+# Certaines écritures ne laissent RIEN sur le disque : démarrer un service,
+# monter un volume, changer la luminosité. Les instantanier remplirait le
+# dépôt de copies inutiles et chasserait, par la rotation, les instantanés qui
+# comptent vraiment. Elles restent au niveau 2 — donc journalisées — mais sans
+# instantané.
+ecriture_volatile() {
+	[ "$MODE_SHELL" -eq 1 ] && return 1
+	case "$BASE" in
+		systemctl)
+			case " $LIGNE " in
+				*" start "*|*" stop "*|*" restart "*|*" reload "*|*" kill "*|\
+				*" poweroff "*|*" reboot "*|*" suspend "*|*" hibernate "*|*" daemon-reload "*)
+					return 0 ;;
+			esac ;;
+		mount|umount|swapon|swapoff|brightnessctl|wpctl|rfkill|modprobe|rmmod|\
+		bluetoothctl|udevadm|hdparm|renice|kill|pkill|killall|loginctl)
+			return 0 ;;
+		ip)  return 0 ;;
+		sysctl)
+			case " $LIGNE " in *" -w "*) return 0 ;; esac ;;
+		nmcli)
+			case " $LIGNE " in *" up "*|*" down "*) return 0 ;; esac ;;
+	esac
+	return 1
+}
+
+SANS_INSTANTANE=0
+if est_sensible; then
+	NIVEAU=3
+elif est_lecture; then
+	NIVEAU=1
+else
+	NIVEAU=2
+	if ecriture_volatile; then
+		SANS_INSTANTANE=1
+		RAISON="écriture sans trace sur le disque : instantané inutile"
+	else
+		RAISON="écriture présumée : ni lecture reconnue, ni commande sensible"
+	fi
+fi
+
+# Le forçage ne sert qu'à MONTER. Autoriser la descente rendrait le classement
+# décoratif : il suffirait de demander le niveau 1.
+if [ "$NIVEAU_FORCE" -gt "$NIVEAU" ]; then
+	NIVEAU="$NIVEAU_FORCE"
+	RAISON="niveau imposé par --niveau"
+elif [ "$NIVEAU_FORCE" -ne 0 ] && [ "$NIVEAU_FORCE" -lt "$NIVEAU" ]; then
+	die "--niveau $NIVEAU_FORCE refusé : la commande est classée au niveau $NIVEAU ($RAISON)."
+fi
+
+racine_est_btrfs() { [ "$(stat -f -c %T / 2>/dev/null)" = "btrfs" ]; }
+
+# Où déposer les instantanés. /.snapshots (sous-volume @snapshots monté par
+# fstab) est le bon endroit : il est HORS de @, donc un retour arrière sur @
+# ne les emporte pas. À défaut, un répertoire dans @ — ce qui fonctionne, mais
+# ne survivrait pas à un rollback.
+choisir_depot() {
+	if [ -d /.snapshots ] && [ "$(stat -f -c %T /.snapshots 2>/dev/null)" = "btrfs" ]; then
+		printf '/.snapshots'; return 0
+	fi
+	if [ -d "$instantanes_dir" ]; then printf '%s' "$instantanes_dir"; return 0; fi
+	[ "$(id -u)" -eq 0 ] && mkdir -p "$instantanes_dir" 2>/dev/null \
+		&& { printf '%s' "$instantanes_dir"; return 0; }
+	return 1
+}
+
+# ------------------------------------------------------------------ simulation
+# Avant l'élévation : une simulation n'exécute rien, ne journalise rien, et
+# n'a donc aucune raison de réclamer des privilèges ni un mot de passe.
+if [ "$SIMULATION" -eq 1 ]; then
+	printf 'niveau      : %s\n' "$NIVEAU"
+	[ "$EXPLIQUER" -eq 1 ] && printf 'raison      : %s\n' "$RAISON"
+	printf 'commande    : %s\n' "$LIGNE"
+	if [ "$NIVEAU" -eq 3 ]; then
+		printf 'porte       : %s — mot de passe humain requis\n' "$SENSIBLE"
+		printf 'instantané  : sans objet\n'
+	elif [ "$SANS_INSTANTANE" -eq 1 ]; then
+		printf 'porte       : %s — sans mot de passe\n' "$GUICHET"
+		printf 'instantané  : non — écriture sans trace sur le disque\n'
+	elif [ "$NIVEAU" -eq 1 ]; then
+		printf 'porte       : %s — sans mot de passe\n' "$GUICHET"
+		printf 'instantané  : non (niveau 1)\n'
+	elif [ "$instantanes" = "jamais" ]; then
+		printf 'porte       : %s — sans mot de passe\n' "$GUICHET"
+		printf 'instantané  : non — désactivé par la politique\n'
+	elif racine_est_btrfs; then
+		printf 'porte       : %s — sans mot de passe\n' "$GUICHET"
+		printf 'instantané  : oui, dans %s\n' "$(choisir_depot || echo '(dépôt introuvable)')"
+	else
+		printf 'porte       : %s — sans mot de passe\n' "$GUICHET"
+		printf "instantané  : NON — la racine n'est pas en btrfs\n"
+	fi
+	printf 'journal     : %s\n' "$journal"
+	exit 0
+fi
+
+# ------------------------------------------------------------------- élévation
+#
+# Appelé depuis le compte utilisateur, le programme se relance sous sudo. La
+# PORTE dépend du niveau, et c'est là toute la mécanique :
+#
+#   niveaux 1 et 2 → claude-os-root      NOPASSWD, donc silencieux
+#   niveau 3       → claude-os-sensible  soumis au mot de passe, donc à un
+#                                        humain, via la fenêtre claude-os-askpass
+#
+# « sudo -n » sur la première : si la règle manque, on veut un message clair
+# tout de suite, pas une invite qui reste en attente dans un terminal que
+# personne ne regarde.
+# « sudo -A » sur la seconde : elle DOIT ouvrir la fenêtre, y compris — et
+# surtout — quand il n'y a pas de terminal, ce qui est le cas sous Claude
+# Desktop.
+if [ "$(id -u)" -ne 0 ]; then
+	command -v sudo >/dev/null 2>&1 || die "sudo est absent : impossible de s'élever.
+      Depuis root :  bash install/patch-acces-root-claude.sh"
+
+	# L'échec le plus probable, et le plus déroutant : le correctif vient
+	# d'être appliqué, mais l'appartenance au groupe ne prend effet qu'à la
+	# prochaine ouverture de session. Sans ce mot, sudo répond seulement
+	# « a password is required », ce qui ressemble à une erreur de mot de
+	# passe et non à une session à rouvrir. Un simple avertissement : le
+	# compte peut par ailleurs être dans « sudo », auquel cas tout marche.
+	if ! id -nG 2>/dev/null | tr ' ' '\n' | grep -qx claude-os-root; then
+		printf '%s : ce compte n%sest pas dans le groupe claude-os-root.\n' "$BIN_NOM" "'" >&2
+		printf '  Se déconnecter puis se reconnecter suffit le plus souvent ; sinon :\n' >&2
+		printf '  sudo bash install/patch-acces-root-claude.sh\n' >&2
+	fi
+
+	RELAI=(sudo)
+	if [ "$NIVEAU" -eq 3 ]; then
+		[ -e "$SENSIBLE" ] || die "porte de niveau 3 absente : $SENSIBLE
+      Relancer install/patch-acces-root-claude.sh."
+		cat >&2 <<MSG
+$BIN_NOM : commande de niveau 3 — accord humain requis.
+
+  commande : $LIGNE
+  raison   : $RAISON
+
+Une fenêtre s'ouvre sur la session : elle affiche cette commande et attend le
+mot de passe. Sans terminal ni session graphique, la demande échouera — c'est
+voulu, une action irréversible ne part pas sans que personne ne l'ait vue.
+MSG
+		RELAI+=(-A -- "$SENSIBLE")
+	else
+		RELAI+=(-n -- "$GUICHET")
+	fi
+
+	[ -n "$POURQUOI" ]        && RELAI+=(--pourquoi "$POURQUOI")
+	[ "$NIVEAU_FORCE" -ne 0 ] && RELAI+=(--niveau "$NIVEAU_FORCE")
+	[ "$MODE_SHELL" -eq 1 ]   && RELAI+=(-c)
+	exec "${RELAI[@]}" "$@"
+fi
+
+# ============================================================================
+# À PARTIR D'ICI, ON EST ROOT.
+# ============================================================================
+
+# ------------------------------------------------------------------- journal
+consigner() {
+	local ligne
+	ligne="$(printf '%s\tniveau=%s\tporte=%s\tinstantane=%s\tcode=%s\tdemandeur=%s\tmotif=%s\tcommande=%s' \
+		"$(date -Is)" "$NIVEAU" "$PORTE" "${1:--}" "${2:--}" "$DEMANDEUR" "${POURQUOI:--}" "$LIGNE")"
+	mkdir -p "$(dirname "$journal")" 2>/dev/null
+	printf '%s\n' "$ligne" >> "$journal" 2>/dev/null
+	command -v logger >/dev/null 2>&1 && \
+		logger -t claude-os-root -p authpriv.notice -- "$ligne" 2>/dev/null
+	return 0
+}
+
+# Le niveau 3 n'est atteignable que par la porte qui a coûté un mot de passe.
+# Ce contrôle rattrape l'appel direct « sudo claude-os-root parted … », que la
+# règle NOPASSWD laisserait autrement passer sans que personne n'ait rien vu.
+if [ "$NIVEAU" -eq 3 ] && [ "$PORTE" != "sensible" ]; then
+	printf '%s : niveau 3 atteint par la porte sans mot de passe — refusé.\n' "$BIN_NOM" >&2
+	printf '  commande : %s\n  raison   : %s\n' "$LIGNE" "$RAISON" >&2
+	printf '  Passer par « claude-os-root %s », qui ouvrira la fenêtre de confirmation.\n' "$LIGNE" >&2
+	consigner "-" "refuse-porte"
+	exit 3
+fi
+
+# --------------------------------------------------------------- instantanés
+#
+# L'instantané est le mécanisme qui rend « pleins pouvoirs » réversible. Il est
+# pris AVANT l'exécution, en lecture seule, et son identifiant part dans le
+# journal sur la même ligne que la commande : c'est ce qui permet, plus tard,
+# de dire « annule ça » et de savoir quoi restaurer.
+
+purger_anciens() {
+	local depot="$1" garder="$2"
+	[ "$garder" -gt 0 ] 2>/dev/null || return 0
+	# Les noms commencent par la date : l'ordre alphabétique est l'ordre
+	# chronologique.
+	#
+	# « -type d » n'est pas une précaution de style : chaque instantané est
+	# accompagné d'une fiche « <id>.info », que le motif attrape aussi. Sans
+	# ce filtre, la rotation compte deux entrées par instantané et en détruit
+	# donc deux fois trop.
+	find "$depot" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*-*' 2>/dev/null \
+		| sort | head -n -"$garder" | while read -r vieux; do
+		[ -n "$vieux" ] || continue
+		btrfs subvolume delete "$vieux" >/dev/null 2>&1 || rm -rf -- "$vieux" 2>/dev/null
+		rm -f -- "$vieux.info" 2>/dev/null
+	done
+	return 0
+}
+
+prendre_instantane() {
+	local depot id cible
+	racine_est_btrfs || return 1
+	command -v btrfs >/dev/null 2>&1 || return 1
+	depot="$(choisir_depot)" || return 1
+
+	id="$(date +%Y%m%d-%H%M%S)-$(tr -dc 'a-f0-9' </dev/urandom 2>/dev/null | head -c4)"
+	cible="$depot/$id"
+	btrfs subvolume snapshot -r / "$cible" >/dev/null 2>&1 || return 1
+
+	# La fiche à côté de l'instantané : sans elle, la liste des instantanés est
+	# une liste de dates, et on ne sait plus lequel annuler.
+	{
+		printf 'id=%s\n'         "$id"
+		printf 'date=%s\n'       "$(date -Is)"
+		printf 'demandeur=%s\n'  "$DEMANDEUR"
+		printf 'niveau=%s\n'     "$NIVEAU"
+		printf 'motif=%s\n'      "${POURQUOI:--}"
+		printf 'commande=%s\n'   "$LIGNE"
+	} > "$cible.info" 2>/dev/null
+
+	purger_anciens "$depot" "$instantanes_garder"
+	printf '%s' "$id"
+}
+
+# ------------------------------------------------------------------- exécution
+ID_INSTANTANE="-"
+if [ "$NIVEAU" -ge 2 ] && [ "$SANS_INSTANTANE" -eq 0 ] && [ "$instantanes" != "jamais" ]; then
+	ID_INSTANTANE="$(prendre_instantane)" || ID_INSTANTANE=""
+	if [ -z "$ID_INSTANTANE" ]; then
+		ID_INSTANTANE="-"
+		if [ "$instantanes" = "toujours" ]; then
+			consigner "-" "sans-instantane"
+			die "instantané impossible, et la politique impose « instantanes=toujours » :
+      la commande n'a pas été exécutée.
+      Racine btrfs ? $(racine_est_btrfs && echo oui || echo non)
+      Voir /etc/claude-os/politique.conf."
+		fi
+		printf '%s : aucun instantané pris — cette action ne sera pas annulable.\n' "$BIN_NOM" >&2
+	else
+		printf '%s : instantané %s\n' "$BIN_NOM" "$ID_INSTANTANE" >&2
+	fi
+fi
+
+if [ "$MODE_SHELL" -eq 1 ]; then
+	sh -c "$LIGNE"
+else
+	"$@"
+fi
+CODE=$?
+
+consigner "$ID_INSTANTANE" "$CODE"
+exit "$CODE"

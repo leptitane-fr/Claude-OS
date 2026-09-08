@@ -118,6 +118,20 @@ mousepad                       # bloc-notes (~20 Mo, GTK3)
 tlp                            # gestion d'énergie : gouverneurs, PM périphériques
 powertop                       # mesure de la consommation (diagnostic, pas d'auto-réglage)
 
+#--- Accès root de Claude Desktop -------------------------------------------
+#
+# L'exigence n°2 du projet. Voir docs/07 et install/patch-acces-root-claude.sh.
+#
+# sudo n'est PAS installé par défaut sur une Debian minimale où un mot de
+# passe root a été défini à l'installation — c'est le cas ici. Sans lui, le
+# guichet claude-os-root n'a aucun moyen de s'élever, et Claude Desktop reste
+# un compte ordinaire.
+sudo
+# Les instantanés, qui rendent réversibles les écritures de Claude. Sans
+# btrfs-progs, le guichet exécute quand même, mais plus rien n'est annulable :
+# « pleins pouvoirs » redeviendrait « pleins pouvoirs de casser sans retour ».
+btrfs-progs
+
 #--- Matériel et système ----------------------------------------------------
 brightnessctl                  # luminosité — la rangée supérieure reste à câbler
 wev                            # relève les codes des touches, sous Wayland

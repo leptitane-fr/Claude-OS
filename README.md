@@ -6,8 +6,8 @@ comme environnement de travail principal, doté de privilèges étendus sur le s
 
 > **État : en service.** Le firmware est flashé, Debian 13 installée, le
 > bureau tourne sur la machine — dock, barre d'état, lanceur, gestionnaire de
-> fichiers. Restent l'audio à valider et les touches de la rangée supérieure à
-> câbler.
+> fichiers. L'accès root de Claude Desktop est en place ([`docs/07`](docs/07-acces-root.md)).
+> Restent l'audio à valider et les touches de la rangée supérieure à câbler.
 
 ---
 
@@ -36,6 +36,7 @@ comme environnement de travail principal, doté de privilèges étendus sur le s
 | Interface | **Shell sur mesure, C + GTK4** | Six petits programmes — dock, barre d'état, lanceur, gestionnaire de fichiers, réglages, fond d'écran — pèsent moins que les six composants existants qu'ils remplacent, partagent une feuille de style et un fichier de configuration, et font exactement ce qu'on leur demande. |
 | Système de fichiers | **btrfs + compression zstd** | Gain d'espace notable sur un eMMC de faible capacité, et surtout **snapshots instantanés** — le mécanisme qui rend les privilèges étendus de Claude réversibles. |
 | Mémoire | **zram (zstd)** | Indispensable si la machine est en 4 Go, une fois Electron chargé. |
+| Accès root de Claude | **Guichet `claude-os-root`, trois niveaux** | Claude Desktop reste non privilégié : ce sont ses *commandes* qui s'élèvent, par une porte qui classe, instantanie et journalise. Le niveau 3 — partitions, firmware, identifiants — est imposé par `sudo` lui-même, pas par la bonne volonté du programme. Voir [`docs/07`](docs/07-acces-root.md). |
 | Machine cible | **`MADOO`** — N6000, 4 Go | Board confirmé sur trois sources indépendantes. 4 Go de LPDDR4x **soudée** : plafond définitif, non extensible. |
 | Levée du write-protect | **Cavalier `J1`** ✅ | Résolu. La déconnexion de batterie est sans effet sur MADOO (`wpsw_cur` = `1`), mais le pontage de `J1` — paire basse sous le lecteur microSD — donne `wpsw_cur` = `0`. Information neuve : ni MrChromebox ni le forum ne l'avaient confirmée. |
 | Filet de récupération | **Sauvegarde USB seule** | Pas de programmateur SPI externe. La sauvegarde du firmware devient donc le seul recours, d'où un protocole de vérification strict. |
@@ -54,12 +55,14 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`docs/04-environnement-bureau.md`](docs/04-environnement-bureau.md) | La pile graphique, le rendu visuel, ce qui est volontairement absent, et les points à valider sur la machine. |
 | [`docs/05-energie.md`](docs/05-energie.md) | Économie d'énergie : ce qui compte vraiment, les réglages TLP et noyau, et ce qui est délibérément écarté. |
 | [`docs/06-journal-incident-wayland.md`](docs/06-journal-incident-wayland.md) | Journal factuel de l'incident de migration Wayland, du correctif et du retour d'urgence. |
+| [`docs/07-acces-root.md`](docs/07-acces-root.md) | **L'accès root de Claude Desktop** : le guichet, les trois niveaux, la fenêtre de confirmation, les instantanés et le retour arrière. |
 
 ### Installation
 
 | Fichier | Rôle |
 |---|---|
 | [`install/provision.sh`](install/provision.sh) | Transforme une Debian 13 minimale en Claude OS. Idempotent, `--dry-run` disponible. |
+| [`install/patch-acces-root-claude.sh`](install/patch-acces-root-claude.sh) | Déploie l'accès root de Claude Desktop sur une machine déjà en service. Idempotent, `--dry-run` et `--retirer` disponibles. Appelé aussi par `provision.sh`. |
 | [`install/packages.list`](install/packages.list) | Les 49 paquets, chacun justifié en commentaire. |
 | [`shell/`](shell/) | Le code du bureau : dock, barre d'état, lanceur, gestionnaire de fichiers, réglages, fond d'écran. Compilé sur la machine par `provision.sh`. |
 | [`rootfs/`](rootfs/) | Les fichiers déployés tels quels : configuration de labwc, session Wayland, lanceur Claude, fond d'écran. |
@@ -71,6 +74,7 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`tools/probe-hardware.sh`](tools/probe-hardware.sh) | Relevé matériel en lecture seule, 13 sections. À lancer depuis ChromeOS **avant** tout effacement. |
 | [`tools/verify-firmware-backup.sh`](tools/verify-firmware-backup.sh) | Valide une sauvegarde de firmware avant de flasher : taille, dump vide, signature `__FMAP__`, régions, et comparaison de deux lectures. Retourne `2` si la sauvegarde est inutilisable. |
 | [`tools/validate-install.sh`](tools/validate-install.sh) | Passe en revue l'installation poste par poste — Wi-Fi, Bluetooth, **audio**, VA-API, énergie, session, empreinte mémoire — et rend un verdict. À lancer après `provision.sh`. |
+| `claude-os` | Installé sur la machine, pas dans `tools/`. `claude-os etat` dit ce qui est en place ; `journal`, `instantanes` et `rollback <id>` donnent la trace des actions privilégiées et le retour arrière. |
 | [`tools/probe-keys.sh`](tools/probe-keys.sh) | Relève, sous Wayland, ce qu'émettent réellement la rangée supérieure et la touche Loupe du clavier Chromebook, pour en déduire les liaisons labwc. |
 
 ---
@@ -142,7 +146,8 @@ Le firmware UEFI est flashé, le cavalier retiré, la machine remontée.
    n'a que faire.
 2. **Récupérer le dépôt** sur la machine, puis lancer
    `sudo bash install/provision.sh`.
-3. **Valider** avec `bash tools/validate-install.sh` — l'audio en premier.
+3. **Valider** avec `bash tools/validate-install.sh` — l'audio en premier —
+   puis `claude-os etat` pour l'accès root.
 4. **Relever les touches** avec `bash tools/probe-keys.sh`, pour en tirer les
    liaisons labwc définitives.
 

@@ -160,26 +160,40 @@ système **ne passera pas par le contrôle de l'écran**, mais par une voie
 programmatique — ce qui est de toute façon la bonne approche : plus rapide, plus
 fiable, traçable, et scriptable.
 
-### Architecture proposée
+### Architecture — telle qu'elle a été construite
+
+> **Ce point a été mis en œuvre.** Le détail complet, y compris les pistes
+> écartées et les découvertes faites en chemin, est dans
+> [`docs/07`](07-acces-root.md).
+
+La v1 de ce document décrivait un courtier `claude-osd` : un démon root, un
+socket Unix, un serveur MCP au-dessus. C'est la bonne cible, et c'en est trois
+à écrire, à faire tourner en permanence sur une machine de 4 Go, et à
+déboguer. Ce qui a été livré rend le même service — classement, instantané,
+journal, confirmation — **sans démon résident** :
 
 ```
-Claude Desktop  (session utilisateur, non privilégié)
-      │  stdio
+Claude Desktop  (session utilisateur, NON privilégié)
+      │  claude-os-root <commande…>
       ▼
-claude-os-mcp   (serveur MCP, non privilégié)
-      │  socket Unix  /run/claude-os/broker.sock
-      ▼
-claude-osd      (courtier, root, service systemd)
+claude-os-root  (classe la commande, puis choisit la porte)
       │
-      ├── vérifie la politique   /etc/claude-os/policy.d/*.toml
-      ├── crée un snapshot btrfs avant toute écriture
-      ├── journalise l'appel (journald + journal append-only)
-      └── exécute
+      ├── niveaux 1 et 2 ──►  sudo NOPASSWD
+      │                       instantané btrfs si niveau 2, journal, exécution
+      │
+      └── niveau 3 ────────►  sudo AVEC mot de passe (chemin distinct)
+                              claude-os-askpass ouvre une fenêtre sur le
+                              bureau, montre la commande, attend l'accord
 ```
 
-Le courtier est le seul composant privilégié, et il est petit : c'est lui, et
+Le guichet est le seul composant privilégié, et il est petit : c'est lui, et
 non l'agent, qui décide. Claude obtient un pouvoir complet sur la machine, mais
 **par une porte instrumentée**.
+
+Le niveau 3 n'est pas imposé par la bonne volonté du programme : le même
+fichier est atteignable par deux chemins, et un seul est dans la règle
+`NOPASSWD`. C'est `sudo` qui refuse l'autre. La porte MCP pourra se brancher
+plus tard sur ce même guichet, sans rien changer au modèle.
 
 ### Trois niveaux d'autorisation
 
@@ -197,10 +211,22 @@ peut être automatique ; une action définitive mérite une seconde paire d'yeux
 
 - Snapshot btrfs avant chaque opération du niveau 2, horodaté et corrélé à
   l'entrée de journal correspondante.
-- `claude-os rollback <id>` restaure l'état antérieur.
+- `claude-os rollback <id>` restaure l'état antérieur — par échange de
+  sous-volumes, sans jamais détruire l'ancien `@`.
 - Rotation automatique des snapshots pour ne pas saturer l'eMMC.
 - Journal d'audit lisible : *qui* a demandé quoi, *quand*, *quel* snapshot
   correspond.
+
+Deux écarts assumés par rapport à ce qui était annoncé ici, l'un et l'autre
+expliqués dans [`docs/07`](07-acces-root.md) :
+
+- le journal n'est **pas** en `append-only` (`chattr +a`) : un fichier en `+a`
+  ne peut pas tourner, et un journal qui ne tourne pas finit par remplir un
+  eMMC de 64 Go. L'inviolabilité est portée par `journald`, la lisibilité par
+  `/var/log/claude-os/actions.log` ;
+- les écritures qui ne laissent rien sur le disque — démarrer un service,
+  monter un volume — restent au niveau 2 mais **sans instantané** : les
+  instantanier chasserait, par la rotation, ceux qui comptent.
 
 ---
 
@@ -214,6 +240,9 @@ peut être automatique ; une action définitive mérite une seconde paire d'yeux
   correspondant, à habiller aux couleurs du shell.
 - **Accès au nuage** — Google Drive, OneDrive — dans le volet du gestionnaire
   de fichiers, par rclone. Le volet est déjà découpé en sections pour cela.
+- **Le serveur MCP.** Le guichet s'appelle aujourd'hui par la ligne de
+  commande. Un serveur MCP exposerait les mêmes trois niveaux comme des
+  outils, sans rien changer au modèle de privilèges.
 - Outil de construction d'image reproductible, pour ne plus dépendre d'une
   installation Debian faite à la main.
 - Politique de mise à jour : Debian stable strict, ou backports ciblés pour le
@@ -226,3 +255,4 @@ peut être automatique ; une action définitive mérite une seconde paire d'yeux
 | Serveur graphique | Wayland, labwc | §2.4 |
 | Gestionnaire de fenêtres | labwc, ~2 Mo | §2.4 |
 | Interface | shell sur mesure, GTK4 | `docs/04`, `shell/` |
+| Accès root de Claude | guichet `claude-os-root`, trois niveaux | §2.6, `docs/07` |

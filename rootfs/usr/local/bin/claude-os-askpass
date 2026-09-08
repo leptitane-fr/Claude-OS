@@ -1,0 +1,116 @@
+#!/bin/sh
+#-------------------------------------------------------------------------------
+# Claude OS — Confirmation humaine des actions de niveau 3
+#
+# POURQUOI CE PROGRAMME
+#
+# Claude Desktop lance ses commandes sans terminal. Un « sudo » ordinaire n'a
+# alors nulle part où réclamer un mot de passe : il échoue sur « no tty
+# present and no askpass program specified », et l'action sensible se solde
+# par un message obscur.
+#
+# sudo prévoit exactement ce cas : quand aucun terminal n'est disponible, il
+# appelle le programme désigné par « Defaults askpass ». C'est celui-ci. Il
+# ouvre une fenêtre sur la session Wayland, montre LA COMMANDE EXACTE qui
+# sera exécutée, et attend le mot de passe.
+#
+# C'est la « confirmation humaine explicite » du niveau 3 (docs/02 §2.6), et
+# c'est ce qui permet d'accorder les niveaux 1 et 2 sans réserve.
+#
+# Il tourne sous le compte de l'utilisateur, JAMAIS en root : sudo l'appelle
+# avant de s'élever.
+#-------------------------------------------------------------------------------
+set -u
+
+INVITE="${1:-Mot de passe}"
+
+# ---------------------------------------------------------------- saisie
+# Second rôle du programme : c'est lui-même qui tourne DANS la fenêtre foot,
+# appelé avec --saisie. Un seul fichier, deux emplois, rien à installer de
+# plus.
+if [ "${1:-}" = "--saisie" ]; then
+	FICHIER="$2"
+	COMMANDE="${3:-(commande inconnue)}"
+	printf '\033[1m  Claude OS — autorisation demandée\033[0m\n\n'
+	printf '  Une action de niveau 3 attend votre accord.\n\n'
+	printf '  \033[1;33m%s\033[0m\n\n' "$COMMANDE"
+	printf '  Ces actions ne sont pas annulables par instantané :\n'
+	printf '  partitionnement, firmware, identifiants, secrets, réseau distant.\n\n'
+	printf '  Mot de passe de %s (vide = refuser) : ' "$(id -un)"
+	stty -echo 2>/dev/null
+	IFS= read -r MDP
+	stty echo 2>/dev/null
+	printf '\n'
+	printf '%s' "$MDP" > "$FICHIER"
+	exit 0
+fi
+
+# --------------------------------------------------------- quelle commande ?
+# Le parent est sudo : sa ligne de commande dit ce qui va être exécuté. C'est
+# la seule source fiable — sudo ne transmet rien d'autre à l'askpass, et
+# approuver sans savoir quoi n'aurait aucun sens.
+COMMANDE=""
+if [ -r "/proc/$PPID/cmdline" ]; then
+	COMMANDE="$(tr '\0' ' ' < "/proc/$PPID/cmdline" 2>/dev/null)"
+fi
+[ -n "$COMMANDE" ] || COMMANDE="$INVITE"
+
+# Le guichet passe par « sudo -A -- /usr/local/bin/claude-os-sensible … ».
+# Montrer cet emballage ferait lire à l'utilisateur un chemin au lieu d'une
+# commande. On ne garde que ce qui sera reellement execute.
+case "$COMMANDE" in
+	*"/usr/local/bin/claude-os-sensible "*)
+		COMMANDE="${COMMANDE#*"/usr/local/bin/claude-os-sensible "}"
+		# Les options du guichet ne sont pas la commande non plus.
+		while :; do
+			case "$COMMANDE" in
+				"--pourquoi "*) COMMANDE="${COMMANDE#--pourquoi }"; COMMANDE="${COMMANDE#* }" ;;
+				"--niveau "*)   COMMANDE="${COMMANDE#--niveau }";   COMMANDE="${COMMANDE#* }" ;;
+				"-c "*)         COMMANDE="${COMMANDE#-c }" ;;
+				*) break ;;
+			esac
+		done ;;
+esac
+
+# ------------------------------------------------------------ terminal, si là
+# Lancé depuis un vrai terminal (SSH, foot ouvert à la main), on demande sur
+# place : ouvrir une fenêtre serait absurde.
+if [ -t 0 ] && [ -t 2 ]; then
+	printf '%s ' "$INVITE" >&2
+	stty -echo 2>/dev/null
+	IFS= read -r MDP
+	stty echo 2>/dev/null
+	printf '\n' >&2
+	printf '%s' "$MDP"
+	exit 0
+fi
+
+# ------------------------------------------------------------ fenêtre Wayland
+: "${XDG_RUNTIME_DIR:=/run/user/$(id -u)}"
+if [ -z "${WAYLAND_DISPLAY:-}" ] || ! command -v foot >/dev/null 2>&1; then
+	cat >&2 <<MSG
+claude-os-askpass : ni terminal, ni session graphique joignable.
+
+Aucune confirmation humaine n'est possible depuis ici, et une action de
+niveau 3 ne s'exécute pas sans elle. La relancer depuis un terminal de la
+session (Super + Entrée), ou depuis SSH.
+MSG
+	exit 1
+fi
+
+TMP="$(mktemp "$XDG_RUNTIME_DIR/claude-os-askpass.XXXXXX")" || exit 1
+chmod 600 "$TMP"
+# Le mot de passe ne transite ni par la ligne de commande, ni par une
+# variable d'environnement : les deux sont lisibles dans /proc par tout
+# processus du même compte. Un fichier en 0600 sous XDG_RUNTIME_DIR (un
+# tmpfs, jamais écrit sur l'eMMC) est le moindre mal.
+trap 'rm -f "$TMP"' EXIT INT TERM
+
+foot --app-id=claude-os-askpass --title="Claude OS — autorisation" \
+     --window-size-chars=84x16 \
+     -- /usr/local/bin/claude-os-askpass --saisie "$TMP" "$COMMANDE" >/dev/null 2>&1
+
+MDP="$(cat "$TMP" 2>/dev/null)"
+rm -f "$TMP"
+[ -n "$MDP" ] || exit 1     # fenêtre fermée ou saisie vide : c'est un refus
+printf '%s' "$MDP"

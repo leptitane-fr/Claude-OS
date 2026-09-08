@@ -336,6 +336,10 @@ say "Déploiement de l'environnement"
 info "copie de rootfs/ vers /"
 run "cp -a '$REPO_DIR/rootfs/.' /"
 run "chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer /usr/local/bin/claude-os-session /usr/local/bin/claude-os-greeter"
+# Le guichet d'accès root et ses deux compagnons (docs/07). Le correctif,
+# appelé plus bas, les réinstalle proprement ; ce chmod couvre le cas où il
+# échouerait, pour qu'ils ne restent pas sur place sans être exécutables.
+run "chmod +x /usr/local/bin/claude-os-root /usr/local/bin/claude-os /usr/local/bin/claude-os-askpass"
 run "chmod +x /etc/xdg/labwc/autostart /etc/xdg/labwc-greeter/autostart"
 
 # La session est WAYLAND, et l'écran de connexion aussi. L'ancienne session
@@ -486,6 +490,22 @@ gtk-cursor-theme-name=Adwaita
 EOF"
 done
 run "chown -R '$TARGET_USER:$TARGET_USER' '$TARGET_HOME/.config'"
+
+# --------------------------------------------------------------- accès root
+
+say "Accès root de Claude Desktop"
+
+# C'est l'exigence n°2 du projet : Claude Desktop dispose de pleins pouvoirs
+# sur la machine, et la contrainte n°3 veut que chaque action privilégiée
+# reste tracée et annulable. Le détail est dans docs/07.
+#
+# Le travail est fait par install/patch-acces-root-claude.sh, et non recopié
+# ici : c'est le même correctif que l'on applique à une machine déjà en
+# service, et deux exemplaires du même code finiraient par diverger. Il est
+# idempotent, et il ne réécrit pas /etc/claude-os/politique.conf s'il existe.
+run "bash '$REPO_DIR/install/patch-acces-root-claude.sh' --user '$TARGET_USER'" \
+	|| warn "la mise en place de l'accès root a échoué — relancer à part :
+      sudo bash install/patch-acces-root-claude.sh"
 
 # -------------------------------------------------------------------- énergie
 

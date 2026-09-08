@@ -26,3 +26,12 @@ QT_QPA_PLATFORM=wayland
 # soit pris en compte.
 ELECTRON_OZONE_PLATFORM_HINT=wayland
 MOZ_ENABLE_WAYLAND=1
+
+# Confirmation des actions privilegiees de niveau 3 (docs/07). Claude Desktop
+# lance ses commandes sans terminal : sans programme d'invite, « sudo » y
+# echoue sur « no tty present » et la demande n'atteint jamais l'ecran.
+#
+# /etc/sudo.conf porte deja le meme chemin, et c'est lui qui fait foi pour
+# sudo. Cette ligne couvre ce que sudo.conf ne couvre pas : « sudo -A », et
+# les autres programmes qui suivent la convention SUDO_ASKPASS.
+SUDO_ASKPASS=/usr/local/bin/claude-os-askpass
