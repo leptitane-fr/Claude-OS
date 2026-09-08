@@ -446,17 +446,29 @@ info "/tmp/.X11-unix appartient à root (Xwayland l'exige, labwc en dépend)"
 # L'appartenance au groupe, elle, ne prend effet qu'à la prochaine ouverture
 # de session — c'est ainsi que fonctionnent les groupes sous Unix, et il vaut
 # mieux le dire que de laisser chercher.
-run "udevadm control --reload-rules"
-run "udevadm trigger --subsystem-match=backlight"
+# CHACUNE DE CES COMMANDES PEUT ÉCHOUER SANS QUE CE SOIT GRAVE, ET AUCUNE NE
+# DOIT AVORTER LA FOURNITURE.
+#
+# Ce script tourne sous « set -e » : une commande qui rend un code d'erreur
+# arrête tout. udevadm peut être absent dans un conteneur, le groupe « video »
+# peut ne pas exister, sysfs peut refuser un chgrp selon le pilote. Sans les
+# « || true », un réglage de confort — la luminosité — empêcherait l'activation
+# de greetd et l'armement du filet, qui viennent plus bas.
+#
+# Écrit après coup : la première version de ce bloc ne les avait pas, et c'est
+# exactement le genre d'oubli qui laisse une machine à moitié fournie sans
+# qu'aucun message ne le dise.
+run "udevadm control --reload-rules || true"
+run "udevadm trigger --subsystem-match=backlight || true"
 for b in /sys/class/backlight/*; do
 	[ -e "$b/brightness" ] || continue
-	run "chgrp video '$b/brightness'"
-	run "chmod g+w '$b/brightness'"
+	run "chgrp video '$b/brightness' || true"
+	run "chmod g+w '$b/brightness' || true"
 done
 if id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx video; then
 	info "« $TARGET_USER » est déjà dans le groupe video"
 else
-	run "usermod -aG video '$TARGET_USER'"
+	run "usermod -aG video '$TARGET_USER' || true"
 	warn "« $TARGET_USER » ajouté au groupe video : effectif à la PROCHAINE"
 	warn "ouverture de session. D'ici là le curseur de luminosité reste inerte."
 fi
@@ -538,7 +550,11 @@ if systemctl list-unit-files 2>/dev/null | grep -q '^greetd\.service'; then
 	# échouait sans un mot, la machine redémarrait sur LightDM, et le
 	# correctif semblait n'avoir « rien changé ». Constaté sur la machine.
 	run "rm -f /etc/systemd/system/display-manager.service"
-	run "systemctl enable greetd"
+	# « || true » indispensable : sous set -e, un échec ici avorterait le
+	# script AVANT le contrôle ci-dessous, celui-là même qui doit rattraper
+	# l'échec en remettant un écran de connexion en service. Le filet de
+	# rattrapage ne servait à rien si la panne l'empêchait d'être atteint.
+	run "systemctl enable greetd || true"
 
 	# On VÉRIFIE. Une bascule de gestionnaire de session qu'on croit faite
 	# et qui ne l'est pas coûte un redémarrage et une soirée.
