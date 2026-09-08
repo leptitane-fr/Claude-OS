@@ -90,7 +90,20 @@ val "terminal virtuel de greetd" "${VT:-<non défini>}"
 if [ -n "$VT" ]; then
 	G="$(systemctl is-active "getty@tty$VT" 2>/dev/null || true)"
 	val "getty@tty$VT" "${G:-inactif}"
-	[ "$G" = "active" ] && echo "  >>> CONFLIT POSSIBLE : un getty tient déjà le tty$VT."
+	if [ "$G" = "active" ]; then
+		echo "  >>> UN GETTY TIENT LE tty$VT, QUE greetd REVENDIQUE AUSSI."
+		echo "  >>> Deux programmes pour un terminal : celui qui perd n'affiche"
+		echo "  >>> rien, et labwc échoue sur « Atomic commit failed: busy »."
+	fi
+	# greetd.service doit écarter le getty de son terminal. Sans cette
+	# directive, les deux démarrent et se disputent l'écran.
+	echo "  --- greetd.service : écarte-t-il le getty ? ---"
+	systemctl cat greetd.service 2>/dev/null \
+		| grep -iE "^(Conflicts|After|Before|WantedBy|ExecStart)=" | sed 's/^/    /' \
+		|| echo "    (unité illisible)"
+	systemctl cat greetd.service 2>/dev/null | grep -qi "^Conflicts=.*getty" \
+		&& echo "    >>> Conflicts sur getty : PRÉSENT" \
+		|| echo "    >>> Conflicts sur getty : ABSENT <<<< c'est la piste"
 fi
 
 sec "3. Les composants"

@@ -49,7 +49,16 @@
 #
 set -euo pipefail
 
-VT_ESSAI=2
+# HUIT, ET PAS DEUX.
+#
+# systemd-logind fait apparaitre un getty A LA DEMANDE sur les terminaux
+# virtuels 1 a 6 (NAutoVTs=6) : basculer l'affichage sur le VT 2 en fait
+# naitre un, qui se dispute alors le terminal avec le labwc de l'essai. On
+# reproduirait exactement le conflit qu'on cherche a isoler, et l'essai
+# accuserait le greeter d'une panne qu'il aurait lui-meme provoquee.
+#
+# Au-dela de 6, aucun getty n'est engendre. L'essai a le terminal pour lui.
+VT_ESSAI=8
 DUREE=30
 ACTION=""
 
