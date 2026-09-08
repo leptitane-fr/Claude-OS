@@ -272,6 +272,9 @@ typedef struct {
     GtkWidget *echelle;
     GtkWidget *valeur;
     char      *dir;            /* /sys/class/backlight/<qqch>              */
+    char      *nom;            /* « intel_backlight » — le %k de la regle   */
+    GDBusProxy *logind;        /* session logind, si elle repond            */
+    gboolean   logind_utilisable;  /* rabattu au premier refus de logind    */
     int        maxi;
     gboolean   inscriptible;
     gboolean   apercu;
@@ -327,6 +330,79 @@ console_lumiere_relire (GtkWidget *rangee)
     lumiere_afficher (l, pourcent);
 }
 
+/* Le curseur renonce, et dit pourquoi. Appele quand les DEUX voies ont
+ * echoue : un curseur qui bouge sans effet est pire que pas de curseur. */
+static void
+lumiere_renoncer (Lumiere *l, const char *cause)
+{
+    if (!l->inscriptible)
+        return;                      /* deja dit — ne pas le repeter */
+    g_message ("luminosite : %s", cause);
+    l->inscriptible = FALSE;
+    gtk_widget_set_sensitive (l->echelle, FALSE);
+    gtk_label_set_text (GTK_LABEL (l->valeur), "Verrou.");
+    gtk_widget_set_tooltip_text (l->boite,
+        "La luminosité n'a pas pu être écrite : ni logind ni "
+        "/sys/class/backlight ne l'ont acceptée. Ajouter le compte au groupe "
+        "« video » (sudo usermod -aG video <compte>) puis rouvrir la session.");
+}
+
+/* LA VOIE DE SECOURS : ecrire dans sysfs. Elle exige que le fichier soit
+ * ouvert au groupe « video » ET que le compte y appartienne — ce qui, pour
+ * l'appartenance, ne prend effet qu'a la session suivante. C'est precisement
+ * la raison pour laquelle ce n'est plus la voie principale. */
+static gboolean
+lumiere_par_sysfs (Lumiere *l, int valeur)
+{
+    g_autofree char *chemin = g_build_filename (l->dir, "brightness", NULL);
+    g_autofree char *texte  = g_strdup_printf ("%d\n", valeur);
+    g_autoptr(GError) err = NULL;
+
+    if (g_file_set_contents (chemin, texte, -1, &err))
+        return TRUE;
+    g_message ("luminosite : sysfs refuse — %s", err->message);
+    return FALSE;
+}
+
+/* LA REPONSE PEUT ARRIVER APRES LA FERMETURE DU PANNEAU.
+ *
+ * L'appel est asynchrone et porte un delai de deux secondes. Si la Console se
+ * referme entre-temps, la rangee est detruite, « lumiere_free » libere la
+ * structure — et cette fonction travaillerait sur de la memoire rendue. Une
+ * reference prise sur le widget avant l'appel, relachee ici, retarde sa
+ * destruction jusqu'a la reponse. */
+static void
+on_logind_repond (GObject *src, GAsyncResult *res, gpointer data)
+{
+    Lumiere *l = data;
+    GtkWidget *garde = l->boite;          /* la reference prise avant l'appel */
+    g_autoptr(GError) err = NULL;
+    g_autoptr(GVariant) r = g_dbus_proxy_call_finish (G_DBUS_PROXY (src), res, &err);
+
+    if (r != NULL) {
+        g_object_unref (garde);
+        return;                                   /* ecrit, rien a dire */
+    }
+    if (g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+        g_object_unref (garde);
+        return;
+    }
+
+    /* logind a refuse. Les motifs connus : session inactive sur le siege, ou
+     * ecran qui n'appartient pas a ce siege. On ne suppose pas lequel — on
+     * essaie l'autre voie, et l'on ne renonce que si elle echoue aussi. */
+    g_message ("luminosite : logind refuse — %s", err->message);
+    l->logind_utilisable = FALSE;
+
+    int pourcent = (int) gtk_range_get_value (GTK_RANGE (l->echelle));
+    int valeur = (int) (pourcent * (double) l->maxi / 100.0 + 0.5);
+    if (valeur < 1)
+        valeur = 1;
+    if (!lumiere_par_sysfs (l, valeur))
+        lumiere_renoncer (l, "logind et sysfs ont tous deux refuse");
+    g_object_unref (garde);
+}
+
 static gboolean
 on_lumiere_ecrire (gpointer data)
 {
@@ -338,23 +414,32 @@ on_lumiere_ecrire (gpointer data)
     if (valeur < 1)
         valeur = 1;   /* jamais zero : un ecran noir n'est pas un reglage */
 
-    g_autofree char *chemin = g_build_filename (l->dir, "brightness", NULL);
-    g_autofree char *texte  = g_strdup_printf ("%d\n", valeur);
-    g_autoptr(GError) err = NULL;
-
-    if (!g_file_set_contents (chemin, texte, -1, &err)) {
-        /* Sans la regle udev ni le groupe « video », l'ecriture est refusee.
-         * On le dit une fois et on desactive : un curseur qui bouge sans
-         * effet est pire que pas de curseur du tout. */
-        g_message ("luminosite : %s", err->message);
-        l->inscriptible = FALSE;
-        gtk_widget_set_sensitive (l->echelle, FALSE);
-        gtk_label_set_text (GTK_LABEL (l->valeur), "Verrou.");
-        gtk_widget_set_tooltip_text (l->boite,
-            "Écriture refusée sur /sys/class/backlight. Le compte doit "
-            "appartenir au groupe « video » — relancer provision.sh, puis "
-            "rouvrir la session.");
+    /* LOGIND D'ABORD, ET C'EST UN CHANGEMENT DE DOCTRINE.
+     *
+     * La regle udev ouvre le fichier « brightness » de chaque ecran au
+     * groupe « video », et provision.sh y ajoute le compte. Mais une appartenance a
+     * un groupe ne prend effet qu'a la session SUIVANTE : entre les deux, le
+     * curseur se verrouille en renvoyant l'utilisateur a provision.sh, qu'il
+     * vient justement de lancer. Constate sur la machine le 8 septembre.
+     *
+     * logind, lui, n'a besoin d'aucun groupe : il verifie que l'appelant est
+     * la session active du siege et ecrit pour lui. Aucune relance, aucune
+     * reouverture de session. C'est la voie de GNOME et de KDE.
+     *
+     * En ASYNCHRONE : un aller-retour sur le bus systeme pendant qu'un doigt
+     * fait glisser un curseur figerait le panneau si le bus tardait. */
+    if (l->logind != NULL && l->logind_utilisable) {
+        g_object_ref (l->boite);      /* relachee dans on_logind_repond */
+        g_dbus_proxy_call (l->logind, "SetBrightness",
+                           g_variant_new ("(ssu)", "backlight", l->nom,
+                                          (guint32) valeur),
+                           G_DBUS_CALL_FLAGS_NONE, 2000, NULL,
+                           on_logind_repond, l);
+        return G_SOURCE_REMOVE;
     }
+
+    if (!lumiere_par_sysfs (l, valeur))
+        lumiere_renoncer (l, "sysfs refuse et logind est indisponible");
     return G_SOURCE_REMOVE;
 }
 
@@ -378,6 +463,8 @@ static void
 lumiere_free (gpointer data)
 {
     Lumiere *l = data;
+    g_clear_object (&l->logind);
+    g_free (l->nom);
     g_free (l->dir);
     g_free (l);
 }
@@ -425,17 +512,49 @@ console_lumiere_new (gboolean apercu)
         return l->boite;
     }
 
-    /* L'inscriptibilite se teste sur le fichier, pas sur l'appartenance au
-     * groupe : la regle udev peut avoir ete posee sans que le compte ait
-     * rouvert sa session, et l'inverse est vrai aussi. */
+    l->nom = g_path_get_basename (l->dir);
+
+    /* LA SESSION LOGIND, SUR LE BUS SYSTEME.
+     *
+     * « /session/self » designe la session de l'appelant : rien a chercher,
+     * rien a deviner. On ne se contente pas de fabriquer le mandataire —
+     * GDBus le rend meme quand personne ne porte le nom — on demande QUI le
+     * porte. Sans proprietaire, logind ne tourne pas, et le mandataire ne
+     * servirait qu'a echouer plus tard. */
+    g_autoptr(GError) err = NULL;
+    l->logind = g_dbus_proxy_new_for_bus_sync (
+        G_BUS_TYPE_SYSTEM,
+        G_DBUS_PROXY_FLAGS_DO_NOT_LOAD_PROPERTIES
+            | G_DBUS_PROXY_FLAGS_DO_NOT_CONNECT_SIGNALS,
+        NULL, "org.freedesktop.login1",
+        "/org/freedesktop/login1/session/self",
+        "org.freedesktop.login1.Session", NULL, &err);
+    if (l->logind != NULL) {
+        g_autofree char *proprio = g_dbus_proxy_get_name_owner (l->logind);
+        if (proprio == NULL)
+            g_clear_object (&l->logind);
+    } else {
+        g_message ("luminosite : logind injoignable — %s", err->message);
+    }
+    l->logind_utilisable = (l->logind != NULL);
+
+    /* DEUX VOIES, DONC DEUX CHANCES.
+     *
+     * On n'appelle pas SetBrightness ici pour savoir s'il marchera : ce serait
+     * changer la luminosite a l'ouverture du panneau. La rangee reste donc
+     * active des qu'UNE des deux voies est plausible, et c'est la premiere
+     * ecriture qui tranche — elle sait renoncer en le disant. */
     g_autofree char *chemin = g_build_filename (l->dir, "brightness", NULL);
-    l->inscriptible = (g_access (chemin, W_OK) == 0);
+    gboolean sysfs_ouvert = (g_access (chemin, W_OK) == 0);
+    l->inscriptible = (l->logind != NULL) || sysfs_ouvert;
+
     if (!l->inscriptible) {
         gtk_widget_set_sensitive (l->echelle, FALSE);
+        gtk_label_set_text (GTK_LABEL (l->valeur), "Verrou.");
         gtk_widget_set_tooltip_text (l->boite,
-            "Écriture refusée sur /sys/class/backlight. Le compte doit "
-            "appartenir au groupe « video » — relancer provision.sh, puis "
-            "rouvrir la session.");
+            "Ni logind ni /sys/class/backlight n'acceptent l'écriture. "
+            "Ajouter le compte au groupe « video » "
+            "(sudo usermod -aG video <compte>) puis rouvrir la session.");
     }
     console_lumiere_relire (l->boite);
     return l->boite;

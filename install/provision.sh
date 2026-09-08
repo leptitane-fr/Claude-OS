@@ -439,16 +439,22 @@ run "chown root:root /tmp/.X11-unix"
 run "chmod 1777 /tmp/.X11-unix"
 info "/tmp/.X11-unix appartient à root (Xwayland l'exige, labwc en dépend)"
 
-# LA LUMINOSITÉ DE L'ÉCRAN, RÉGLABLE DEPUIS LA CONSOLE.
+# LA LUMINOSITÉ DE L'ÉCRAN — LA VOIE DE SECOURS, PAS LA PRINCIPALE.
+#
+# Depuis le 8 septembre 2026, la Console écrit la luminosité par logind
+# (SetBrightness sur le bus système), qui n'exige aucun groupe et prend effet
+# immédiatement. Tout ce bloc est le FILET : il sert quand logind refuse —
+# session non active sur le siège, écran rattaché à un autre siège.
 #
 # /sys/class/backlight/*/brightness appartient à root. La règle udev déposée
 # par rootfs/ l'ouvre au groupe « video » au branchement, mais udev ne rejoue
-# pas les périphériques déjà présents : sans les trois lignes qui suivent, le
-# curseur ne fonctionnerait qu'après le prochain démarrage.
+# pas les périphériques déjà présents : sans les trois lignes qui suivent, la
+# voie de secours ne serait armée qu'au prochain démarrage.
 #
 # L'appartenance au groupe, elle, ne prend effet qu'à la prochaine ouverture
-# de session — c'est ainsi que fonctionnent les groupes sous Unix, et il vaut
-# mieux le dire que de laisser chercher.
+# de session — c'est ainsi que fonctionnent les groupes sous Unix. C'est
+# précisément ce défaut qui a fait passer logind devant : le curseur
+# renvoyait l'utilisateur à provision.sh, qu'il venait de lancer.
 # CHACUNE DE CES COMMANDES PEUT ÉCHOUER SANS QUE CE SOIT GRAVE, ET AUCUNE NE
 # DOIT AVORTER LA FOURNITURE.
 #
@@ -472,8 +478,9 @@ if id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx video; then
 	info "« $TARGET_USER » est déjà dans le groupe video"
 else
 	run "usermod -aG video '$TARGET_USER' || true"
-	warn "« $TARGET_USER » ajouté au groupe video : effectif à la PROCHAINE"
-	warn "ouverture de session. D'ici là le curseur de luminosité reste inerte."
+	info "« $TARGET_USER » ajouté au groupe video (voie de secours ; effective"
+	info "à la prochaine ouverture de session). La Console, elle, passe par"
+	info "logind et n'attend pas."
 fi
 
 # La session est WAYLAND, et l'écran de connexion aussi. L'ancienne session

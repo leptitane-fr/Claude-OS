@@ -4,10 +4,19 @@
 # inscriptible autrement. Sans cette règle, le curseur de la Console lit la
 # valeur, l'affiche, et échoue en silence à l'écrire.
 #
+# CE N'EST PLUS LA VOIE PRINCIPALE, ET VOICI POURQUOI.
+#
 # Deux voies existaient : passer par logind (SetBrightness sur le bus) ou
-# ouvrir le fichier au groupe « video ». La seconde est retenue parce qu'elle
-# tient en une ligne, ne demande aucune dépendance, et se vérifie d'un
-# « ls -l ». provision.sh ajoute le compte au groupe.
+# ouvrir le fichier au groupe « video ». La seconde avait été retenue parce
+# qu'elle tient en une ligne et se vérifie d'un « ls -l ». Elle a un défaut
+# qu'on n'avait pas pesé : une appartenance à un groupe ne prend effet qu'à
+# la session SUIVANTE. Le 8 septembre 2026, le curseur se verrouillait donc
+# en demandant de relancer provision.sh — que l'utilisateur venait de lancer.
+#
+# La Console appelle maintenant logind d'abord : il ne demande aucun groupe,
+# vérifie seulement que l'appelant est la session active du siège, et écrit
+# tout de suite. Cette règle reste comme FILET, pour le cas où logind refuse.
+# provision.sh ajoute toujours le compte au groupe.
 #
 # La portée est étroite : ce groupe ne donne accès qu'au rétro-éclairage,
 # jamais au reste de sysfs.
