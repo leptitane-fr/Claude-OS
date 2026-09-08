@@ -35,14 +35,21 @@
 #                compilé. « git pull » met à jour le DÉPÔT, pas la machine :
 #                c'est cette étape qui manquait entre les deux.
 #
+#   --compiler   Recompile et réinstalle le shell. C'EST L'AUTRE MOITIÉ :
+#                --deployer ne transporte que rootfs/, jamais une ligne de C.
+#                Tout correctif touchant shell/ exige cette étape, et les
+#                deux autres modes le disent maintenant quand elle manque.
+#
 #   --revenir    Défait la bascule.
 #
 # Seul --basculer change le gestionnaire de session, et il arme le filet
-# avant de le faire. Les quatre autres se défont sans redémarrer.
+# avant de le faire. Les cinq autres se défont sans redémarrer — --compiler compris,
+# qui ne fait que reconstruire ce que le dépôt contient déjà.
 #
 # USAGE
 #   sudo bash install/bascule-session.sh --verifier
 #   sudo bash install/bascule-session.sh --deployer
+#   sudo bash install/bascule-session.sh --compiler
 #   sudo bash install/bascule-session.sh --essai [secondes]   (défaut : 30)
 #   sudo bash install/bascule-session.sh --basculer
 #   sudo bash install/bascule-session.sh --revenir
@@ -66,18 +73,19 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--verifier) ACTION=verifier ;;
 		--deployer) ACTION=deployer ;;
+		--compiler) ACTION=compiler ;;
 		--essai)    ACTION=essai
 		            if [ "${2:-}" ] && [ -z "${2//[0-9]/}" ]; then DUREE="$2"; shift; fi ;;
 		--basculer) ACTION=basculer ;;
 		--revenir)  ACTION=revenir ;;
 		--vt)       VT_ESSAI="${2:?numéro de terminal virtuel attendu}"; shift ;;
-		-h|--help)  sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+		-h|--help)  sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 		*) echo "Option inconnue : $1" >&2; exit 2 ;;
 	esac
 	shift
 done
 
-[ -n "$ACTION" ] || { sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$ACTION" ] || { sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ "$(id -u)" -eq 0 ] || { echo "Ce script doit tourner en root : sudo bash $0 --$ACTION" >&2; exit 1; }
 
 say()  { printf '\n\033[1;34m── %s\033[0m\n' "$*"; }
@@ -88,6 +96,58 @@ die()  { printf '\n\033[31mÉCHEC : %s\033[0m\n' "$*" >&2; exit 1; }
 ANOMALIES=0
 ok()   { printf '  \033[32m✓\033[0m %-42s %s\n' "$1" "${2:-}"; }
 ko()   { printf '  \033[31m✗\033[0m %-42s %s\n' "$1" "${2:-}"; ANOMALIES=$((ANOMALIES+1)); }
+
+DEPOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# ---------------------------------------------------------------------------
+#  LE SHELL EST-IL À JOUR SUR LA MACHINE ?
+#
+#  CE CONTRÔLE EXISTE PARCE QUE SON ABSENCE A COÛTÉ DEUX SÉANCES.
+#
+#  Le 8 septembre 2026, la propagation du thème a été écrite en C, dans
+#  claude-os-reglages. Elle a été poussée, tirée, puis déployée par
+#  « --deployer » — qui ne fait que « cp -a rootfs/. / » et NE COMPILE RIEN.
+#  Sur la machine : claude-os-theme présent, portals.conf présent, autostart
+#  à jour, et un panneau de réglages datant d'une heure plus tôt, qui ne
+#  connaissait pas le script. Le bureau changeait de thème, rien d'autre ne
+#  suivait, et « --verifier » annonçait que tout allait bien.
+#
+#  L'invariant n°3 disait « git pull ne déploie rien ». Il lui manquait sa
+#  moitié : « --deployer ne compile rien ». C'est cette moitié-là.
+#
+#  MÉTHODE : la date. Le binaire le plus ANCIEN fait référence — c'est
+#  toujours le retardataire qu'on exécute. Si une source du shell lui est
+#  postérieure, la machine tourne sur du vieux. « git pull » horodate à
+#  l'instant les fichiers qu'il modifie, et laisse les autres tranquilles :
+#  la comparaison ne se déclenche donc que sur ce qui a vraiment changé.
+SHELL_BINAIRES="claude-os-dock claude-os-status claude-os-fond claude-os-lanceur
+                claude-os-connexion claude-os-fichiers claude-os-reglages"
+
+# Rend 0 si le shell installé est antérieur aux sources ; remplit SHELL_RETARD
+# avec les fichiers en cause et SHELL_REF avec le binaire pris pour référence.
+SHELL_RETARD=""
+SHELL_REF=""
+shell_perime() {
+	SHELL_RETARD=""; SHELL_REF=""
+	[ -d "$DEPOT/shell/src" ] || return 1
+
+	for b in $SHELL_BINAIRES; do
+		p="$(command -v "$b" 2>/dev/null || true)"
+		[ -n "$p" ] || continue
+		if [ -z "$SHELL_REF" ] || [ "$p" -ot "$SHELL_REF" ]; then SHELL_REF="$p"; fi
+	done
+	# Aucun binaire installé : ce n'est pas « périmé », c'est « absent », et
+	# le contrôle voisin le dit déjà. Ne pas crier deux fois la même chose.
+	[ -n "$SHELL_REF" ] || return 1
+
+	# Les feuilles de style comptent autant que le C : elles sont installées
+	# par meson, pas copiées par rootfs/. Une couleur changée dans le dépôt et
+	# pas recompilée donne exactement le même malentendu.
+	SHELL_RETARD="$(find "$DEPOT/shell/src" "$DEPOT/shell/style" "$DEPOT/shell/data" \
+	                     "$DEPOT/shell/meson.build" \
+	                     -newer "$SHELL_REF" -type f 2>/dev/null | head -6 || true)"
+	[ -n "$SHELL_RETARD" ]
+}
 
 # ===========================================================================
 #  VÉRIFIER — ne touche à rien
@@ -316,6 +376,22 @@ verifier() {
 	[ -d /usr/share/claude-os-shell/style ] \
 		&& ok "feuilles de style" "$(ls /usr/share/claude-os-shell/style | tr '\n' ' ')" \
 		|| ko "feuilles de style" "/usr/share/claude-os-shell/style absent"
+
+	# LE BINAIRE INSTALLÉ EST-IL CELUI DU DÉPÔT ?
+	#
+	# « --deployer » copie rootfs/ et rien d'autre. Tout ce qui est écrit en C
+	# — la propagation du thème, par exemple — ne rejoint la machine que par
+	# une compilation. Sans ce contrôle, le dépôt et la machine divergent en
+	# silence et l'on diagnostique un bureau qui n'existe que dans git.
+	if shell_perime; then
+		ko "shell compilé" "PÉRIMÉ — le dépôt est plus récent que $SHELL_REF"
+		info "        Sources modifiées depuis :"
+		printf '              %s\n' $SHELL_RETARD
+		info "        Le dépôt et la machine ne font pas tourner le même code."
+		info "        Recompiler :  sudo bash $0 --compiler"
+	else
+		ok "shell compilé" "à jour avec $DEPOT/shell"
+	fi
 	dpkg-query -W -f='${db:Status-Status}' dbus-user-session 2>/dev/null | grep -qx installed \
 		&& ok "dbus-user-session" "présent" \
 		|| ko "dbus-user-session" "absent — le bureau s'ouvrirait vide"
@@ -411,7 +487,6 @@ verifier() {
 #  recompile le shell — plusieurs minutes qu'on ne veut pas payer pour copier
 #  quatre fichiers pendant un diagnostic.
 deployer() {
-	DEPOT="$(cd "$(dirname "$0")/.." && pwd)"
 	[ -d "$DEPOT/rootfs" ] || die "rootfs/ introuvable dans $DEPOT"
 
 	say "Déploiement de rootfs/ depuis $DEPOT"
@@ -457,6 +532,20 @@ deployer() {
 	fi
 
 	systemctl daemon-reload 2>/dev/null || true
+
+	# CE QUE CETTE ÉTAPE N'A PAS FAIT, ET QU'ELLE DOIT DIRE.
+	#
+	# Un déploiement qui se déclare satisfait alors qu'il laisse la moitié du
+	# correctif dans le dépôt est pire qu'un déploiement qui échoue : on lui
+	# fait confiance, et on cherche la panne ailleurs. C'est arrivé.
+	if shell_perime; then
+		echo
+		ko "shell compilé" "PÉRIMÉ — cette étape ne compile RIEN"
+		info "        Ces sources sont plus récentes que $SHELL_REF :"
+		printf '              %s\n' $SHELL_RETARD
+		info "        Le déploiement ci-dessus ne les a PAS emportées."
+		info "        Compléter par :  sudo bash $0 --compiler"
+	fi
 	echo
 	# LE PORTAIL NE RELIT PAS portals.conf TOUT SEUL.
 	#
@@ -471,6 +560,66 @@ deployer() {
 	echo
 	info "L'essai de l'écran de connexion peut être relancé :"
 	info "    sudo bash $0 --essai"
+}
+
+# ===========================================================================
+#  COMPILER — la moitié que --deployer ne fait pas
+# ===========================================================================
+#
+#  provision.sh compile déjà le shell, mais il installe aussi les paquets,
+#  exécute les purges et réarme le filet : plusieurs minutes et beaucoup de
+#  risque pour reconstruire sept binaires. Cette étape ne fait que cela.
+#
+#  Mêmes options que provision.sh, à dessein : --prefix=/usr, buildtype
+#  release. Deux chemins d'installation différents pour le même programme
+#  donneraient un /usr/local/bin qui masque /usr/bin, et l'on croirait tourner
+#  sur le neuf en tournant sur l'ancien — c'est déjà arrivé, voir provision.sh.
+compiler() {
+	[ -d "$DEPOT/shell" ] || die "shell/ introuvable dans $DEPOT"
+	for outil in meson ninja; do
+		command -v "$outil" >/dev/null 2>&1 \
+			|| die "$outil est absent. Les paquets de compilation ont été purgés ?
+      sudo apt-get install --no-install-recommends build-essential meson ninja-build"
+	done
+
+	say "Compilation du shell depuis $DEPOT/shell"
+	info "branche : $(git -C "$DEPOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+	info "commit  : $(git -C "$DEPOT" log --oneline -1 2>/dev/null || echo '?')"
+
+	BUILD="$DEPOT/shell/build"
+	# Reconstruction complète : un répertoire de compilation gardé d'une
+	# version à l'autre a déjà relié du code qui n'existait plus.
+	rm -rf "$BUILD"
+
+	# AUCUNE SORTIE N'EST JETÉE. Une compilation qui échoue à la moitié et
+	# qu'on n'a pas lue laisse des binaires dépareillés — la moitié neuve,
+	# l'autre d'hier — et c'est indiagnosticable de l'extérieur.
+	meson setup "$BUILD" "$DEPOT/shell" --prefix=/usr --buildtype=release \
+		|| die "meson setup a échoué (voir ci-dessus)."
+	ninja -C "$BUILD" || die "la compilation a échoué (voir ci-dessus)."
+	meson install -C "$BUILD" || die "l'installation a échoué (voir ci-dessus)."
+
+	echo
+	# ON RELIT CE QU'ON VIENT DE FAIRE. Le contrôle qui a manqué le 8
+	# septembre est aussi celui qui doit valider cette étape : s'il crie
+	# encore ici, c'est que l'installation n'a pas atterri où l'on croit.
+	if shell_perime; then
+		ko "shell compilé" "TOUJOURS périmé après installation"
+		info "        Référence : $SHELL_REF"
+		info "        Un binaire d'essai dans /usr/local/bin masque peut-être"
+		info "        celui de /usr/bin — les deux sont dans le PATH."
+	else
+		ok "shell compilé" "à jour"
+		for b in $SHELL_BINAIRES; do
+			p="$(command -v "$b" 2>/dev/null || true)"
+			[ -n "$p" ] && info "$(ls -l "$p" | awk '{print $6, $7, $8, $NF}')" || true
+		done
+	fi
+
+	echo
+	info "Le thème et les réglages ne changent qu'à la prochaine ouverture de"
+	info "session : les programmes en cours tournent encore sur l'ancien code."
+	info "Fermer la session et la rouvrir suffit — pas besoin de redémarrer."
 }
 
 # ---------------------------------------------------------------------------
@@ -815,6 +964,7 @@ revenir() {
 case "$ACTION" in
 	verifier) verifier ;;
 	deployer) deployer ;;
+	compiler) compiler ;;
 	essai)    essai ;;
 	basculer) basculer ;;
 	revenir)  revenir ;;

@@ -363,3 +363,139 @@ jeu.
 Une correction qui dépend d'un ordonnancement qu'on n'a pas vérifié n'est pas
 une correction, c'est un pari. Celui-ci a été perdu au premier redémarrage,
 et il a coûté un aller-retour de plus à quelqu'un qui n'avait pas à le payer.
+
+---
+
+# 8 septembre 2026 — le correctif qui n'était pas sur la machine
+
+## Le symptôme
+
+Le thème du bureau change ; **rien d'autre ne suit**. Les barres de titre
+restent claires en mode sombre, Chromium en mode « Device » reste clair,
+Claude Desktop en mode « Système » aussi. Seules les fenêtres du shell — les
+Réglages, les Fichiers, le dock, la Console — obéissent.
+
+La veille, toute la chaîne du portail XDG avait été écrite, éprouvée de bout
+en bout au banc d'essai, poussée dans le dépôt, tirée sur la machine et
+déployée. Le redémarrage n'a rien changé.
+
+## Ce que la machine a répondu
+
+Sept commandes, toutes en lecture seule, et la réponse tenait dans trois
+d'entre elles :
+
+```
+$ gsettings get org.gnome.desktop.interface color-scheme
+'prefer-light'
+
+$ gdbus call … org.freedesktop.portal.Settings.ReadOne \
+      org.freedesktop.appearance color-scheme
+(<uint32 2>,)
+
+$ cat ~/.local/state/claude-os/shell.log
+=== 09:24:09 : claude-os-theme ===
+claude-os-theme : « clair » appliqué (prefer-light, Adwaita)
+```
+
+**Le portail fonctionnait.** Il répondait `2`, c'est-à-dire « clair », et
+Chromium était clair : il suivait, correctement, ce que le système lui
+disait. L'erreur n'était pas là où l'on cherchait.
+
+Elle était dans la troisième ligne. **Un seul appel** à `claude-os-theme`
+dans tout le journal, celui de l'autostart, posant « clair ». Le panneau de
+réglages avait pourtant été ouvert deux fois ensuite — PID 1366 à 09:24:19,
+PID 1390 à 09:24:40, ses avertissements GTK sont dans le même fichier, donc
+sa sortie y arrivait bien. Aucune deuxième ligne. **Le panneau n'avait pas
+appelé le script.**
+
+Tout le reste en découlait : `~/.config/labwc/themerc-override`, daté 09:24,
+écrit une seule fois avec la palette claire et jamais réécrit — d'où des
+barres de titre claires ; `~/.config/gtk-3.0/settings.ini` en `Adwaita` et
+`prefer-dark-theme=0`, même cause.
+
+## La cause
+
+`propager_theme()` est du **C**, compilé dans `claude-os-reglages`.
+`--deployer` fait exactement une chose :
+
+```sh
+cp -a "$DEPOT/rootfs/." /
+```
+
+Il copie `rootfs/`. Il ne compile rien. Le shell n'est reconstruit que par
+`provision.sh`, par meson.
+
+Sur la machine : `claude-os-theme` daté du 8 septembre 09:23, `portals.conf`
+09:23, l'autostart 09:23 — et `/usr/bin/claude-os-reglages` daté **08:30**.
+Une heure plus tôt. Le binaire ne connaissait pas l'existence du script.
+
+```
+$ strings $(command -v claude-os-reglages) | grep claude-os-theme
+$ ls -l $(command -v claude-os-reglages)
+-rwxr-xr-x 1 root root 43640  8 sept. 08:30 /usr/bin/claude-os-reglages
+```
+
+Sortie vide. Diagnostic confirmé sans rien modifier.
+
+## Ce que l'incident dit vraiment
+
+L'invariant n°3 s'appelait « `git pull` ne déploie RIEN ». Il n'avait que la
+moitié de la règle. L'autre moitié est « `--deployer` ne compile RIEN », et
+elle a coûté deux séances : une à écrire un correctif qui n'est jamais
+arrivé, une à chercher la panne dans un portail qui marchait.
+
+Le vrai défaut n'est pas la ligne de C manquante. C'est qu'un outil de
+déploiement s'est déclaré satisfait en laissant la moitié du correctif dans
+le dépôt, et qu'un vérificateur a passé tous ses contrôles au vert sur une
+machine qui ne faisait pas tourner le code qu'on croyait.
+
+**Un déploiement qui ment sur ce qu'il a déployé est pire qu'un déploiement
+qui échoue : on lui fait confiance, et on cherche ailleurs.**
+
+## Le correctif
+
+`bascule-session.sh` gagne un mode et un contrôle.
+
+`--compiler` reconstruit et réinstalle le shell — et rien d'autre.
+`provision.sh` savait déjà le faire, mais il installe aussi les paquets,
+exécute les purges et réarme le filet : plusieurs minutes et beaucoup de
+risque pour sept binaires. Mêmes options que lui, à dessein — `--prefix=/usr`,
+`buildtype=release` — parce que deux chemins d'installation différents pour
+le même programme donneraient un `/usr/local/bin` qui masque `/usr/bin`, et
+l'on croirait tourner sur le neuf en tournant sur l'ancien.
+
+Le contrôle, lui, compare des **dates** : le binaire installé le plus ancien
+— c'est toujours le retardataire qu'on exécute — contre les sources de
+`shell/src`, `shell/style`, `shell/data` et `meson.build`. Les feuilles de
+style comptent autant que le C : elles sont posées par `meson install`, pas
+par une copie de `rootfs/`. `git pull` horodate à l'instant ce qu'il modifie
+et laisse le reste tranquille, donc la comparaison ne se déclenche que sur ce
+qui a vraiment changé.
+
+Il tourne dans `--verifier`, à la fin de `--deployer` — là où l'on a été
+trompé — et à la fin de `--compiler`, qui se soumet à son propre verdict :
+s'il crie encore après l'installation, c'est qu'elle n'a pas atterri où l'on
+croit.
+
+**Éprouvé dans les deux sens**, parce qu'un outil de diagnostic qui ment
+coûte plus qu'il ne rapporte :
+
+| Épreuve | Attendu | Obtenu |
+|---|---|---|
+| Binaire au 8 sept. 08:30, `settings.c` au 8 sept. 09:23 | crie, et nomme `settings.c` | ✓ |
+| Binaires postérieurs à toutes les sources | se tait | ✓ |
+| Une feuille de style retouchée après la compilation | crie, et la nomme | ✓ |
+
+Et après un `--compiler` réel, l'épreuve même qui avait servi sur la machine :
+
+```
+$ strings /usr/bin/claude-os-reglages | grep claude-os-theme
+/usr/local/bin/claude-os-theme
+```
+
+## Ce qu'il faut en retenir
+
+Le banc d'essai prouvait que le mécanisme fonctionnait. Il ne prouvait pas
+qu'il **arrivait jusqu'à la machine**, et cette question-là n'avait été posée
+par personne. Une chaîne vérifiée de bout en bout dans un conteneur reste une
+hypothèse tant qu'on n'a pas vérifié le dernier maillon : le transport.

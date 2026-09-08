@@ -25,7 +25,7 @@ xwayland 2:24.1.6, libgtk4-layer-shell0 1.0.4, dbus-user-session 1.16.2.
 |---|---|
 | **Audio** | **EN ÉCHEC.** `sof_rt5682 jsl_rt5682_def: probe with driver sof_rt5682 failed with error -22`, précédé de `ipc tx timed out` et `failed to load DSP topology`. Le DSP démarre mais la topologie ne se charge pas. C'est le risque n°1 identifié dès `docs/01`. |
 | Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le même conflit de terminal virtuel que l'invariant n°5 — à reconfirmer maintenant que greetd est sur le tty7. |
-| Thème global | **Fait, mesuré au banc d'essai, pas encore vu sur la machine.** Le portail publie 1 en sombre et 2 en clair, `SettingChanged` part à chaque bascule, et la barre de titre d'une fenêtre DÉJÀ OUVERTE change de couleur. Reste à confirmer à l'écran que Chromium et Claude Desktop suivent — l'option « suivre le thème du système » doit être active dans Chromium. |
+| Thème global | **La chaîne est vivante sur la machine** : le portail y répond `uint32 2` en clair, `gsettings` conserve la valeur, `~/.config/labwc/themerc-override` est engendré à l'ouverture. Le 8 septembre, il manquait uniquement la **recompilation** du panneau de réglages — voir l'invariant n°3. Reste à confirmer à l'écran, après `--compiler` et réouverture de session, que Chromium (option « suivre le thème du système ») et Claude Desktop suivent la bascule. |
 | Rangée supérieure du clavier | Non câblée. `tools/probe-keys.sh` relève les codes, les liaisons labwc restent à écrire. |
 | Reports | rclone (Drive, OneDrive), notifications, icônes sur le bureau. |
 | Volume dans la Console | Le curseur est en place mais **ne commande rien tant que l'audio est en panne** : sans carte son, `wpctl` ne trouve aucune sortie et la rangée se désactive d'elle-même en le disant. |
@@ -74,13 +74,39 @@ exécuté en root juste avant lui, à chaque démarrage du service :
 **Leçon générale :** une correction qui dépend d'un ordonnancement qu'on n'a
 pas vérifié n'est pas une correction, c'est un pari.
 
-### 3. `git pull` ne déploie RIEN
+### 3. `git pull` ne déploie rien, et `--deployer` ne compile rien
 
-`rootfs/` n'est recopié vers `/` que par `provision.sh` ou par
-`bascule-session.sh --deployer`. Trois séances de diagnostic ont porté sur
-des correctifs présents dans le dépôt et absents de la machine.
+Deux moitiés, et il a fallu se faire prendre par chacune.
 
-**Après tout `git pull` touchant `rootfs/`, lancer `--deployer`.**
+**`rootfs/` n'arrive sur la machine que par `provision.sh` ou
+`--deployer`.** Trois séances de diagnostic ont porté sur des correctifs
+présents dans le dépôt et absents de `/`.
+
+**`shell/` n'arrive sur la machine que par une compilation.** `--deployer`
+fait exactement `cp -a rootfs/. /` : il ne transporte pas une ligne de C, ni
+une feuille de style — celles-ci sont posées par `meson install`, pas par une
+copie. Le 8 septembre 2026, la propagation du thème écrite dans
+`shell/src/settings.c` a été poussée, tirée, déployée… et la machine a gardé
+un `claude-os-reglages` daté d'une heure plus tôt. Le bureau changeait de
+thème, rien d'autre ne suivait, `--verifier` disait que tout allait bien, et
+l'on a cherché la panne dans le portail XDG — qui, lui, fonctionnait.
+
+**La règle :**
+
+| Ce que touche le correctif | Ce qu'il faut lancer |
+|---|---|
+| `rootfs/` | `--deployer` |
+| `shell/` (C, en-têtes, `style/`, `data/`, `meson.build`) | `--compiler` |
+| les deux | les deux |
+
+`--verifier` **et** `--deployer` comparent maintenant la date des sources à
+celle du binaire installé le plus ancien, et refusent de se dire satisfaits
+quand le dépôt est en avance. `--compiler` recompile et réinstalle, puis se
+soumet au même contrôle.
+
+**Leçon générale :** un déploiement qui se déclare satisfait alors qu'il
+laisse la moitié du correctif dans le dépôt est pire qu'un déploiement qui
+échoue — on lui fait confiance, et on cherche ailleurs.
 
 ### 4. Aucune sortie de commande n'est envoyée dans `/dev/null`
 
@@ -161,6 +187,7 @@ produit la panne de septembre autant que son contenu.
 cd ~/Claude-OS && git pull
 sudo bash install/bascule-session.sh --verifier   # ne change rien
 sudo bash install/bascule-session.sh --deployer   # recopie rootfs/ vers /
+sudo bash install/bascule-session.sh --compiler   # recompile shell/ — voir n°3
 sudo bash install/bascule-session.sh --essai      # ← REGARDER L'ÉCRAN
 sudo bash install/bascule-session.sh --basculer   # arme le filet, puis bascule
 sudo systemctl reboot
