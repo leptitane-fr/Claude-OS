@@ -18,9 +18,10 @@ le lanceur. Les fenêtres portent des boutons réduire/agrandir, et le thème
 sort du shell pour atteindre Chromium, Claude Desktop, le terminal et les
 barres de titre.
 
-**Deux corrections attendent leur confirmation à l'écran** : le thème global
-(après recompilation) et la luminosité par logind. Les deux sont éprouvées au
-banc d'essai, aucune ne l'est sur MADOO.
+**Le thème global et la luminosité sont confirmés sur MADOO** : la bascule
+clair/sombre est suivie par toutes les applications sans qu'aucune soit
+relancée, et le curseur de luminosité commande l'écran immédiatement, par
+logind, sans appartenance au groupe `video` ni réouverture de session.
 
 **L'audio reste en échec**, et c'est le chantier n°1.
 
@@ -198,14 +199,12 @@ restent en filet.
 | # | Sujet | État | Prochain geste |
 |---|---|---|---|
 | 1 | **Audio** | En échec | Voir ci-dessous |
-| 2 | Thème global | Écrit, à confirmer à l'écran | `--deployer`, `--compiler`, rouvrir la session |
-| 3 | Luminosité par logind | Écrite, à confirmer à l'écran | idem |
-| 4 | Affichage au démarrage | Non diagnostiqué | Reconfirmer maintenant que greetd est sur le tty7 |
-| 5 | Rangée supérieure du clavier | Non câblée | `bash tools/probe-keys.sh`, puis les liaisons dans `rc.xml` |
-| 6 | rclone (Drive, OneDrive) | Reporté | Une section de plus dans le volet du gestionnaire de fichiers |
-| 7 | Notifications | Reporté | — |
-| 8 | Icônes sur le bureau | Reporté | Demande un septième programme — voir `docs/04` §4.4 |
-| 9 | Luminosité automatique | Non implémentée | `ls /sys/bus/iio/devices/` **avant** d'écrire quoi que ce soit |
+| 2 | Affichage au démarrage | Non diagnostiqué | Reconfirmer maintenant que greetd est sur le tty7 |
+| 3 | Rangée supérieure du clavier | Non câblée | `bash tools/probe-keys.sh`, puis les liaisons dans `rc.xml` |
+| 4 | rclone (Drive, OneDrive) | Reporté | Une section de plus dans le volet du gestionnaire de fichiers |
+| 5 | Notifications | Reporté | — |
+| 6 | Icônes sur le bureau | Reporté | Demande un septième programme — voir `docs/04` §4.4 |
+| 7 | Luminosité automatique | Non implémentée | `ls /sys/bus/iio/devices/` **avant** d'écrire quoi que ce soit |
 
 ### 1. L'audio — le chantier n°1
 
@@ -231,7 +230,7 @@ Ce qui n'a **pas** encore été tenté, et qui devrait l'être dans cet ordre :
 Tant que l'audio est en panne, la rangée de volume de la Console reste
 désactivée et le dit — c'est voulu.
 
-### 4. L'affichage au démarrage
+### 2. L'affichage au démarrage
 
 L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. C'était
 peut-être le conflit de terminal virtuel de l'invariant n°5, maintenant
@@ -244,11 +243,14 @@ corrigé. **À reconfirmer**, et à ne pas déclarer résolu sans l'avoir revu.
 Par principe, ce document distingue ce qui a été mesuré de ce qui est
 plausible. N'ont **jamais** été vérifiés sur MADOO :
 
-- l'appel `SetBrightness` au **vrai** logind — le banc d'essai n'a ni bus
-  système, ni siège, ni écran rétro-éclairé ;
-- que Chromium et Claude Desktop suivent effectivement la bascule de thème à
-  l'écran — la chaîne est prouvée jusqu'au portail, pas au-delà ;
 - la cause de l'écran noir au démarrage ;
 - la présence d'un capteur de luminosité ambiante.
 
 Une cause plausible n'est pas une cause.
+
+**Rayés de cette liste le 8 septembre 2026**, parce qu'ils ont été vus à
+l'écran et non plus seulement au banc d'essai : le suivi du thème par
+Chromium et Claude Desktop, et l'appel `SetBrightness` au vrai logind. Ce
+dernier méritait la prudence : le banc d'essai n'avait ni bus système, ni
+siège, ni écran rétro-éclairé, et seule la forme de l'appel y était prouvée.
+La machine a tranché.

@@ -18,6 +18,7 @@ comme environnement de travail principal, doté de privilèges étendus sur le s
 > qui en découlent dans [`CLAUDE.md`](CLAUDE.md) — **à lire avant toute
 > intervention**.
 >
+> Le thème et la luminosité ont été **confirmés à l'écran** le 8 septembre.
 > Restent ouverts : l'**audio**, qui échoue au chargement de la topologie DSP,
 > l'affichage qui n'apparaît qu'au premier contact du pavé tactile, et les
 > touches de la rangée supérieure à câbler.
@@ -146,11 +147,10 @@ applications épinglées sont à vous.
 Le détail, avec la marche à suivre proposée pour chaque point, est dans
 [`docs/07`](docs/07-journal-des-seances.md).
 
-**À confirmer à l'écran** — écrit et éprouvé au banc d'essai, jamais vu sur
-MADOO : le **thème global** (toutes les fenêtres suivent la bascule
-clair/sombre sans être relancées) et la **luminosité par logind** (le curseur
-commande l'écran sans rouvrir de session). Les deux demandent `--deployer`,
-`--compiler`, puis une réouverture de session.
+**Confirmé à l'écran le 8 septembre 2026** : le **thème global** — toutes les
+applications suivent la bascule clair/sombre sans être relancées — et la
+**luminosité par logind**, qui commande l'écran sans appartenance au groupe
+`video` ni réouverture de session.
 
 **Chantiers ouverts :**
 

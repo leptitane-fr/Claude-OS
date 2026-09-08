@@ -25,22 +25,15 @@ Le fil chronologique complet — ce qui a été fait, dans quel ordre, et ce qui
 été mesuré — est dans
 [`docs/07`](docs/07-journal-des-seances.md).
 
-### En attente de confirmation à l'écran
+### Confirmé à l'écran le 8 septembre 2026
 
-Deux corrections sont écrites et éprouvées au banc d'essai, **aucune n'a été
-vue sur MADOO**. Le geste est le même pour les deux :
+Deux corrections écrites ce jour-là ont été **vues fonctionner sur MADOO**,
+pas seulement au banc d'essai :
 
-```sh
-cd ~/Claude-OS && git pull
-sudo bash install/bascule-session.sh --deployer
-sudo bash install/bascule-session.sh --compiler
-# puis fermer et rouvrir la session
-```
-
-| À confirmer | Ce qu'on doit voir |
+| Confirmé | Ce qui a été constaté |
 |---|---|
-| **Thème global** | Basculer clair/sombre dans les Réglages : Chromium (option « suivre le thème du système »), Claude Desktop, le terminal et les barres de titre suivent **sans être relancés** |
-| **Luminosité** | Le curseur de la Console commande l'écran **immédiatement**, sans rouvrir de session |
+| **Thème global** | La bascule clair/sombre des Réglages est suivie par **toutes** les applications — Chromium, Claude Desktop, le terminal, les barres de titre — sans qu'aucune soit relancée. |
+| **Luminosité** | Le curseur de la Console commande l'écran immédiatement, par logind, sans appartenance au groupe `video` ni réouverture de session. |
 
 ### Ce qui reste ouvert
 
