@@ -26,3 +26,22 @@ QT_QPA_PLATFORM=wayland
 # soit pris en compte.
 ELECTRON_OZONE_PLATFORM_HINT=wayland
 MOZ_ENABLE_WAYLAND=1
+
+# Accessibilité : aucun bus a11y sur cette machine.
+#
+# at-spi2 n'est pas installé, et « org.a11y.Bus » n'est fourni par aucun
+# fichier .service. Chaque composant GTK4 tente malgré tout de le joindre au
+# démarrage, échoue, et verse cinq lignes d'avertissement dans shell.log —
+# quatre fois par ouverture de session, mesuré le 8 septembre 2026.
+#
+# Le coût en temps est marginal ; ce qui compte est le bruit. L'invariant n°4
+# dit qu'aucune sortie n'est jetée : un journal utile est un journal où une
+# vraie erreur se voit. Ces avertissements-là noient tout le reste.
+#
+# GTK documente cette valeur exactement pour ce cas — le message d'erreur la
+# nomme lui-même : « If you are attempting to run GTK without a11y support,
+# GTK_A11Y should be set to 'none' ».
+#
+# À REVOIR le jour où l'accessibilité est mise au programme : cette ligne la
+# désactive pour toute la session, y compris pour les applications tierces.
+GTK_A11Y=none

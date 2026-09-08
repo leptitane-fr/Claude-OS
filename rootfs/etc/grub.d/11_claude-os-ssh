@@ -1,0 +1,47 @@
+#!/bin/sh
+set -e
+
+# Claude OS — entrée de démarrage « dépannage réseau ».
+#
+# Le serveur SSH est désactivé au démarrage normal (systemctl disable
+# ssh.service). Cette entrée démarre le même système, à l'identique, en
+# ajoutant le seul paramètre « systemd.wants=ssh.service ».
+#
+# Ce paramètre est interprété par systemd-debug-generator(8) : il ajoute une
+# dépendance Wants= à default.target dans /run, c'est-à-dire en mémoire. Rien
+# n'est écrit sur le disque, et le démarrage suivant repart sans SSH sans
+# qu'il y ait quoi que ce soit à défaire.
+#
+# Le noyau et l'initrd sont résolus ici, au moment où update-grub s'exécute,
+# à partir des symlinks /vmlinuz et /initrd.img que Debian met à jour à chaque
+# installation de noyau. update-grub étant lancé automatiquement à ce
+# moment-là, l'entrée suit les mises à jour sans intervention — et GRUB reçoit
+# un chemin réel, sans avoir à suivre un lien symbolique.
+#
+# La ligne de commande est reprise de /etc/default/grub et de
+# /etc/default/grub.d/*.cfg, que grub-mkconfig a déjà lus et exportés : les
+# réglages d'énergie restent donc identiques entre les deux entrées.
+
+# En cas d'anomalie, on n'émet rien : le menu garde ses entrées normales.
+ROOT_UUID=$(findmnt -no UUID / 2>/dev/null) || exit 0
+[ -n "$ROOT_UUID" ] || exit 0
+
+KERNEL=$(readlink -f /vmlinuz 2>/dev/null) || exit 0
+INITRD=$(readlink -f /initrd.img 2>/dev/null) || exit 0
+[ -r "$KERNEL" ] && [ -r "$INITRD" ] || exit 0
+
+echo "Entrée de dépannage SSH (${KERNEL##*/})" >&2
+
+cat <<FIN_ENTREE
+menuentry 'Claude OS — dépannage réseau (SSH activé)' --class debian --class gnu-linux --class gnu --class os --id 'claude-os-ssh' {
+	load_video
+	insmod gzio
+	insmod part_gpt
+	insmod ext2
+	search --no-floppy --fs-uuid --set=root ${ROOT_UUID}
+	echo	'Démarrage avec le serveur SSH activé...'
+	linux	${KERNEL} root=UUID=${ROOT_UUID} ro ${GRUB_CMDLINE_LINUX} ${GRUB_CMDLINE_LINUX_DEFAULT} systemd.wants=ssh.service
+	echo	'Chargement du disque mémoire initial...'
+	initrd	${INITRD}
+}
+FIN_ENTREE

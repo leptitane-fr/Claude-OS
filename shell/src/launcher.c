@@ -34,6 +34,16 @@
  * demarre par personne au demarrage de la session : le premier appui sur le
  * bouton du dock le lance, les suivants sont instantanes. Rien n'est paye
  * tant que le lanceur n'a pas servi.
+ *
+ * Le demarrage a froid a ete mesure sur MADOO le 8 septembre 2026 : 654,
+ * 707 et 729 ms jusqu'au contexte GPU. C'est ce chiffre qui justifie la
+ * residence -- quitter a la fermeture rendrait 44 Mo, mais mettrait sept
+ * dixiemes de seconde entre le clic et la grille. Trop cher pour un
+ * lanceur, dont tout l'interet est l'immediatete.
+ *
+ * En revanche, rester vivant n'oblige pas a rester gros : fermer() rend
+ * l'arbre de widgets, qui est refabrique a chaque ouverture de toute
+ * facon.
  * ========================================================================= */
 
 #include <gtk/gtk.h>
@@ -41,6 +51,7 @@
 #include <gio/gdesktopappinfo.h>
 
 #include <string.h>            /* strlen */
+#include <malloc.h>            /* malloc_trim */
 
 #include "config.h"
 
@@ -273,6 +284,28 @@ static void
 fermer (void)
 {
     gtk_widget_set_visible (L.fenetre, FALSE);
+
+    /* Rendre l'arbre de widgets, et pas seulement le masquer.
+     *
+     * ouvrir() appelle inventaire_relire() PUIS construire_contenu() : la
+     * liste est integralement refabriquee a chaque ouverture. Ce qu'on
+     * garderait ici pendant que la fenetre est masquee ne ferait donc gagner
+     * aucune milliseconde a la reouverture -- c'est de la memoire retenue
+     * pour rien, sur une machine qui n'a que 4 Go soudes et qui swappe deja.
+     *
+     * On ne touche PAS a L.apps. L'inventaire ne pese que des chaines et des
+     * references GAppInfo ; le liberer avant que GTK n'ait fini de defaire
+     * les widgets qui le referencent demanderait de raisonner sur l'ordre de
+     * finalisation, pour un gain marginal. Le poids est dans les widgets et
+     * leurs icones, pas dans le tableau.
+     *
+     * malloc_trim() n'est pas decoratif : free() seul ne rend rien au noyau,
+     * la glibc garde les pages dans le tas du processus en prevision de la
+     * prochaine allocation. C'est ce qui separe « libere » de « rendu », et
+     * seul le second se voit dans la memoire privee du processus.
+     */
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (L.defilement), NULL);
+    malloc_trim (0);
 }
 
 static void

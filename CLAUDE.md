@@ -16,7 +16,21 @@ pour atteindre Chromium, Claude Desktop, le terminal et les barres de titre.
 
 La machine est un **HP Chromebook x360 14b-cb0000sf**, board `MADOO`,
 Pentium Silver N6000, **4 Go de RAM soudée**. Compte utilisateur : `stef`.
-Accès SSH actif — c'est le filet de secours de toute intervention.
+
+**SSH n'est plus lancé au démarrage** (8 septembre 2026). Il écoutait sur
+`0.0.0.0:22` en permanence pour un usage occasionnel. Le filet de secours est
+désormais une **entrée du menu de démarrage** — « Claude OS — dépannage réseau
+(SSH activé) » — qui ajoute `systemd.wants=ssh.service` à la ligne de commande
+noyau. C'est un effet en mémoire, dans `/run` : le démarrage suivant repart
+sans SSH, sans rien à défaire. Générateur : `/etc/grub.d/11_claude-os-ssh`,
+source dans `rootfs/`.
+
+**`--deployer` ne suffit pas pour ce fichier** : il copie `rootfs/` vers `/`,
+il ne régénère pas le menu. Après tout déploiement qui touche
+`etc/grub.d/` ou `etc/default/grub.d/`, il faut `sudo update-grub` — sans
+quoi le menu reste celui d'avant, en silence. **Cette entrée n'a pas encore été démarrée pour de
+vrai** — la valider une fois pendant que le bureau fonctionne, pas le jour où
+il faudra s'en servir.
 
 Versions constatées sur la machine : labwc 0.8.3, greetd 0.10.3,
 xwayland 2:24.1.6, libgtk4-layer-shell0 1.0.4, dbus-user-session 1.16.2.
@@ -99,7 +113,7 @@ barre de 34 px au-dessus des onglets.
 |---|---|
 | **Audio** | **Réparé le 8 septembre 2026**, cette ligne ne décrit plus la machine. Le `probe failed with error -22` a disparu des journaux, PipeWire énumère cinq sorties dont « Jasper Lake HD Audio » par défaut, et les touches de volume la commandent — confirmé à l'oreille. L'historique de la panne reste dans `docs/07`. |
 | Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le conflit de terminal virtuel de l'invariant n°5 — **à reconfirmer** maintenant que greetd est sur le tty7, et à ne pas déclarer résolu sans l'avoir revu. |
-| Luminosité automatique | Non implémentée : elle suppose un capteur de luminosité ambiante dont la présence sur MADOO n'a pas été constatée. À vérifier avec `ls /sys/bus/iio/devices/` avant d'écrire quoi que ce soit. |
+| Luminosité automatique | **Impossible par capteur — mesuré le 8 septembre 2026.** `/sys/bus/iio/devices/` expose `cros-ec-accel` ×2, `cros-ec-gyro` et `cros-ec-lid-angle`. Aucun capteur de luminosité ambiante sur MADOO. La question est close. **Ce qui reste ouvert, et vaut bien davantage :** l'asservissement à l'**inactivité** — baisser le rétroéclairage après quelques minutes sans interaction. Le rétroéclairage est le premier poste de consommation de la machine (~1 à 2 W sur 6,8 W) ; c'est le plus gros levier d'autonomie qui reste, et il est logiciel. Mécanisme pressenti : `ext-idle-notify-v1`, **présence à confirmer sur labwc 0.8.3**. |
 | Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
 
 ---
@@ -173,6 +187,15 @@ l'on a cherché la panne dans le portail XDG — qui, lui, fonctionnait.
 celle du binaire installé le plus ancien, et refusent de se dire satisfaits
 quand le dépôt est en avance. `--compiler` recompile et réinstalle, puis se
 soumet au même contrôle.
+
+**Faux positif connu : un `git rebase` déclenche « PÉRIMÉ » à tort.** Un
+rebase réécrit les fichiers du répertoire de travail, donc leur date, sans
+changer une ligne de leur contenu. Le 8 septembre 2026, un rebase à 17:47 a
+fait déclarer périmés six fichiers compilés à 17:12 — le code installé était
+pourtant le bon. Avant de conclure, comparer le `git reflog` aux dates : si
+un rebase tombe entre la compilation et le contrôle, l'alerte ne dit rien.
+Recompiler reste sans danger, mais ne cherchez pas une régression qui
+n'existe pas.
 
 **Leçon générale :** un déploiement qui se déclare satisfait alors qu'il
 laisse la moitié du correctif dans le dépôt est pire qu'un déploiement qui
