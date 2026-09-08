@@ -186,15 +186,14 @@ border.width:                       1
 window.active.border.color:         $SURFACE_SUNK
 window.inactive.border.color:       $SURFACE_ALT
 
-window.active.button.unpressed.image.color:       $TEXTE
-window.inactive.button.unpressed.image.color:     $TEXTE_DIM
-window.active.button.close.unpressed.image.color: $DANGER
-
-titlebar.height:                    30
-window.button.width:                24
-window.button.height:               24
-window.button.spacing:              4
-window.titlebar.padding.width:      8
+# NI COULEURS DE BOUTONS, NI PROPORTIONS ICI.
+#
+# Les boutons sont désormais des SVG livrés par le thème Claude-OS, qui
+# portent leurs propres couleurs : « button.*.image.color » ne s'applique
+# qu'aux masques XBM et n'aurait plus aucun effet. Quant aux proportions,
+# elles appartiennent au thème et ne dépendent pas du clair ou du sombre —
+# les répéter ici les aurait figées à la valeur d'hier au premier ajustement
+# du thème, sans que rien ne le signale.
 
 menu.items.bg.color:                $SURFACE_ALT
 menu.items.text.color:              $TEXTE

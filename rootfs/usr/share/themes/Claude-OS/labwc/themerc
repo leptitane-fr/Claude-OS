@@ -1,0 +1,84 @@
+# Claude OS — thème de barre de titre pour labwc.
+#
+# POURQUOI UN THÈME, ET PLUS SEULEMENT UN themerc-override
+#
+# L'habillage précédent ne changeait que des couleurs. Les boutons restaient
+# ceux de labwc : des masques XBM 1 bit, fins, monochromes et visiblement
+# crénelés — la croix de fermeture l'était particulièrement à l'écran.
+#
+# Or les images de boutons ne se surchargent pas : labwc les cherche dans le
+# RÉPERTOIRE DU THÈME, à côté de ce fichier. Il fallait donc un thème à nous,
+# désigné par <theme><name>Claude-OS</name></theme> dans rc.xml.
+#
+# Le themerc-override continue d'exister et prime toujours : c'est lui que
+# claude-os-theme réécrit à chaque bascule clair/sombre. Ce fichier-ci porte
+# ce qui NE dépend pas du thème — les proportions et les boutons.
+#
+# CE QUE PORTENT LES TROIS BOUTONS
+#
+# Des pastilles colorées à coins arrondis, pas des disques. Le disque aurait
+# été un emprunt direct à macOS ; le rectangle arrondi est le vocabulaire de
+# tout le reste du bureau — 14 px de rayon sur les icônes du dock, 16 sur les
+# pastilles de la Console, 20 sur ses panneaux. Les boutons de fenêtre
+# entrent dans la même famille au lieu d'y faire exception.
+#
+# Le glyphe est CREUSÉ dans la pastille et visible en permanence. macOS ne le
+# montre qu'au survol : c'est élégant à la souris, et illisible au doigt sur
+# un écran tactile, où il n'y a pas de survol du tout.
+#
+# Les couleurs :
+#   réduire   ambre    #e8b13a
+#   agrandir  vert     #4fb477
+#   fermer    corail   #e0705a — celui de la charte Claude, déjà retenu par
+#                                l'habillage précédent pour ce même bouton
+#
+# Fenêtre au second plan : les trois pastilles passent au gris. Une fenêtre
+# qui n'a pas le focus n'a pas à réclamer l'attention avec trois taches de
+# couleur. Au survol, la couleur revient — il faut savoir ce qu'on s'apprête
+# à cliquer, focus ou pas.
+#
+# LES PROPORTIONS, ET LE TACTILE
+#
+# 34 px de barre (28 de bouton + 2x3 de rembourrage), pastille de 20 px. La zone cliquable fait
+# donc 28 px là où elle en faisait 24, ce qui reste sous le seuil du « gros
+# bouton » tout en devenant visable au doigt. La pastille, elle, ne grandit
+# pas d'autant : c'est la cible qui s'élargit, pas le décor.
+#
+# NE PAS INVENTER DE NOM DE PROPRIÉTÉ. labwc ignore silencieusement ce qu'il
+# ne connaît pas — on croit alors avoir thémé ce qui ne l'est pas. Les noms
+# ci-dessous ont été relevés dans le binaire installé.
+
+# --- Proportions ----------------------------------------------------------
+window.button.width:                28
+window.button.height:               28
+window.button.spacing:              4
+window.titlebar.padding.width:      8
+# 3 px au-dessus et au-dessous des boutons de 28 px : la barre fait donc
+# 34 px. « titlebar.height » ne sert plus — labwc 0.8.3 le refuse
+# explicitement (« titlebar.height is no longer supported », relevé dans son
+# journal), la hauteur se déduit du contenu et de ce rembourrage.
+window.titlebar.padding.height:     3
+
+# Le fond de survol suit le rayon des pastilles, pour que le halo épouse la
+# forme du bouton au lieu de dessiner un carré derrière un rectangle arrondi.
+window.button.hover.bg.corner-radius: 9
+
+# --- Couleurs de repli ----------------------------------------------------
+# claude-os-theme réécrit tout ceci dans ~/.config/labwc/themerc-override à
+# chaque changement de thème. Les valeurs ici sont celles de claude-sombre,
+# le thème par défaut : elles évitent une barre de titre blanche pendant la
+# seconde qui précède le premier passage du script.
+window.active.title.bg.color:       #2a2a27
+window.inactive.title.bg.color:     #1f1f1d
+window.active.label.text.color:     #faf9f5
+window.inactive.label.text.color:   #b0aea5
+window.label.text.justify:          center
+
+border.width:                       1
+window.active.border.color:         #3d3d3a
+window.inactive.border.color:       #2a2a27
+
+# Les boutons sont des SVG qui portent leurs propres couleurs : les
+# propriétés « button.*.image.color » ne s'appliquent qu'aux masques XBM et
+# n'ont plus d'effet ici. Elles ne sont donc pas reprises — en laisser une
+# donnerait à croire qu'elle commande quelque chose.

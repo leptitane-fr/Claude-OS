@@ -63,6 +63,36 @@ Trois pièges payés, tous documentés dans le code :
   fenêtre de détection de format de gdk-pixbuf : « Format d'image non
   reconnu » sur un fichier parfaitement valide.
 
+### Les barres de titre
+
+Uniformisées le 8 septembre 2026. Presque toutes les fenêtres portaient déjà
+la barre de labwc — nos applications GTK4 (elles n'ont pas de `GtkHeaderBar`,
+GTK ne dessine donc rien et le compositeur décore), Claude Desktop, les
+dialogues GTK. Seuls les **boutons** restaient ceux de labwc : des masques XBM
+1 bit, fins, monochromes et visiblement crénelés.
+
+Les images de boutons **ne se surchargent pas** : labwc les cherche dans le
+répertoire du thème. `themerc-override` ne pouvait donc rien y faire. D'où un
+thème à nous, `rootfs/usr/share/themes/Claude-OS/labwc/`, désigné par
+`<theme><name>` dans `rc.xml`. Le `themerc-override` continue de primer pour
+les couleurs, que `claude-os-theme` réécrit à chaque bascule clair/sombre.
+
+Deux limites mesurées :
+
+- **`titlebar.height` n'existe plus** en labwc 0.8.3 : il répond
+  « no longer supported » dans le journal. La hauteur se règle par
+  `window.titlebar.padding.height`.
+- **`labwc --reconfigure` ne recharge pas les images de boutons.** Les
+  couleurs suivent, les pastilles non : elles n'apparaissent qu'à la
+  **prochaine ouverture de session**. Ne pas conclure que le thème est cassé.
+
+**Chromium** dessinait son propre cadre — onglets dans la barre de titre, un
+seul `×`, ni réduire ni agrandir. `browser.custom_chrome_frame` est passé à
+`false` dans son profil pour qu'il prenne la barre du système. C'est un
+réglage de goût, réversible d'un clic droit sur la bande d'onglets
+(« Utiliser la barre de titre et les bordures du système »), au prix d'une
+barre de 34 px au-dessus des onglets.
+
 ### Ce qui reste ouvert
 
 | Sujet | État |

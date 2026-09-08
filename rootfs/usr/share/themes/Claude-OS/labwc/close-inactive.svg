@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28">
+  <!-- Claude OS — bouton de barre de titre. Le dessin et ses raisons sont dans le themerc du meme repertoire. Le commentaire est A L'INTERIEUR de la balise svg : place avant, il repousserait celle-ci hors de la fenetre ou le format se reconnait. -->
+  <rect x="4" y="4" width="20" height="20" rx="7" fill="#55554f"/>
+  <path d="M10.3 10.3l7.4 7.4M17.7 10.3l-7.4 7.4" stroke="#1c1c1a" stroke-width="1.9" stroke-linecap="round" fill="none"/>
+</svg>

@@ -45,22 +45,6 @@ border.width:                       1
 window.active.border.color:         #3d3d3a
 window.inactive.border.color:       #2a2a27
 
-# --- Boutons --------------------------------------------------------------
-window.active.button.unpressed.image.color:     #faf9f5
-window.inactive.button.unpressed.image.color:   #b0aea5
-# Fermer se distingue des deux autres : c'est le seul dont l'effet ne se
-# rattrape pas d'un clic.
-window.active.button.close.unpressed.image.color: #e0705a
-
-# --- Proportions ----------------------------------------------------------
-# 30 px : assez pour viser au doigt sur un écran tactile, assez peu pour ne
-# pas manger la hauteur utile d'un 14 pouces en 768 px.
-titlebar.height:                    30
-window.button.width:                24
-window.button.height:               24
-window.button.spacing:              4
-window.titlebar.padding.width:      8
-
 # --- Menu du clic droit ---------------------------------------------------
 menu.items.bg.color:                #2a2a27
 menu.items.text.color:              #faf9f5

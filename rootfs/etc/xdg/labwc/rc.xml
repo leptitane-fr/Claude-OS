@@ -23,6 +23,14 @@
   </core>
 
   <theme>
+    <!-- NOTRE THÈME, ET PAS SEULEMENT DES COULEURS.
+         Les images de boutons ne se surchargent pas : labwc les cherche dans
+         le répertoire du thème. Sans <name>, on héritait des masques XBM par
+         défaut — fins, monochromes et crénelés. Le thème est déployé par
+         rootfs/ dans /usr/share/themes/Claude-OS/labwc/.
+         Le themerc-override de ~/.config/labwc continue de primer : c'est lui
+         que claude-os-theme réécrit à chaque bascule clair/sombre. -->
+    <name>Claude-OS</name>
     <!-- Pas d'ombre portée du compositeur : les surfaces du shell portent
          déjà la leur, en CSS, calculée une seule fois. -->
     <dropShadows>no</dropShadows>
