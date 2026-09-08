@@ -58,7 +58,20 @@ courant. L'écran de connexion tourne sous `_greetd` : si c'est lui qui crée
 le répertoire, la **session de l'utilisateur** ne peut plus s'en servir et
 meurt en une seconde, en boucle — l'écran de connexion, lui, reste parfait.
 
-La règle est dans `rootfs/etc/tmpfiles.d/claude-os-x11.conf`.
+**Et wlroots CRÉE le répertoire s'il ne le trouve pas**, au nom du compte qui
+tourne à ce moment-là. La règle `tmpfiles` seule ne suffit donc pas : elle
+s'exécute une fois, tôt, et rien ne garantit qu'elle passe avant le premier
+Xwayland. Au premier redémarrage après sa mise en place, le greeter a gagné la
+course et la panne est revenue à l'identique.
+
+Ce qui garantit vraiment le répertoire est un `ExecStartPre` sur greetd —
+exécuté en root juste avant lui, à chaque démarrage du service :
+
+- `rootfs/etc/systemd/system/greetd.service.d/10-claude-os-x11-unix.conf`
+- `rootfs/etc/tmpfiles.d/claude-os-x11.conf` (couvre les démarrages sans greetd)
+
+**Leçon générale :** une correction qui dépend d'un ordonnancement qu'on n'a
+pas vérifié n'est pas une correction, c'est un pari.
 
 ### 3. `git pull` ne déploie RIEN
 

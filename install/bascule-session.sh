@@ -255,7 +255,17 @@ verifier() {
 	fi
 	[ -e /etc/tmpfiles.d/claude-os-x11.conf ] \
 		&& ok "règle tmpfiles" "/etc/tmpfiles.d/claude-os-x11.conf" \
-		|| ko "règle tmpfiles" "absente — le problème reviendra au prochain démarrage"
+		|| ko "règle tmpfiles" "absente"
+	# LA GARANTIE QUI COMPTE VRAIMENT.
+	#
+	# tmpfiles ne s'exécute qu'une fois, tôt, et rien n'assure qu'il passe
+	# avant le premier Xwayland. Le ExecStartPre de greetd, lui, tourne en
+	# root juste avant greetd, à chaque démarrage du service. Sans lui, le
+	# greeter peut créer /tmp/.X11-unix à son nom et condamner la session.
+	D=/etc/systemd/system/greetd.service.d/10-claude-os-x11-unix.conf
+	[ -e "$D" ] \
+		&& ok "greetd : ExecStartPre X11-unix" "$D" \
+		|| ko "greetd : ExecStartPre X11-unix" "ABSENT — la session peut mourir au prochain démarrage"
 
 	say "Le compte à ouvrir"
 	if [ -r /etc/claude-os/utilisateur ]; then

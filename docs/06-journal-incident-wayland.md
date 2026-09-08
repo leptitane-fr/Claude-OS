@@ -314,3 +314,52 @@ exactement le conflit qu'il devait isoler. Il tourne maintenant sur le vt 8.
 entier ; l'affectation avortait, et `set -e` arrêtait le diagnostic au
 milieu, sans un mot. Un contrôle qui tue l'outil qui le porte ne contrôle
 rien. Trouvé en l'essayant, pas en le relisant.
+
+---
+
+# `/tmp/.X11-unix`, deuxième acte
+
+Date : 2026-09-08. La panne de la cause n°2 est revenue **au premier
+redémarrage** suivant son correctif, à l'identique :
+
+```
+[ERROR] xwayland/sockets.c: /tmp/.X11-unix not owned by root or us
+=== labwc s'est arrêté — code de retour 1 ===
+```
+
+## Pourquoi la règle tmpfiles ne suffisait pas
+
+Le point manqué la première fois : **wlroots CRÉE le répertoire s'il ne le
+trouve pas**, au nom du compte qui tourne à ce moment-là.
+
+La règle `tmpfiles` s'exécute une fois, tôt au démarrage. Rien ne garantit
+qu'elle passe avant le premier Xwayland — et c'est celui du greeter, sous
+`_greetd`. Au redémarrage du 8 septembre, le greeter a gagné la course, créé
+le répertoire à son nom, et la session de l'utilisateur n'a plus pu s'en
+servir.
+
+`--verifier` l'avait pourtant montré correct la veille : parce que
+`--deployer` venait de le corriger **à la main**, dans la même minute. Le
+contrôle disait vrai sur l'instant et taisait la fragilité.
+
+## Le correctif, cette fois sans course à gagner
+
+```ini
+# /etc/systemd/system/greetd.service.d/10-claude-os-x11-unix.conf
+[Service]
+ExecStartPre=/usr/bin/install -d -m 1777 -o root -g root /tmp/.X11-unix
+```
+
+`ExecStartPre` s'exécute en root immédiatement avant greetd, à chaque
+démarrage du service et à chaque redémarrage automatique. `install -d` fait
+les trois gestes d'un coup et **reprend un répertoire existant mal possédé** —
+vérifié dans les deux cas, absent et mal possédé.
+
+La règle `tmpfiles` reste : elle couvre les démarrages où greetd n'est pas en
+jeu.
+
+## Ce qu'il faut en retenir
+
+Une correction qui dépend d'un ordonnancement qu'on n'a pas vérifié n'est pas
+une correction, c'est un pari. Celui-ci a été perdu au premier redémarrage,
+et il a coûté un aller-retour de plus à quelqu'un qui n'avait pas à le payer.
