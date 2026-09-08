@@ -29,6 +29,7 @@ xwayland 2:24.1.6, libgtk4-layer-shell0 1.0.4, dbus-user-session 1.16.2.
 | Reports | rclone (Drive, OneDrive), notifications, icônes sur le bureau. |
 | Volume dans la Console | Le curseur est en place mais **ne commande rien tant que l'audio est en panne** : sans carte son, `wpctl` ne trouve aucune sortie et la rangée se désactive d'elle-même en le disant. |
 | Luminosité dans la Console | Exige que le compte soit dans le groupe `video` — `provision.sh` l'y ajoute, mais **l'appartenance ne prend effet qu'à la session suivante**. D'ici là le curseur se désactive et l'explique. |
+| Barres de titre et thème clair | `rootfs/etc/xdg/labwc/themerc-override` habille les décorations serveur aux couleurs de `theme-claude-sombre`. Le fichier est **statique** : passer le bureau en thème clair laissera les barres de titre sombres, jusqu'à ce qu'il soit engendré depuis le thème courant. |
 | Luminosité automatique | Non implémentée : elle suppose un capteur de luminosité ambiante dont la présence sur MADOO n'a pas été constatée. À vérifier avec `ls /sys/bus/iio/devices/` avant d'écrire quoi que ce soit. |
 
 ---

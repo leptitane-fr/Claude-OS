@@ -1,0 +1,71 @@
+# Claude OS — habillage des barres de titre dessinées par labwc.
+#
+# POURQUOI CE FICHIER EXISTE
+#
+# rc.xml demande « decoration server » : labwc pose lui-même une barre de
+# titre aux fenêtres qui n'en dessinent pas — c'est ce qui rend les boutons
+# réduire et agrandir à Chromium et à Claude Desktop.
+#
+# Mais labwc les dessine alors avec SON thème par défaut, qui est clair. On
+# obtenait des barres blanches sur un bureau sombre : les boutons étaient
+# revenus, et l'ensemble ne se tenait plus. Constaté à l'écran le 8 septembre.
+#
+# Les couleurs ci-dessous sont celles de style/theme-claude-sombre.css, à
+# l'identique. Les noms de propriétés ont été relevés dans src/theme.c de
+# labwc 0.8.4 : en inventer un ne provoque aucune erreur, il est simplement
+# ignoré, et l'on croit avoir thémé ce qui ne l'est pas.
+#
+# LIMITE CONNUE, ET ASSUMÉE POUR L'INSTANT
+#
+# Ce fichier est statique. Le shell, lui, change de thème à chaud par
+# shell.conf. Passer le bureau en thème clair laissera donc les barres de
+# titre sombres jusqu'à ce que ce fichier soit engendré depuis le thème
+# courant — voir « ce qui reste ouvert » dans CLAUDE.md.
+
+# --- Barre de titre -------------------------------------------------------
+# Active : la surface surélevée du shell, celle des pastilles de la Console.
+# Inactive : le fond, pour que la fenêtre au premier plan se distingue sans
+# qu'on ait à lire le titre.
+window.active.title.bg.color:       #2a2a27
+window.inactive.title.bg.color:     #1f1f1d
+window.active.label.text.color:     #faf9f5
+window.inactive.label.text.color:   #b0aea5
+window.label.text.justify:          center
+
+# --- Bordures -------------------------------------------------------------
+# Un pixel, comme les séparateurs du shell. Au-delà, la bordure devient un
+# élément de décor et non plus une limite.
+border.width:                       1
+window.active.border.color:         #3d3d3a
+window.inactive.border.color:       #2a2a27
+
+# --- Boutons --------------------------------------------------------------
+window.active.button.unpressed.image.color:     #faf9f5
+window.inactive.button.unpressed.image.color:   #b0aea5
+# Fermer se distingue des deux autres : c'est le seul dont l'effet ne se
+# rattrape pas d'un clic.
+window.active.button.close.unpressed.image.color: #e0705a
+
+# --- Proportions ----------------------------------------------------------
+# 30 px : assez pour viser au doigt sur un écran tactile, assez peu pour ne
+# pas manger la hauteur utile d'un 14 pouces en 768 px.
+titlebar.height:                    30
+window.button.width:                24
+window.button.height:               24
+window.button.spacing:              4
+window.titlebar.padding.width:      8
+
+# --- Menu du clic droit ---------------------------------------------------
+menu.items.bg.color:                #2a2a27
+menu.items.text.color:              #faf9f5
+menu.items.active.bg.color:         #d97757
+menu.items.active.text.color:       #ffffff
+menu.border.color:                  #3d3d3a
+menu.border.width:                  1
+menu.separator.color:               #3d3d3a
+
+# --- Bandeau Alt-Tab ------------------------------------------------------
+osd.bg.color:                       #1f1f1d
+osd.label.text.color:               #faf9f5
+osd.border.color:                   #3d3d3a
+osd.border.width:                   1
