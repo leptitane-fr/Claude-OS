@@ -512,8 +512,27 @@ run "cat > /etc/greetd/config.toml <<'EOF'
 # mot de passe accepté, greetd remplace le tout par la session.
 
 [terminal]
-# Le premier terminal virtuel, celui qu'on voit au démarrage.
-vt = 1
+# LE TERMINAL VIRTUEL 7, ET SÛREMENT PAS LE 1.
+#
+# L'unité systemd livrée par le paquet greetd porte :
+#
+#     After=getty@tty7.service
+#     Conflicts=getty@tty7.service
+#
+# Elle écarte donc le getty du tty7, et de LUI SEUL. Configurer greetd sur le
+# tty1 revenait à occuper un terminal que le paquet ne protège pas : systemd
+# y démarrait un getty par getty.target, et les deux se disputaient l'écran.
+#
+# Le perdant n'affiche rien, et labwc échoue sur « Atomic commit failed:
+# Périphérique ou ressource occupé ». D'où l'intermittence observée les 7 et
+# 8 septembre 2026 : un soir labwc gagnait la course et le bureau s'ouvrait,
+# le lendemain le getty gagnait et l'on tombait sur une invite texte.
+#
+# Deux bénéfices à respecter l'intention du paquet plutôt qu'à la contourner
+# par un drop-in : le getty du tty1 RESTE disponible, ce qui donne une console
+# de secours permanente sur une machine dépourvue de touches F, et l'on ne
+# dépend d'aucune surcharge locale qu'une mise à jour pourrait ignorer.
+vt = 7
 
 [default_session]
 command = \"labwc -C /etc/xdg/labwc-greeter\"

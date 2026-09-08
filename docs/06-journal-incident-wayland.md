@@ -242,3 +242,75 @@ premier faisait tout d'un bloc, et c'est cette forme autant que sa liste de
 paquets qui a produit la panne. Le second réinstallait une pile X11 que
 l'architecture rejette, sans remettre le compositeur. `bascule-session.sh`
 les remplace en séparant ce qui est réversible de ce qui ne l'est pas.
+
+---
+
+# Le terminal virtuel partagé
+
+Date : 2026-09-08. **Résolu.**
+
+Symptôme : la machine démarre sur une invite texte au lieu de l'écran de
+connexion — mais pas toujours. Le 7 au soir le bureau s'ouvrait et a servi
+une heure quarante ; le 8 au matin, invite texte.
+
+## La cause
+
+L'unité `greetd.service` livrée par Debian porte :
+
+```
+After=getty@tty7.service
+Conflicts=getty@tty7.service
+```
+
+Elle écarte le getty **du tty7, et de lui seul**. Or `/etc/greetd/config.toml`
+disait `vt = 1`. greetd occupait donc un terminal que rien ne protégeait, et
+`getty.target` y démarrait un getty comme sur n'importe quelle machine.
+
+Deux programmes pour un terminal. Le perdant n'affiche rien, et labwc échoue :
+
+```
+[ERROR] backend/drm/atomic.c: connector eDP-1: Atomic commit failed: busy
+```
+
+C'est cette erreur qui a emporté la session du 7 au soir, à 20 h 53, après
+une heure quarante d'usage normal. **L'intermittence était le symptôme le
+plus parlant** : une course entre deux programmes n'a pas toujours le même
+gagnant.
+
+## Ce qui l'a démontré
+
+`bascule-session.sh --essai`, lancé sur un terminal virtuel **sans getty** :
+
+```
+✓ le compositeur tourne     pid 1502
+✓ le greeter tourne         pid 1548
+```
+
+L'écran de connexion s'affiche, proprement, sur le même matériel et avec la
+même configuration. Le greeter n'a jamais été en cause.
+
+## Le correctif
+
+`vt = 7` dans `config.toml`, c'est-à-dire respecter l'intention du paquet
+plutôt que la contourner par une surcharge locale qu'une mise à jour pourrait
+ignorer. Bénéfice de côté, et il compte sur cette machine : le getty du
+**tty1 reste disponible**, console de secours permanente là où l'absence de
+touches F rendait SSH obligatoire.
+
+`--verifier` compare désormais le `vt` de `config.toml` au getty nommé dans le
+`Conflicts=` de l'unité, et signale l'incohérence en une ligne.
+
+## L'outil s'est encore trompé deux fois
+
+Il faut le noter, parce que c'est la troisième et la quatrième fois.
+
+**`--essai` tournait sur le vt 2.** `systemd-logind` engendre un getty à la
+demande sur les terminaux 1 à 6 (`NAutoVTs=6`) : l'essai en faisait naître un,
+qui se disputait le terminal avec son propre labwc. Il aurait reproduit
+exactement le conflit qu'il devait isoler. Il tourne maintenant sur le vt 8.
+
+**Le contrôle de cohérence s'est tué lui-même à l'écriture.** Sous
+`set -o pipefail`, un `systemctl` qui échoue fait rendre son code au tuyau
+entier ; l'affectation avortait, et `set -e` arrêtait le diagnostic au
+milieu, sans un mot. Un contrôle qui tue l'outil qui le porte ne contrôle
+rien. Trouvé en l'essayant, pas en le relisant.

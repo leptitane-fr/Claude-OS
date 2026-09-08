@@ -170,6 +170,38 @@ verifier() {
 		ko "config.toml" "/etc/greetd/config.toml absent"
 	fi
 
+	# LE TERMINAL VIRTUEL DOIT ÊTRE CELUI QUE L'UNITÉ PROTÈGE.
+	#
+	# greetd.service porte « Conflicts=getty@ttyN.service » : il n'écarte le
+	# getty que du terminal N. Si config.toml en désigne un autre, un getty
+	# reste en place sur celui de greetd, et les deux se disputent l'écran.
+	# Le perdant n'affiche rien ; labwc échoue sur « Atomic commit failed:
+	# busy ». C'est la panne des 7 et 8 septembre 2026, et son intermittence
+	# venait de ce que la course avait un gagnant différent selon le démarrage.
+	# « || true » sur les deux : sous « set -o pipefail », un systemctl qui
+	# échoue fait rendre son code au tuyau entier, l'affectation avorte, et
+	# « set -e » arrête le script au milieu du diagnostic — sans un mot. Un
+	# contrôle qui tue l'outil qui le porte ne contrôle rien.
+	VT_CFG="$(sed -n 's/^ *vt *= *\([0-9]*\).*/\1/p' /etc/greetd/config.toml 2>/dev/null | head -1 || true)"
+	VT_UNITE="$(systemctl cat greetd.service 2>/dev/null \
+	            | sed -n 's/^Conflicts=getty@tty\([0-9]*\)\.service.*/\1/p' | head -1 || true)"
+	if [ -z "$VT_CFG" ]; then
+		ko "terminal virtuel" "aucun « vt » dans config.toml"
+	elif [ -z "$VT_UNITE" ]; then
+		warn "greetd.service n'écarte explicitement aucun getty — vérifier à la main"
+		info "        config.toml : vt $VT_CFG"
+	elif [ "$VT_CFG" = "$VT_UNITE" ]; then
+		ok "terminal virtuel" "vt $VT_CFG, écarté du getty par l'unité"
+	else
+		ko "TERMINAL VIRTUEL INCOHÉRENT" "config.toml : vt $VT_CFG, unité : tty$VT_UNITE"
+		info "        L'unité n'écarte le getty que du tty$VT_UNITE. Sur le tty$VT_CFG"
+		info "        un getty subsiste et se dispute l'écran avec labwc."
+		info "        Corriger config.toml — ou relancer provision.sh."
+	fi
+	if [ -n "$VT_CFG" ] && [ "$(systemctl is-active "getty@tty$VT_CFG" 2>/dev/null || true)" = "active" ]; then
+		ko "getty@tty$VT_CFG" "ACTIF sur le terminal de greetd"
+	fi
+
 	say "La configuration de la SESSION (celle du bureau)"
 	# L'ASYMÉTRIE QUI TROMPE.
 	#

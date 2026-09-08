@@ -24,7 +24,7 @@ xwayland 2:24.1.6, libgtk4-layer-shell0 1.0.4, dbus-user-session 1.16.2.
 | Sujet | État |
 |---|---|
 | **Audio** | **EN ÉCHEC.** `sof_rt5682 jsl_rt5682_def: probe with driver sof_rt5682 failed with error -22`, précédé de `ipc tx timed out` et `failed to load DSP topology`. Le DSP démarre mais la topologie ne se charge pas. C'est le risque n°1 identifié dès `docs/01`. |
-| Affichage au démarrage | L'écran reste noir avec deux lignes d'erreur jusqu'à ce qu'on touche le pavé tactile, puis l'écran de connexion apparaît. Non diagnostiqué. |
+| Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le même conflit de terminal virtuel que l'invariant n°5 — à reconfirmer maintenant que greetd est sur le tty7. |
 | Rangée supérieure du clavier | Non câblée. `tools/probe-keys.sh` relève les codes, les liaisons labwc restent à écrire. |
 | Reports | rclone (Drive, OneDrive), notifications, icônes sur le bureau. |
 | Volume dans la Console | Le curseur est en place mais **ne commande rien tant que l'audio est en panne** : sans carte son, `wpctl` ne trouve aucune sortie et la rangée se désactive d'elle-même en le disant. |
@@ -75,7 +75,23 @@ gestionnaire de session, à cause de trois `>/dev/null 2>&1` sur des
 commandes qui échouaient en silence. Une commande qui peut échouer doit
 parler, et son code de retour doit être lu.
 
-### 5. Ce dépôt n'a pas de branche par défaut
+### 5. Le terminal virtuel de greetd doit être celui que l'unité protège
+
+`greetd.service`, livré par Debian, porte `Conflicts=getty@tty7.service` : il
+n'écarte le getty **que du tty7**. Configurer `vt = 1` dans
+`/etc/greetd/config.toml` revenait à occuper un terminal non protégé, où
+`getty.target` démarre un getty. Les deux se disputaient l'écran ; le perdant
+n'affichait rien et labwc échouait sur `Atomic commit failed: busy`.
+
+L'intermittence venait de là : selon le démarrage, la course avait un
+gagnant différent — un soir le bureau s'ouvrait, le lendemain on tombait sur
+une invite texte.
+
+`config.toml` dit donc `vt = 7`, et `--verifier` compare les deux valeurs.
+Bénéfice de côté : le getty du **tty1 reste disponible**, console de secours
+permanente sur une machine sans touches F.
+
+### 6. Ce dépôt n'a pas de branche par défaut
 
 Trois branches `claude/…` coexistent. Un `git pull` sur la mauvaise répond
 « Déjà à jour » sans rien changer. `provision.sh` affiche désormais sa
