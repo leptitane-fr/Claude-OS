@@ -255,6 +255,20 @@ ligne_reseau (Wifi *w, Reseau *r)
     GtkWidget *nom = gtk_label_new (r->ssid);
     gtk_label_set_xalign (GTK_LABEL (nom), 0.0);
     gtk_label_set_ellipsize (GTK_LABEL (nom), PANGO_ELLIPSIZE_END);
+    /* L'ELLIPSE SEULE NE SUFFIT PAS. Elle abaisse la largeur MINIMUM du
+     * libelle, pas sa largeur NATURELLE : un nom long continuait donc a
+     * reclamer toute sa place, la colonne de detail s'elargissait, et GTK
+     * repositionnait le popover en consequence. Mesure du 8 septembre 2026,
+     * au banc : a taille de popover identique (768x491), popup_x passait de
+     * -545 sur la page Wi-Fi a -618 sur la page Bluetooth, dont les libelles
+     * d'action sont plus longs — 73 px de glissement vers la gauche, visibles
+     * a l'oeil puisque la Console n'etait plus alignee sur la barre.
+     *
+     * Le plafond en caracteres borne la largeur naturelle. La colonne garde
+     * la meme largeur quel que soit le nom, ce que la feuille de style
+     * revendique deja pour la Console : « un panneau qui change de taille
+     * selon le nom du reseau connecte donne une impression d'instabilite ». */
+    gtk_label_set_max_width_chars (GTK_LABEL (nom), 14);
     gtk_widget_set_hexpand (nom, TRUE);
 
     GtkWidget *rang = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
@@ -402,16 +416,32 @@ une_borne_lue (GObject *src, GAsyncResult *res, gpointer data)
     if (ssid != NULL) {
         guint8 force = v_force ? g_variant_get_byte (v_force) : 0;
 
-        /* Un meme reseau est souvent porte par plusieurs bornes : on ne
-         * garde que la plus forte, sinon la liste se remplit de doublons. */
+        /* « Connecte » APPARTIENT AU RESEAU, PAS A LA BORNE.
+         *
+         * Un meme SSID est souvent porte par plusieurs bornes — deux bandes
+         * sur la meme box, ou un repeteur. On n'en garde qu'une, la plus
+         * forte, sinon la liste se remplit de doublons. Mais le drapeau
+         * « actif » etait pose sur CETTE borne-la, alors que la connexion
+         * peut passer par une autre.
+         *
+         * Mesure du 8 septembre 2026 sur le reseau de la maison : le SSID
+         * connecte est vu par quatre bornes, et celle a laquelle on est
+         * reellement associe est a 56 de force quand deux autres sont a 60.
+         * La plus forte l'emportait, sans le drapeau — et la liste
+         * n'indiquait jamais le reseau connecte.
+         *
+         * Le drapeau se calcule donc par OU logique sur toutes les bornes du
+         * SSID : il suffit qu'UNE d'elles soit l'active. */
+        gboolean cette_borne_active = (g_strcmp0 (a->chemin, w->ap_actif) == 0);
+
         Reseau *deja = g_hash_table_lookup (w->par_ssid, ssid);
         if (deja != NULL) {
             if (force > deja->force) {
                 deja->force = force;
                 g_free (deja->ap);
                 deja->ap = g_strdup (a->chemin);
-                deja->actif = (g_strcmp0 (a->chemin, w->ap_actif) == 0);
             }
+            deja->actif = deja->actif || cette_borne_active;
         } else {
             Reseau *r = g_new0 (Reseau, 1);
             r->ssid    = g_steal_pointer (&ssid);
@@ -420,7 +450,7 @@ une_borne_lue (GObject *src, GAsyncResult *res, gpointer data)
             r->protege = (v_flags && (g_variant_get_uint32 (v_flags) & NM_802_11_AP_FLAGS_PRIVACY))
                       || (v_rsn   && g_variant_get_uint32 (v_rsn) != 0)
                       || (v_wpa   && g_variant_get_uint32 (v_wpa) != 0);
-            r->actif   = (g_strcmp0 (r->ap, w->ap_actif) == 0);
+            r->actif   = cette_borne_active;
             g_hash_table_insert (w->par_ssid, r->ssid, r);
             g_ptr_array_add (w->reseaux, r);
         }
@@ -659,6 +689,20 @@ wifi_page_new (GtkStack *pile, const char *retour, gboolean apercu)
     w->message = gtk_label_new ("");
     gtk_widget_add_css_class (w->message, "qs-vide");
     gtk_label_set_wrap (GTK_LABEL (w->message), TRUE);
+    /* UN LIBELLE QUI S'ENROULE RECLAME LA LARGEUR DE SON TEXTE DEROULE.
+     *
+     * Ce message d'etat vit sur la page cachee de la pile interne, laquelle
+     * est homogene en largeur : sa largeur NATURELLE s'imposait donc a toute
+     * la colonne, meme quand la liste etait affichee. Mesure du 8 septembre
+     * 2026 au banc : la fenetre de defilement demandait 190 px, ce libellé
+     * 369 — et c'est 369 qui l'emportait. GTK positionnant le popover sur la
+     * largeur naturelle, la Console glissait de 73 px vers la gauche des
+     * qu'on ouvrait le Bluetooth.
+     *
+     * Le plafond en caracteres donne a Pango une largeur d'enroulement, donc
+     * une largeur naturelle bornee. Le texte s'enroule sur plusieurs lignes
+     * au lieu d'elargir le panneau. */
+    gtk_label_set_max_width_chars (GTK_LABEL (w->message), 28);
     gtk_widget_set_valign (w->message, GTK_ALIGN_CENTER);
     gtk_widget_set_size_request (w->message, -1, 240);
 

@@ -289,11 +289,12 @@ popover.qs-popover > contents {
 .qs-tile.on       { background-color: @accent; }
 .qs-tile.on:hover { background-color: @accent-hover; }
 
-.qs-tile.on .qs-tile-icon,
-.qs-tile.on .qs-tile-name,
-.qs-tile.on .qs-tile-state { color: @on-accent; }
-
-.qs-tile.on .qs-tile-state { opacity: 0.82; }
+/* La pastille ne porte plus qu'une icône : les libellés « Wi-Fi » et
+   « Activé » ont été retirés, l'icône disant la fonction et l'accent
+   l'état. Les règles qui les coloraient sur accent sont parties avec eux.
+   « .qs-tile-name » et « .qs-tile-state » servent encore, plus bas, à la
+   ligne « Réglages ». */
+.qs-tile.on .qs-tile-icon { color: @on-accent; }
 
 .qs-tile:disabled { opacity: 0.42; }
 
@@ -439,20 +440,32 @@ window.reglages { background-color: @surface-alt; }
 
 /* Le chevron est collé à la pastille : les deux forment un objet, mais deux
    zones cliquables. */
+/* Le chevron est POSÉ SUR la pastille, plus à côté d'elle : son fond doit
+   donc être transparent pour laisser passer la couleur de la pastille —
+   @surface-alt quand elle est éteinte, l'accent quand elle est allumée. */
 .qs-chevron {
   background: none;
-  background-color: @surface-alt;
+  background-color: transparent;
   border: none;
   box-shadow: none;
-  min-width: 26px;
-  padding: 0 2px;
-  margin-left: 2px;
-  border-radius: 16px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  margin-left: 8px;
+  border-radius: 12px;
   color: @text-dim;
   transition: background-color 120ms ease-out;
 }
 
 .qs-chevron:hover { background-color: @surface-sunk; color: @text; }
+
+/* Pastille allumée : le chevron n'est plus descendant du bouton, il ne peut
+   plus hériter de « .qs-tile.on .qs-tile-icon ». Sa classe lui est posée
+   depuis tile_apply. Le survol s'éclaircit à partir de la couleur de
+   contraste, faute de quoi il retomberait sur un gris qui jure sur l'accent. */
+.qs-chevron.sur-accent        { color: @on-accent; }
+.qs-chevron.sur-accent:hover  { background-color: alpha(@on-accent, 0.20);
+                                color: @on-accent; }
 
 .qs-vide { font-size: 13px; color: @text-dim; }
 

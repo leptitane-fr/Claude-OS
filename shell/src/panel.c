@@ -66,13 +66,18 @@
  * entierement visible. Voir le commentaire de gtk_popover_set_offset. */
 #define ECART_BARRE_PX 12
 
+/* Largeur de la colonne de detail. La meme que la Console — « .qs
+ * { min-width: 296px } » dans shell.css — pour que le panneau deplie ait
+ * deux colonnes de meme largeur plutot qu'un assemblage bancal. */
+#define LARGEUR_COLONNE_PX 296
+
 /* ------------------------------------------------------------------------- */
 
 typedef struct {
     GtkWidget  *button;
     GtkWidget  *chevron;
     GtkWidget  *icon;
-    GtkWidget  *state;          /* libelle secondaire : « Active » / ...     */
+    const char *nom;            /* « Wi-Fi » — pour l'infobulle et l'a11y    */
     const char *icon_on;
     const char *icon_off;
     gboolean    on;
@@ -109,13 +114,31 @@ tile_apply (Tile *t, gboolean on, gboolean available)
 {
     t->on = on;
     gtk_image_set_from_icon_name (GTK_IMAGE (t->icon), on ? t->icon_on : t->icon_off);
-    gtk_label_set_text (GTK_LABEL (t->state),
-                        !available ? "Indisponible" : on ? "Activé" : "Désactivé");
 
-    if (on)
+    if (on) {
         gtk_widget_add_css_class (t->button, "on");
-    else
+        /* Le chevron n'est plus DANS le bouton mais POSE DESSUS : il n'est
+         * plus son descendant, et « .qs-tile.on .qs-chevron » ne l'atteint
+         * pas. On lui pose donc sa propre classe, pour qu'il passe en
+         * couleur de contraste avec le fond d'accent. */
+        gtk_widget_add_css_class (t->chevron, "sur-accent");
+    } else {
         gtk_widget_remove_css_class (t->button, "on");
+        gtk_widget_remove_css_class (t->chevron, "sur-accent");
+    }
+
+    /* L'ETAT SE LIT A LA COULEUR, ET SE DIT A L'INFOBULLE.
+     *
+     * Les libelles « Wi-Fi / Activé » ont disparu de la pastille : l'icone
+     * dit la fonction, l'accent dit l'etat, et deux lignes de texte pour
+     * cela encombraient la Console. Mais un bouton reduit a une icone n'a
+     * plus de nom accessible, et « indisponible » ne se distingue d'
+     * « eteint » que par une opacite. L'infobulle porte donc les deux, ce
+     * qui sert aussi de nom au lecteur d'ecran. */
+    g_autofree char *bulle = g_strdup_printf (
+        "%s — %s", t->nom,
+        !available ? "indisponible" : on ? "activé" : "désactivé");
+    gtk_widget_set_tooltip_text (t->button, bulle);
 
     gtk_widget_set_sensitive (t->button, available);
 }
@@ -159,29 +182,14 @@ tile_build (Tile *t, const char *name, const char *icon_on, const char *icon_off
 {
     t->icon_on  = icon_on;
     t->icon_off = icon_off;
+    t->nom      = name;
 
     t->icon = gtk_image_new_from_icon_name (icon_off);
-    gtk_image_set_pixel_size (GTK_IMAGE (t->icon), 20);
+    gtk_image_set_pixel_size (GTK_IMAGE (t->icon), 22);
     gtk_widget_add_css_class (t->icon, "qs-tile-icon");
 
-    GtkWidget *title = gtk_label_new (name);
-    gtk_widget_add_css_class (title, "qs-tile-name");
-    gtk_widget_set_halign (title, GTK_ALIGN_START);
-
-    t->state = gtk_label_new ("Indisponible");
-    gtk_widget_add_css_class (t->state, "qs-tile-state");
-    gtk_widget_set_halign (t->state, GTK_ALIGN_START);
-
-    GtkWidget *texts = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append (GTK_BOX (texts), title);
-    gtk_box_append (GTK_BOX (texts), t->state);
-
-    GtkWidget *row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_box_append (GTK_BOX (row), t->icon);
-    gtk_box_append (GTK_BOX (row), texts);
-
     t->button = gtk_button_new ();
-    gtk_button_set_child (GTK_BUTTON (t->button), row);
+    gtk_button_set_child (GTK_BUTTON (t->button), t->icon);
     gtk_widget_add_css_class (t->button, "qs-tile");
     gtk_widget_set_hexpand (t->button, TRUE);
     gtk_widget_set_sensitive (t->button, FALSE);
@@ -189,16 +197,31 @@ tile_build (Tile *t, const char *name, const char *icon_on, const char *icon_off
 
     /* Deux gestes distincts sur une meme pastille, comme sur ChromeOS : le
      * corps allume et eteint, le chevron ouvre la liste. Un seul bouton qui
-     * ferait les deux obligerait a choisir entre les deux usages. */
-    t->chevron = gtk_button_new_from_icon_name ("go-next-symbolic");
+     * ferait les deux obligerait a choisir entre les deux usages.
+     *
+     * LA FLECHE POINTE VERS OU LA COLONNE S'OUVRE. Elle allait vers la
+     * droite du temps ou la page remplacait la Console ; la page se deplie
+     * maintenant a GAUCHE, et une fleche qui designe le cote oppose au
+     * mouvement se lit comme une erreur.
+     *
+     * Elle est POSEE SUR la pastille par un GtkOverlay, et non a cote dans
+     * une boite. Deux raisons : la pastille recupere toute la largeur, ce
+     * qui agrandit la cible du doigt pour le geste le plus courant — allumer
+     * et eteindre ; et GTK n'admet pas un bouton dans un bouton, ce qu'une
+     * fleche « a l'interieur » demanderait autrement. L'enfant d'un overlay
+     * recoit le clic avant ce qu'il recouvre : les deux gestes restent
+     * distincts sans code d'arbitrage. */
+    t->chevron = gtk_button_new_from_icon_name ("go-previous-symbolic");
     gtk_widget_add_css_class (t->chevron, "qs-chevron");
+    gtk_widget_set_halign (t->chevron, GTK_ALIGN_START);
     gtk_widget_set_valign (t->chevron, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text (t->chevron, name);
 
-    GtkWidget *paire = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *paire = gtk_overlay_new ();
     gtk_widget_add_css_class (paire, "qs-tile-paire");
     gtk_widget_set_hexpand (paire, TRUE);
-    gtk_box_append (GTK_BOX (paire), t->button);
-    gtk_box_append (GTK_BOX (paire), t->chevron);
+    gtk_overlay_set_child (GTK_OVERLAY (paire), t->button);
+    gtk_overlay_add_overlay (GTK_OVERLAY (paire), t->chevron);
     return paire;
 }
 
@@ -566,9 +589,22 @@ static void
 on_ouvrir_page (GtkButton *b, gpointer data)
 {
     Panel *p = data;
-    gtk_stack_set_visible_child_name (
-        p->pile,
-        GTK_WIDGET (b) == p->wifi.chevron ? "wifi" : "bluetooth");
+    const char *voulue   = GTK_WIDGET (b) == p->wifi.chevron ? "wifi" : "bluetooth";
+    const char *courante = gtk_stack_get_visible_child_name (p->pile);
+
+    /* Le meme chevron ouvre ET referme. Un bouton qui se contentait d'ouvrir
+     * laissait la fleche « retour » comme unique sortie : on cliquait a
+     * nouveau la ou l'on venait de cliquer, il ne se passait rien, et le
+     * geste evident semblait cassé. On repasse par « vide » plutot que de
+     * replier directement : c'est on_page_changee qui replie, et cela
+     * arrete du meme coup la decouverte Bluetooth. */
+    if (gtk_revealer_get_reveal_child (GTK_REVEALER (p->reveleur))
+        && g_strcmp0 (courante, voulue) == 0) {
+        gtk_stack_set_visible_child_name (p->pile, "vide");
+        return;
+    }
+
+    gtk_stack_set_visible_child_name (p->pile, voulue);
     gtk_revealer_set_reveal_child (GTK_REVEALER (p->reveleur), TRUE);
 }
 
@@ -773,6 +809,21 @@ panel_new (gboolean apercu)
     gtk_stack_add_named (GTK_STACK (pile), p->page_wifi, "wifi");
     gtk_stack_add_named (GTK_STACK (pile), p->page_bt,   "bluetooth");
     gtk_stack_set_visible_child_name (GTK_STACK (pile), "vide");
+
+    /* UNE LARGEUR, POUR LES DEUX PAGES.
+     *
+     * GTK place le popover d'apres la taille NATURELLE de son contenu. Les
+     * deux pages n'ayant pas la meme — les libelles d'action du Bluetooth
+     * sont plus longs que ceux du Wi-Fi — le popover se posait ailleurs
+     * selon la page ouverte : mesure au banc, a taille de surface pourtant
+     * identique (768x491), popup_x valait -545 sur le Wi-Fi et -618 sur le
+     * Bluetooth. Soit 73 px de glissement vers la gauche, et une Console qui
+     * n'etait plus alignee sur la barre d'etat.
+     *
+     * La demande de taille fixe la largeur minimale ; le plafond en
+     * caracteres pose sur les noms, dans wifi.c et bluetooth.c, borne la
+     * naturelle. Entre les deux, la colonne ne bouge plus. */
+    gtk_widget_set_size_request (pile, LARGEUR_COLONNE_PX, -1);
 
     /* Le revelateur donne la largeur, pas la pile : replie il mesure zero,
      * et le popover reprend exactement la largeur de la Console seule. */

@@ -372,6 +372,20 @@ ligne_appareil (Bt *bt, Appareil *a)
     GtkWidget *nom = gtk_label_new (a->nom);
     gtk_label_set_xalign (GTK_LABEL (nom), 0.0);
     gtk_label_set_ellipsize (GTK_LABEL (nom), PANGO_ELLIPSIZE_END);
+    /* L'ELLIPSE SEULE NE SUFFIT PAS. Elle abaisse la largeur MINIMUM du
+     * libelle, pas sa largeur NATURELLE : un nom long continuait donc a
+     * reclamer toute sa place, la colonne de detail s'elargissait, et GTK
+     * repositionnait le popover en consequence. Mesure du 8 septembre 2026,
+     * au banc : a taille de popover identique (768x491), popup_x passait de
+     * -545 sur la page Wi-Fi a -618 sur la page Bluetooth, dont les libelles
+     * d'action sont plus longs — 73 px de glissement vers la gauche, visibles
+     * a l'oeil puisque la Console n'etait plus alignee sur la barre.
+     *
+     * Le plafond en caracteres borne la largeur naturelle. La colonne garde
+     * la meme largeur quel que soit le nom, ce que la feuille de style
+     * revendique deja pour la Console : « un panneau qui change de taille
+     * selon le nom du reseau connecte donne une impression d'instabilite ». */
+    gtk_label_set_max_width_chars (GTK_LABEL (nom), 14);
     gtk_widget_set_hexpand (nom, TRUE);
 
     GtkWidget *rang = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
@@ -516,6 +530,20 @@ bluetooth_page_new (GtkStack *pile, const char *retour, gboolean apercu)
     bt->message = gtk_label_new ("");
     gtk_widget_add_css_class (bt->message, "qs-vide");
     gtk_label_set_wrap (GTK_LABEL (bt->message), TRUE);
+    /* UN LIBELLE QUI S'ENROULE RECLAME LA LARGEUR DE SON TEXTE DEROULE.
+     *
+     * Ce message d'etat vit sur la page cachee de la pile interne, laquelle
+     * est homogene en largeur : sa largeur NATURELLE s'imposait donc a toute
+     * la colonne, meme quand la liste etait affichee. Mesure du 8 septembre
+     * 2026 au banc : la fenetre de defilement demandait 190 px, ce libellé
+     * 369 — et c'est 369 qui l'emportait. GTK positionnant le popover sur la
+     * largeur naturelle, la Console glissait de 73 px vers la gauche des
+     * qu'on ouvrait le Bluetooth.
+     *
+     * Le plafond en caracteres donne a Pango une largeur d'enroulement, donc
+     * une largeur naturelle bornee. Le texte s'enroule sur plusieurs lignes
+     * au lieu d'elargir le panneau. */
+    gtk_label_set_max_width_chars (GTK_LABEL (bt->message), 28);
     gtk_widget_set_valign (bt->message, GTK_ALIGN_CENTER);
     gtk_widget_set_size_request (bt->message, -1, 240);
 
