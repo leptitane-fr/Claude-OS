@@ -17,6 +17,22 @@
  * d'ecritures sysfs. On attend que le doigt se stabilise. */
 #define ECRITURE_DIFFEREE_MS 90
 
+/* GEL APRES UNE ACTION DE L'UTILISATEUR.
+ *
+ * La Console se relit desormais en boucle tant qu'elle est ouverte, pour
+ * suivre les touches du clavier. Cette relecture et le doigt sur le curseur
+ * visent le meme widget, et sans precaution ils se disputent :
+ *
+ *   le doigt pose le curseur a 40 %   ->  l'ecriture est differee de 90 ms
+ *   la relecture tombe dans l'intervalle, lit encore 55 %, et REPOSE 55 %
+ *   le curseur saute en arriere sous le doigt.
+ *
+ * Toute action de l'utilisateur gele donc la relecture le temps que
+ * l'ecriture parte et que le service la prenne en compte. Large exprès :
+ * pendant un glissement continu, chaque mouvement repousse le gel, et on ne
+ * relit qu'une fois le doigt leve. */
+#define GEL_APRES_ACTION_US (700 * 1000)
+
 /* Une action d'alimentation demande confirmation, et l'armement retombe seul.
  * Quatre secondes : assez pour lire « Confirmer ? » et cliquer, trop court
  * pour qu'un clic distrait deux minutes plus tard eteigne la machine. */
@@ -36,6 +52,7 @@ typedef struct {
     gboolean   apercu;
     gboolean   ecriture_en_cours;  /* ignore les retours pendant qu'on ecrit */
     guint      differe;
+    gint64     gel;                /* relecture suspendue jusqu'a cette date */
 } Son;
 
 static void
@@ -131,6 +148,8 @@ console_son_relire (GtkWidget *rangee)
     Son *s = g_object_get_data (G_OBJECT (rangee), "son");
     if (s == NULL || s->apercu)
         return;
+    if (g_get_monotonic_time () < s->gel)
+        return;                    /* le doigt est sur le curseur */
     char *argv[] = { (char *) "wpctl", (char *) "get-volume",
                      (char *) "@DEFAULT_AUDIO_SINK@", NULL };
     son_lancer (s, on_volume_lu, argv);
@@ -162,6 +181,8 @@ on_son_change (GtkRange *r, gpointer data)
     if (s->ecriture_en_cours)
         return;
 
+    s->gel = g_get_monotonic_time () + GEL_APRES_ACTION_US;
+
     int pourcent = (int) gtk_range_get_value (r);
     /* Bouger le curseur sort du silence : c'est ce qu'on attend d'un
      * curseur de volume, et cela evite d'avoir a le desactiver a la main. */
@@ -184,6 +205,7 @@ on_muet_bascule (GtkButton *b, gpointer data)
     if (!s->disponible)
         return;
 
+    s->gel = g_get_monotonic_time () + GEL_APRES_ACTION_US;
     s->muet = !s->muet;
     son_afficher (s, (int) gtk_range_get_value (GTK_RANGE (s->echelle)));
 
@@ -280,6 +302,7 @@ typedef struct {
     gboolean   apercu;
     gboolean   ecriture_en_cours;
     guint      differe;
+    gint64     gel;                /* meme role que pour le son */
 } Lumiere;
 
 /* Le premier ecran retro-eclaire declare par le noyau. Sur MADOO c'est
@@ -318,6 +341,8 @@ console_lumiere_relire (GtkWidget *rangee)
     Lumiere *l = g_object_get_data (G_OBJECT (rangee), "lumiere");
     if (l == NULL || l->apercu || l->dir == NULL || l->maxi <= 0)
         return;
+    if (g_get_monotonic_time () < l->gel)
+        return;                    /* le doigt est sur le curseur */
 
     g_autofree char *cur = shell_sysfs_read (l->dir, "brightness");
     if (cur == NULL)
@@ -449,6 +474,8 @@ on_lumiere_change (GtkRange *r, gpointer data)
     Lumiere *l = data;
     if (l->ecriture_en_cours)
         return;
+
+    l->gel = g_get_monotonic_time () + GEL_APRES_ACTION_US;
 
     lumiere_afficher (l, (int) gtk_range_get_value (r));
 

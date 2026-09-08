@@ -11,9 +11,11 @@
  *
  * DISCIPLINE D'ENERGIE, LA MEME QUE LE RESTE DU PANNEAU
  *
- * Rien ici ne consulte quoi que ce soit tant que la Console est fermee. Le
- * volume est relu a l'ouverture, la luminosite aussi, et aucune minuterie
- * ne tourne entre deux ouvertures.
+ * Rien ici ne consulte quoi que ce soit tant que la Console est fermee.
+ * Ouverte, elle se relit en boucle — les touches du clavier changent le
+ * volume et la luminosite sans passer par nous, et un curseur qui reste
+ * fige pendant qu'on appuie donne une Console qui ment. La minuterie vit
+ * dans panel.c, entre « show » et « closed », et nulle part ailleurs.
  * ========================================================================= */
 #pragma once
 
@@ -30,7 +32,11 @@
  * un curseur qui ne commande rien. */
 GtkWidget *console_son_new (gboolean apercu);
 
-/* Relit la valeur reelle. Appele a l'ouverture de la Console. */
+/* Relit la valeur reelle. Appele a l'ouverture de la Console, puis
+ * periodiquement tant qu'elle reste ouverte. Sans effet pendant les
+ * quelques centaines de millisecondes qui suivent une action de
+ * l'utilisateur : sinon la relecture reposerait l'ancienne valeur sous le
+ * doigt qui vient de deplacer le curseur. */
 void console_son_relire (GtkWidget *rangee);
 
 /* --- Luminosite ----------------------------------------------------------

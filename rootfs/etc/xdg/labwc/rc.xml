@@ -79,6 +79,57 @@
     <keybind key="W-S-q">
       <action name="Exit"/>
     </keybind>
+
+    <!-- Rangée du haut du clavier Chromebook (Google Madoo).
+
+         Le noyau expose cette rangée en mode « vivaldi » ; sa disposition se
+         lit dans /sys/devices/platform/i8042/serio0/function_row_physmap :
+
+             EA  précédent    KEY_BACK
+             E9  suivant      KEY_FORWARD
+             E7  recharger    KEY_REFRESH
+             91  plein écran  KEY_FULL_SCREEN     372
+             92  aperçu       KEY_SCALE           120
+             94  lumière bas  KEY_BRIGHTNESSDOWN  224
+             95  lumière haut KEY_BRIGHTNESSUP    225
+             A0  muet         KEY_MUTE            113
+             AE  volume bas   KEY_VOLUMEDOWN      114
+             B0  volume haut  KEY_VOLUMEUP        115
+
+         VOLUME. Les touches émettent bien leurs codes, vérifié dans le
+         masque « B: KEY= » de /proc/bus/input/devices. Le défaut de labwc
+         les liait déjà, mais à « amixer sset Master », qui échoue ici :
+
+             $ amixer sset Master 5%+
+             amixer: Unable to find simple control 'Master',0
+
+         Cette carte (sof-rt5682) n'expose aucun contrôle « Master », et le
+         son passe de toute façon par PipeWire, qu'ALSA ne pilote pas. On
+         redirige donc vers wpctl. Ces liaisons viennent après <default /> :
+         labwc remplace les doublons plutôt que de les cumuler, il l'écrit
+         au chargement sous la forme « Replaced N keybinds ».
+
+         Le « -l 1.0 » plafonne à 100 %. Sans lui wpctl monte au delà et
+         sature l'amplification logicielle. -->
+    <keybind key="XF86AudioRaiseVolume">
+      <action name="Execute" command="wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%+ -l 1.0"/>
+    </keybind>
+    <keybind key="XF86AudioLowerVolume">
+      <action name="Execute" command="wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"/>
+    </keybind>
+    <keybind key="XF86AudioMute">
+      <action name="Execute" command="wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"/>
+    </keybind>
+
+    <!-- PLEIN ÉCRAN. Cause différente : cette touche n'était liée à rien.
+         Elle émet KEY_FULL_SCREEN (372), que XKB nomme <I380> et traduit en
+         keysym XF86FullScreen, défini dans symbols/inet et inclus dans
+         toutes les dispositions par « * = +inet(evdev) » (rules/evdev).
+
+         W-f, défini plus haut, reste valable en parallèle. -->
+    <keybind key="XF86FullScreen">
+      <action name="ToggleFullscreen"/>
+    </keybind>
   </keyboard>
 
 </labwc_config>

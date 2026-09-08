@@ -1,0 +1,18 @@
+# Claude OS — d'où Chromium tire sa clé de chiffrement.
+#
+# Chromium chiffre cookies et mots de passe avec une clé qu'il demande au
+# trousseau. Il choisit le fournisseur d'après XDG_CURRENT_DESKTOP. Notre
+# session s'annonce « labwc » : aucun cas reconnu, donc Chromium tentait le
+# portail XDG « Secret » et, à son échec, retombait sur la clé codée en dur.
+#
+# Deux clés différentes selon les jours, donc deux formats dans le profil :
+# mesuré le 8 septembre 2026, 81 cookies en « v11 » (clé du trousseau) et 5
+# en « v10 » (clé codée en dur). Les cookies écrits sous une clé étaient
+# illisibles sous l'autre — d'où les sessions perdues et les reconnexions à
+# répétition sur chaque site.
+#
+# Le drapeau ci-dessous nomme le fournisseur explicitement. Chromium ne
+# devine plus, ne dépend plus du portail, et s'adresse directement au Secret
+# Service de gnome-keyring — celui qui détient déjà l'élément « Chromium
+# Safe Storage », donc la clé des cookies « v11 » existants.
+export CHROMIUM_FLAGS="${CHROMIUM_FLAGS} --password-store=gnome-libsecret"

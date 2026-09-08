@@ -35,6 +35,37 @@
 
 #define WATT_REFRESH_MS 2000    /* uniquement panneau ouvert                 */
 
+/* Cadence de relecture du son et de la luminosite, panneau ouvert seulement.
+ *
+ * Les touches du clavier passent par labwc, qui appelle wpctl et
+ * brightnessctl sans rien nous dire — aucun de ces deux services n'emet de
+ * signal que l'on puisse ecouter. La seule facon de suivre, c'est de relire.
+ *
+ * 400 ms : sous ~500 ms le curseur semble suivre la touche, au-dela le
+ * decalage se voit.
+ *
+ * CE QUE CELA COUTE, MESURE SUR CETTE MACHINE. La luminosite est un simple
+ * fichier sysfs, negligeable. Le son lance « wpctl get-volume », et wpctl
+ * n'est pas gratuit : 40 appels en 1,71 s, soit 43 ms d'horloge et 35 ms de
+ * processeur chacun. A 400 ms de cadence cela represente environ 9 % d'un
+ * coeur — pendant les quelques secondes ou la Console est ouverte, et rien
+ * du tout une fois refermee.
+ *
+ * On paie donc un peu, en echange d'un curseur qui ne ment pas. Faire mieux
+ * demanderait d'ecouter PipeWire directement, donc de lier libpipewire au
+ * shell pour lire un nombre — exactement ce que console.h refuse de faire
+ * pour libpulse. Le compromis est assume, pas subi. */
+#define SUIVI_REFRESH_MS 400
+
+/* Depliage de la colonne de detail. Assez court pour qu'on n'attende pas,
+ * assez long pour qu'on voie d'ou elle sort — sans quoi le panneau semble
+ * avoir toujours ete large, et l'on cherche ce qui a change. */
+#define REVEAL_MS 160
+
+/* Ce que la Console laisse sous elle pour que la barre d'etat reste
+ * entierement visible. Voir le commentaire de gtk_popover_set_offset. */
+#define ECART_BARRE_PX 12
+
 /* ------------------------------------------------------------------------- */
 
 typedef struct {
@@ -57,6 +88,7 @@ typedef struct {
     GtkWidget *page_bt;
     Tile       wifi;
     Tile       bluetooth;
+    GtkWidget *reveleur;        /* colonne de detail, a gauche de la Console */
     GtkWidget *popover;
     GtkWidget *bat_pct;
     GtkWidget *bat_detail;
@@ -64,6 +96,7 @@ typedef struct {
     GtkWidget *son;             /* rangee volume                             */
     GtkWidget *lumiere;         /* rangee luminosite                         */
     guint      watt_timer;      /* 0 quand le panneau est ferme              */
+    guint      suivi_timer;     /* idem : son et luminosite                  */
     gboolean   services_sondes; /* NetworkManager et BlueZ deja contactes ?  */
     gboolean   apercu;
 } Panel;
@@ -449,6 +482,18 @@ on_watt_tick (gpointer data)
     return G_SOURCE_CONTINUE;
 }
 
+/* Suit les touches du clavier pendant que la Console est ouverte. Les deux
+ * fonctions appelees se taisent d'elles-memes si l'utilisateur vient de
+ * toucher au curseur correspondant — voir le gel dans console.c. */
+static gboolean
+on_suivi_tick (gpointer data)
+{
+    Panel *p = data;
+    console_son_relire (p->son);
+    console_lumiere_relire (p->lumiere);
+    return G_SOURCE_CONTINUE;
+}
+
 /* -------------------------------------------------------------------------
  * Reglages
  *
@@ -512,7 +557,11 @@ reglages_build (Panel *p)
  * Cycle de vie du panneau : la minuterie ne vit qu'entre l'ouverture et la
  * fermeture. C'est tout l'interet de n'afficher ces valeurs qu'au clic.
  * ------------------------------------------------------------------------- */
-/* Le chevron sait quelle page ouvrir a la pastille qui le porte. */
+/* Le chevron sait quelle page ouvrir a la pastille qui le porte.
+ *
+ * La page ne remplace plus la Console : elle se deplie a sa gauche. Passer
+ * d'un chevron a l'autre alors que la colonne est deja ouverte ne fait donc
+ * que changer la page a l'interieur, sans replier ni deplier. */
 static void
 on_ouvrir_page (GtkButton *b, gpointer data)
 {
@@ -520,6 +569,7 @@ on_ouvrir_page (GtkButton *b, gpointer data)
     gtk_stack_set_visible_child_name (
         p->pile,
         GTK_WIDGET (b) == p->wifi.chevron ? "wifi" : "bluetooth");
+    gtk_revealer_set_reveal_child (GTK_REVEALER (p->reveleur), TRUE);
 }
 
 /* Ce qui tourne ne tourne QUE sur la page visible : balayage Wi-Fi a
@@ -539,6 +589,16 @@ on_page_changee (GObject *pile, GParamSpec *ps, gpointer data)
         bluetooth_page_ouverte (p->page_bt);
     else
         bluetooth_page_fermee (p->page_bt);
+
+    /* LE RETOUR ARRIERE PASSE PAR ICI, ET C'EST VOULU.
+     *
+     * Les fleches « retour » de wifi.c et bluetooth.c ne savent qu'une
+     * chose : demander a la pile la page nommee a leur construction. En les
+     * faisant pointer vers « vide », on replie la colonne sans toucher a une
+     * ligne de ces deux fichiers — ils continuent de ne rien savoir de la
+     * mise en page, ce qui est leur contrat. */
+    if (g_strcmp0 (page, "vide") == 0)
+        gtk_revealer_set_reveal_child (GTK_REVEALER (p->reveleur), FALSE);
 }
 
 static void
@@ -555,17 +615,20 @@ on_panel_show (GtkWidget *popover, gpointer data)
         bluetooth_setup (&p->bluetooth);
     }
 
-    /* Le son et la luminosite se relisent a chaque ouverture : ils changent
-     * par les touches du clavier et par les applications, sans que la Console
-     * en soit avertie. Deux lectures a l'ouverture coutent moins qu'une
-     * surveillance permanente, et c'est tout l'interet de n'afficher ces
-     * valeurs qu'au clic. */
+    /* Le son et la luminosite changent par les touches du clavier et par les
+     * applications, sans que la Console en soit avertie. Une lecture a
+     * l'ouverture ne suffit donc pas : tant que le panneau reste ouvert, les
+     * touches continuent d'agir et les curseurs restaient figes sur la valeur
+     * qu'ils avaient au moment du clic. D'ou la lecture immediate ci-dessous,
+     * puis la minuterie qui prend le relais jusqu'a la fermeture. */
     console_son_relire (p->son);
     console_lumiere_relire (p->lumiere);
 
     battery_refresh (p);
     if (p->watt_timer == 0)
         p->watt_timer = g_timeout_add (WATT_REFRESH_MS, on_watt_tick, p);
+    if (!p->apercu && p->suivi_timer == 0)
+        p->suivi_timer = g_timeout_add (SUIVI_REFRESH_MS, on_suivi_tick, p);
 }
 
 static void
@@ -574,15 +637,27 @@ on_panel_closed (GtkPopover *popover, gpointer data)
     Panel *p = data;
     (void) popover;
 
-    /* Toujours rouvrir sur la page principale : retrouver le panneau la ou
-     * on l'avait laisse trois heures plus tot serait deroutant. Et cela
-     * garantit l'arret de la decouverte Bluetooth. */
+    /* Toujours rouvrir colonne repliee : retrouver le panneau la ou on
+     * l'avait laisse trois heures plus tot serait deroutant. Et cela
+     * garantit l'arret de la decouverte Bluetooth.
+     *
+     * Le repli est instantane, sans animation : la Console vient de
+     * disparaitre, animer ce qu'on ne voit plus ne ferait que retarder le
+     * retour a l'etat de repos. */
     bluetooth_page_fermee (p->page_bt);
-    gtk_stack_set_visible_child_name (p->pile, "principal");
+    gtk_revealer_set_transition_duration (GTK_REVEALER (p->reveleur), 0);
+    gtk_revealer_set_reveal_child (GTK_REVEALER (p->reveleur), FALSE);
+    gtk_stack_set_visible_child_name (p->pile, "vide");
+    gtk_revealer_set_transition_duration (GTK_REVEALER (p->reveleur),
+                                          REVEAL_MS);
 
     if (p->watt_timer != 0) {
         g_source_remove (p->watt_timer);
         p->watt_timer = 0;
+    }
+    if (p->suivi_timer != 0) {
+        g_source_remove (p->suivi_timer);
+        p->suivi_timer = 0;
     }
 }
 
@@ -668,22 +743,58 @@ panel_new (gboolean apercu)
 
     /* Les pages detaillees vivent dans le MEME popover : ouvrir une fenetre
      * separee pour choisir un reseau ferait perdre le fil, et obligerait a
-     * gerer son placement. */
+     * gerer son placement.
+     *
+     * ELLES NE REMPLACENT PLUS LA CONSOLE, ELLES LA PROLONGENT.
+     *
+     * Auparavant la pile contenait aussi la page principale, et choisir un
+     * reseau escamotait tout le reste : le volume, la batterie et l'heure
+     * disparaissaient le temps de lire une liste de SSID. On perdait de vue
+     * l'etat de la machine au moment precis ou l'on agit dessus.
+     *
+     * La pile ne contient donc plus que les pages de detail, et vit dans un
+     * revelateur pose a GAUCHE de la Console, qui reste entiere a cote. La
+     * page « vide » est le repos : une boite sans contenu, vers laquelle
+     * pointent les fleches « retour » des deux pages. */
     GtkWidget *pile = gtk_stack_new ();
     gtk_stack_set_transition_type (GTK_STACK (pile),
-                                   GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT);
+                                   GTK_STACK_TRANSITION_TYPE_CROSSFADE);
     gtk_stack_set_transition_duration (GTK_STACK (pile), 140);
     /* Sans cela la pile prend la hauteur de sa plus grande page, et la page
      * principale traine 240 px de vide sous la carte batterie. */
     gtk_stack_set_vhomogeneous (GTK_STACK (pile), FALSE);
     gtk_stack_set_hhomogeneous (GTK_STACK (pile), FALSE);
-    gtk_stack_add_named (GTK_STACK (pile), box, "principal");
+    gtk_stack_add_named (GTK_STACK (pile), gtk_box_new (GTK_ORIENTATION_VERTICAL, 0),
+                         "vide");
 
     p->pile      = GTK_STACK (pile);
-    p->page_wifi = wifi_page_new (p->pile, "principal", apercu);
-    p->page_bt   = bluetooth_page_new (p->pile, "principal", apercu);
+    p->page_wifi = wifi_page_new (p->pile, "vide", apercu);
+    p->page_bt   = bluetooth_page_new (p->pile, "vide", apercu);
     gtk_stack_add_named (GTK_STACK (pile), p->page_wifi, "wifi");
     gtk_stack_add_named (GTK_STACK (pile), p->page_bt,   "bluetooth");
+    gtk_stack_set_visible_child_name (GTK_STACK (pile), "vide");
+
+    /* Le revelateur donne la largeur, pas la pile : replie il mesure zero,
+     * et le popover reprend exactement la largeur de la Console seule. */
+    p->reveleur = gtk_revealer_new ();
+    gtk_revealer_set_child (GTK_REVEALER (p->reveleur), pile);
+    /* SLIDE_RIGHT : le contenu entre par la gauche et glisse vers la
+     * Console. Le popover etant aligne sur le bord droit de la barre, c'est
+     * lui qui s'etend vers la gauche pendant que la colonne s'ouvre — le
+     * bord droit, celui que l'oeil suit, ne bouge pas d'un pixel. */
+    gtk_revealer_set_transition_type (GTK_REVEALER (p->reveleur),
+                                      GTK_REVEALER_TRANSITION_TYPE_SLIDE_RIGHT);
+    gtk_revealer_set_transition_duration (GTK_REVEALER (p->reveleur), REVEAL_MS);
+    gtk_revealer_set_reveal_child (GTK_REVEALER (p->reveleur), FALSE);
+
+    GtkWidget *rangee = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
+    gtk_box_append (GTK_BOX (rangee), p->reveleur);
+    gtk_box_append (GTK_BOX (rangee), box);
+    /* La colonne de detail est plus haute que la Console (une liste de
+     * reseaux fait 240 px a elle seule). Sans cela elle etirerait la Console
+     * a sa hauteur, et l'alimentation se retrouverait a flotter en bas. */
+    gtk_widget_set_valign (box, GTK_ALIGN_START);
+    gtk_widget_set_valign (p->reveleur, GTK_ALIGN_START);
 
     g_signal_connect (p->wifi.chevron, "clicked",
                       G_CALLBACK (on_ouvrir_page), p);
@@ -694,13 +805,25 @@ panel_new (gboolean apercu)
 
     GtkWidget *popover = gtk_popover_new ();
     p->popover = popover;
-    gtk_popover_set_child (GTK_POPOVER (popover), pile);
+    gtk_popover_set_child (GTK_POPOVER (popover), rangee);
     gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
     gtk_widget_add_css_class (popover, "qs-popover");
     /* Aligne le panneau sur le bord droit de la barre plutot que sur son
      * centre : sinon il deborderait de l'ecran, la barre etant deja collee
      * au bord. */
     gtk_widget_set_halign (popover, GTK_ALIGN_END);
+    /* DEGAGER LA BARRE D'ETAT.
+     *
+     * Sans decalage, GTK colle le bas du popover au haut du bouton qui
+     * l'ouvre : mesure au banc d'essai, le popover finissait a y=1037 et la
+     * barre commencait a y=1038. Zero pixel entre les deux, et l'ombre
+     * portee de la Console — 12 px de decalage, 36 px de flou — retombait
+     * en plein sur la barre, dont les coins arrondis semblaient coupes.
+     *
+     * 12 px, parce que c'est deja l'ecart que le dock et la barre gardent
+     * avec le bord de l'ecran (« margin: 0 12px 12px 0 » dans shell.css).
+     * La Console se pose donc sur la meme trame que le reste du bureau. */
+    gtk_popover_set_offset (GTK_POPOVER (popover), 0, -ECART_BARRE_PX);
 
     gtk_box_append (GTK_BOX (box), console_alimentation_new (popover, apercu));
 

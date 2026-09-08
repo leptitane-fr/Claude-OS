@@ -39,10 +39,8 @@ pas seulement au banc d'essai :
 
 | Sujet | État |
 |---|---|
-| **Audio** | **EN ÉCHEC — chantier n°1.** `sof_rt5682 jsl_rt5682_def: probe with driver sof_rt5682 failed with error -22`, précédé de `ipc tx timed out` et `failed to load DSP topology`. Le DSP démarre, la topologie ne se charge pas. Marche à suivre proposée dans `docs/07`. |
+| **Audio** | **Réparé le 8 septembre 2026**, cette ligne ne décrit plus la machine. Le `probe failed with error -22` a disparu des journaux, PipeWire énumère cinq sorties dont « Jasper Lake HD Audio » par défaut, et les touches de volume la commandent — confirmé à l'oreille. L'historique de la panne reste dans `docs/07`. |
 | Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le conflit de terminal virtuel de l'invariant n°5 — **à reconfirmer** maintenant que greetd est sur le tty7, et à ne pas déclarer résolu sans l'avoir revu. |
-| Rangée supérieure du clavier | Non câblée. `tools/probe-keys.sh` relève les codes, les liaisons labwc restent à écrire. |
-| Volume dans la Console | Le curseur est en place mais **ne commande rien tant que l'audio est en panne** : sans carte son, `wpctl` ne trouve aucune sortie et la rangée se désactive d'elle-même en le disant. |
 | Luminosité automatique | Non implémentée : elle suppose un capteur de luminosité ambiante dont la présence sur MADOO n'a pas été constatée. À vérifier avec `ls /sys/bus/iio/devices/` avant d'écrire quoi que ce soit. |
 | Reports | rclone (Drive, OneDrive), notifications, icônes sur le bureau. |
 
