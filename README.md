@@ -18,10 +18,11 @@ comme environnement de travail principal, doté de privilèges étendus sur le s
 > qui en découlent dans [`CLAUDE.md`](CLAUDE.md) — **à lire avant toute
 > intervention**.
 >
-> Le thème et la luminosité ont été **confirmés à l'écran** le 8 septembre.
-> Restent ouverts : l'**audio**, qui échoue au chargement de la topologie DSP,
-> l'affichage qui n'apparaît qu'au premier contact du pavé tactile, et les
-> touches de la rangée supérieure à câbler.
+> Au 8 septembre 2026 : le thème et la luminosité sont **confirmés à
+> l'écran**, l'**audio fonctionne**, la rangée supérieure du clavier est
+> câblée, le bureau a un **centre de notifications** — le shell est lui-même
+> le serveur freedesktop — et des **barres de titre uniformes**. Reste ouvert
+> l'affichage qui n'apparaît qu'au premier contact du pavé tactile.
 
 ---
 
@@ -154,17 +155,20 @@ applications suivent la bascule clair/sombre sans être relancées — et la
 
 **Chantiers ouverts :**
 
-1. **L'audio.** En échec : le DSP démarre mais la topologie ne se charge pas
-   (`sof_rt5682 … probe failed -22`). C'est le risque n°1 identifié dès
-   `docs/01`, et le premier chantier. `bash tools/validate-install.sh` en
-   rend compte.
-2. **L'affichage au démarrage**, qui n'apparaît qu'au premier contact du
+1. **L'affichage au démarrage**, qui n'apparaît qu'au premier contact du
    pavé tactile. Peut-être réglé par le passage de greetd au tty7 —
    **à reconfirmer**, et à ne pas déclarer résolu sans l'avoir revu.
-3. **Les touches de la rangée supérieure**, à relever avec
-   `bash tools/probe-keys.sh` puis à câbler dans `rc.xml`.
-4. **Les reports** : rclone pour Drive et OneDrive, les notifications, les
-   icônes sur le bureau.
+2. **Les reports** : rclone pour Drive et OneDrive, les icônes sur le bureau.
+3. **La luminosité automatique**, qui suppose un capteur de luminosité
+   ambiante dont la présence sur MADOO n'a pas été constatée.
+
+**Clos le 8 septembre 2026 :** l'audio — le DSP chargeait mal sa topologie,
+c'était le risque n°1 de `docs/01` — la rangée supérieure du clavier, et les
+notifications, qui n'existaient tout simplement pas sur la machine.
+
+Un point restera ouvert sans qu'on y puisse rien : la **synchronisation
+Google dans Chromium**. L'identifiant OAuth partagé que Debian livre a été
+supprimé par Google — interrogé directement, il répond `deleted_client`.
 
 ---
 

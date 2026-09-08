@@ -23,7 +23,15 @@ clair/sombre est suivie par toutes les applications sans qu'aucune soit
 relancée, et le curseur de luminosité commande l'écran immédiatement, par
 logind, sans appartenance au groupe `video` ni réouverture de session.
 
-**L'audio reste en échec**, et c'est le chantier n°1.
+**L'audio fonctionne.** Le `probe failed with error -22` a disparu des
+journaux, PipeWire énumère cinq sorties, et les touches de volume du clavier
+la commandent — confirmé à l'oreille. Ce fut longtemps le chantier n°1 ; il
+ne l'est plus.
+
+**La rangée supérieure du clavier est câblée**, volume et plein écran
+compris. **Les notifications existent** — le shell est lui-même le serveur
+freedesktop. **Les barres de titre sont uniformisées**, avec trois boutons
+colorés propres au projet.
 
 ---
 
@@ -194,19 +202,180 @@ restent en filet.
 
 ---
 
+## Séance du 8 septembre au soir — Chromium, le clavier, la Console, les notifications
+
+Une séance longue, en sept temps, où presque chaque correctif a commencé par
+une hypothèse fausse mesurée puis écartée.
+
+### Chromium : trois pannes, trois causes distinctes
+
+**L'interface restait en anglais** alors que le réglage était bon
+(`intl.accept_languages = "fr"`). `/usr/lib/chromium/locales/` ne contenait
+qu'`en-US.pak` : le paquet `chromium-l10n` n'était pas installé, Chromium
+n'avait donc aucune traduction à charger.
+
+**Les sessions se perdaient à chaque lancement.** Chromium choisit son
+fournisseur de clé de chiffrement d'après `XDG_CURRENT_DESKTOP`. Notre session
+s'annonce `labwc` : aucun cas reconnu, il tentait le portail XDG « Secret »
+et, à son échec, retombait sur une clé codée en dur. Deux clés selon les
+jours, donc deux formats dans le profil — mesuré : **81 cookies en `v11`
+(clé du trousseau) et 5 en `v10` (clé codée en dur)**, les uns illisibles sous
+l'autre clé.
+
+La cause côté portail était dans `portals.conf` : le `default=gtk` routait
+*toutes* les interfaces vers xdg-desktop-portal-gtk, y compris `Secret`, que
+gtk n'implémente pas. Corrigé sur les deux fronts — fournisseur nommé
+explicitement (`--password-store=gnome-libsecret`) et route `Secret` vers
+gnome-keyring. Après quoi `prev_init_success` passe à `true`, trois clés
+disponibles, **zéro échec de déchiffrement**.
+
+**La connexion au compte Google est cassée en amont, pas chez nous.**
+L'identifiant OAuth partagé que Debian livre dans `/etc/chromium.d/apikeys` a
+été interrogé directement :
+
+```
+client_id=811574891467.apps.googleusercontent.com
+→ HTTP 401  {"error": "deleted_client"}
+```
+
+Google a supprimé ce client. Aucun réglage local n'y changera rien. Reste, si
+récupérer les données de Chrome importe : installer Google Chrome à côté, ou
+exporter/importer à la main.
+
+### La rangée supérieure du clavier
+
+Le noyau expose la rangée en mode « vivaldi » ; sa disposition se lit dans
+`/sys/devices/platform/i8042/serio0/function_row_physmap` :
+`EA E9 E7 91 92 94 95 A0 AE B0`.
+
+**Volume : la liaison existait, la commande échouait.** labwc lie déjà les
+touches audio, mais à `amixer sset Master` — et cette carte n'expose aucun
+contrôle « Master », le son passant de toute façon par PipeWire. Le journal de
+session en portait la trace, une ligne par appui :
+
+```
+amixer: Unable to find simple control 'Master',0
+```
+
+Redirigé vers `wpctl`.
+
+**Plein écran : la touche n'était liée à rien.** Elle émet `KEY_FULL_SCREEN`
+(372), que XKB nomme `<I380>` et traduit en keysym `XF86FullScreen`, présent
+dans toutes les dispositions par `* = +inet(evdev)`. La validité du nom a été
+éprouvée en soumettant d'abord à labwc un keysym volontairement faux, qui
+produit `unknown keybind` — les deux vrais n'en produisent aucun.
+
+### La Console
+
+**Elle collait à la barre d'état** : mesuré au banc, le popover finissait à
+`y=1037` et la pastille de la barre commençait à `y=1038`. Zéro pixel, et
+l'ombre portée retombait dessus. Relevée de 12 px, l'écart que le dock et la
+barre gardent déjà avec le bord de l'écran.
+
+**Les curseurs ne suivaient pas les touches** : son et luminosité n'étaient
+relus qu'à l'ouverture. Ni `wpctl` ni `brightnessctl` n'émettent de signal
+qu'on puisse écouter ; une minuterie de 400 ms prend donc le relais entre
+« show » et « closed », et nulle part ailleurs. Ce que cela coûte, mesuré :
+**40 appels à `wpctl` en 1,71 s, soit 35 ms de processeur chacun**, environ
+9 % d'un cœur pendant les quelques secondes où le panneau est ouvert.
+
+**Les pages Wi-Fi et Bluetooth escamotaient la Console.** Elles se déplient
+désormais à sa gauche, dans un révélateur, la Console restant entière à côté.
+
+**La Console glissait de 73 px à l'ouverture du Bluetooth.** Instrumenté
+plutôt que deviné : à taille de surface strictement identique (768x491),
+`popup_x` valait -545 sur la page Wi-Fi et -618 sur le Bluetooth. Ni la liste
+ni les noms d'appareils n'étaient en cause — deux fausses pistes mesurées et
+écartées. C'était **le libellé du message « liste vide »** : un GtkLabel qui
+s'enroule réclame la largeur de son texte déroulé, 369 px, et il vit sur la
+page cachée d'une pile homogène en largeur. GTK positionnant le popover sur
+la largeur naturelle, cette page invisible déplaçait tout.
+
+**La liste n'indiquait jamais le réseau connecté.** Un même SSID est souvent
+porté par plusieurs bornes ; on n'en garde que la plus forte, mais le drapeau
+« actif » était posé sur celle-là. Mesuré sur le réseau de la maison : **le
+SSID connecté est vu par quatre bornes, et celle à laquelle on est réellement
+associé est à 56 de force quand deux autres sont à 60**. Le drapeau se calcule
+désormais par OU logique sur toutes les bornes du SSID.
+
+### Le centre de notifications
+
+La machine n'en avait **aucun** : ni dunst, ni mako, ni notification-daemon, et
+`NameHasOwner org.freedesktop.Notifications` répondait `false`. Chromium et
+Claude Desktop émettaient dans le vide, sans erreur visible — une notification
+perdue ne se plaint pas.
+
+`shell/src/notifications.c` **est** le serveur, pas seulement l'affichage : il
+prend le nom sur le bus de session et implémente les quatre méthodes de la
+spécification freedesktop plus ses deux signaux. Sont honorés `replaces_id`,
+l'urgence critique qui n'expire pas, `image-data` pour la favicon jointe par
+Chromium, et l'action « default » qui rend la carte cliquable. `body-markup`
+est volontairement **absent** des capacités annoncées : les libellés sont
+rendus en texte brut.
+
+Le centre et la bannière sont accrochés au même bouton que la Console — leur
+bord droit est donc hérité, pas recalculé. Seule la verticale est calculée,
+depuis la hauteur que la Console annonce. La formule étant unique, les deux
+ordres d'ouverture donnent des géométries **identiques au pixel**.
+
+Trois pièges, tous mesurés avant d'être corrigés :
+
+- **Un popover s'ouvre vers le bas.** Né au ras de l'écran, GTK le retournait,
+  et ce retournement annulait le décalage : offset -12 donnait `popup_y=-391`,
+  offset -387 donnait `-390`. Avec `GTK_POS_TOP` explicite : -391 puis -766.
+- **`gtk_icon_theme_add_search_path()` ignore un répertoire sans
+  `index.theme`.** L'icône était installée, bien formée, et introuvable.
+- **Un commentaire XML placé avant `<svg>`** repousse la balise hors de la
+  fenêtre où gdk-pixbuf reconnaît le format : « Format d'image non reconnu »
+  sur un fichier parfaitement valide.
+
+Le « clic à côté » a demandé un détour : deux saisies du pointeur ne
+coexistent pas, et le centre doit rester ouvert en même temps que la Console.
+C'est donc la fenêtre de la barre qui s'étend à tout l'écran, transparente, le
+temps de recueillir le clic.
+
+### Les barres de titre
+
+L'uniformité était déjà presque acquise — vérifié, pas supposé : nos
+applications GTK4 portent la barre de labwc, n'ayant pas de `GtkHeaderBar`, et
+Claude Desktop aussi. Ce qui manquait, c'étaient les boutons.
+
+**Les images de boutons ne se surchargent pas** : labwc les cherche dans le
+répertoire du thème, et `themerc-override` ne porte que des propriétés. D'où
+un thème à nous, désigné par `<theme><name>` dans `rc.xml`.
+
+Des pastilles colorées à coins arrondis, pas des disques : le disque aurait
+été un emprunt direct à macOS, le rectangle arrondi est le vocabulaire de tout
+le reste du bureau. Le glyphe est creusé et **visible en permanence** — macOS
+ne le montre qu'au survol, ce qui n'existe pas au doigt.
+
+Deux limites de labwc, mesurées : **`titlebar.height` n'existe plus** en 0.8.3
+(« no longer supported » dans le journal), et **`--reconfigure` ne recharge
+pas les images de boutons** — elles n'apparaissent qu'à la session suivante.
+
+**Chromium était la seule vraie exception** : il dessinait son propre cadre,
+avec un seul `×` et ni réduire ni agrandir. `browser.custom_chrome_frame`
+passe à `false`. Réglage de goût, réversible d'un clic droit sur la bande
+d'onglets, au prix d'une barre de 34 px au-dessus des onglets.
+
+---
+
 ## Ce qui reste à faire
 
 | # | Sujet | État | Prochain geste |
 |---|---|---|---|
-| 1 | **Audio** | En échec | Voir ci-dessous |
-| 2 | Affichage au démarrage | Non diagnostiqué | Reconfirmer maintenant que greetd est sur le tty7 |
-| 3 | Rangée supérieure du clavier | Non câblée | `bash tools/probe-keys.sh`, puis les liaisons dans `rc.xml` |
-| 4 | rclone (Drive, OneDrive) | Reporté | Une section de plus dans le volet du gestionnaire de fichiers |
-| 5 | Notifications | Reporté | — |
-| 6 | Icônes sur le bureau | Reporté | Demande un septième programme — voir `docs/04` §4.4 |
-| 7 | Luminosité automatique | Non implémentée | `ls /sys/bus/iio/devices/` **avant** d'écrire quoi que ce soit |
+| 1 | Affichage au démarrage | Non diagnostiqué | Reconfirmer maintenant que greetd est sur le tty7 |
+| 2 | rclone (Drive, OneDrive) | Reporté | Une section de plus dans le volet du gestionnaire de fichiers |
+| 3 | Icônes sur le bureau | Reporté | Demande un septième programme — voir `docs/04` §4.4 |
+| 4 | Luminosité automatique | Non implémentée | `ls /sys/bus/iio/devices/` **avant** d'écrire quoi que ce soit |
+| 5 | Synchronisation Google dans Chromium | **Impossible** | Rien à faire localement : l'identifiant OAuth de Debian a été supprimé par Google. Passer par Google Chrome, ou exporter/importer à la main. |
 
-### 1. L'audio — le chantier n°1
+**Rayés le 8 septembre 2026 :** l'audio, la rangée supérieure du clavier, et
+les notifications. Les deux premiers ont été confirmés à l'usage par
+l'utilisateur ; le troisième a été éprouvé de bout en bout sur la session
+réelle, du bus D-Bus à la bannière.
+
+### L'audio, pour mémoire — réparé le 8 septembre 2026
 
 ```
 sof_rt5682 jsl_rt5682_def: probe with driver sof_rt5682 failed with error -22
@@ -216,7 +385,15 @@ précédé de `ipc tx timed out` et `failed to load DSP topology`. Le DSP
 démarre, la topologie ne se charge pas. C'était le risque n°1 identifié dès
 [`docs/01`](01-materiel-firmware.md), et il s'est réalisé.
 
-Ce qui n'a **pas** encore été tenté, et qui devrait l'être dans cet ordre :
+Voilà ce que disait ce journal tant que la panne durait. Elle a été levée le
+8 septembre 2026 par l'installation d'`alsa-ucm-conf` et une configuration
+WirePlumber contournant l'ACP faute de profil UCM `sof-rt5682`. Le détail est
+dans le journal du guichet, `/var/log/claude-os/actions.log`.
+
+La marche à suivre d'alors est conservée ci-dessous : elle resservira si la
+carte retombe en panne à une mise à jour de noyau.
+
+Ce qui n'avait **pas** été tenté, dans l'ordre où il fallait le faire :
 
 1. Vérifier quel fichier de topologie le pilote réclame et s'il est présent —
    `dmesg | grep -i topology`, puis `ls /lib/firmware/intel/sof-tplg/`.
@@ -227,10 +404,11 @@ Ce qui n'a **pas** encore été tenté, et qui devrait l'être dans cet ordre :
 4. Ne pas conclure avant d'avoir lu le journal du noyau **complet** au
    démarrage, pas seulement les lignes en erreur.
 
-Tant que l'audio est en panne, la rangée de volume de la Console reste
-désactivée et le dit — c'est voulu.
+La Console désactive d'elle-même sa rangée de volume quand `wpctl` ne trouve
+aucune sortie, et le dit plutôt que d'afficher un curseur qui ne commande
+rien — c'est voulu, et cela reste vrai si la panne revient.
 
-### 2. L'affichage au démarrage
+### L'affichage au démarrage
 
 L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. C'était
 peut-être le conflit de terminal virtuel de l'invariant n°5, maintenant
