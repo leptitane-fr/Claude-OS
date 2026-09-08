@@ -54,3 +54,17 @@ void notifs_ancrer (Notifs *n, GtkWidget *ancre);
 /* Branche le centre sur la hauteur de la Console. A appeler avec le popover
  * rendu par panel_new(). */
 void notifs_suivre_console (Notifs *n, GtkWidget *console);
+
+/* LA NAPPE : ce qui rend le « clic a cote » possible.
+ *
+ * Un popover qui se cache tout seul prend une saisie du pointeur, et deux
+ * saisies ne coexistent pas : la Console se refermerait en ouvrant le centre,
+ * et l'inverse aussi. Le centre reste donc sans saisie, et c'est la fenetre
+ * de la barre d'etat qui, le temps que le centre soit ouvert, s'etend a tout
+ * l'ecran pour recueillir le clic exterieur. Elle est transparente et ne
+ * dessine rien : seule sa zone d'entree change.
+ *
+ * C'est la technique des environnements de bureau pour leurs panneaux, et
+ * elle a l'avantage de ne rien retirer a l'empilement : la Console garde sa
+ * propre saisie, les deux surfaces restent ouvertes ensemble. */
+void notifs_nappe (Notifs *n, GtkWidget *fenetre);

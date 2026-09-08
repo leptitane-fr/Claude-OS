@@ -1085,9 +1085,10 @@ window.fichiers-progres { background-color: @surface; }
   box-shadow: 0 8px 28px @shadow,
               0 2px  6px @shadow-close;
   color: @text-dim;
-  /* Rond : min-width = min-height, et un rayon qui dépasse la moitié. */
-  min-width: 34px;
-  min-height: 34px;
+  /* Ronde, et de la HAUTEUR EXACTE de la pilule — imposée depuis status.c,
+     qui mesure celle-ci plutôt que de la deviner : elle dépend de la police,
+     réglable dans shell.conf. Le rayon dépasse la moitié, la cloche reste
+     donc ronde quelle que soit la valeur mesurée. */
   padding: 0;
   border-radius: 999px;
   /* L'écart avec la pilule, et le même retrait du bord bas qu'elle. */

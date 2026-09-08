@@ -33,6 +33,8 @@
 
 typedef struct {
     Notifs    *notifs;
+    gboolean   ouvrir_centre;
+    GtkWidget *pilule;      /* le bouton de la barre : donne sa hauteur   */
     GtkWidget *clock;
     GtkWidget *bat_icon;
     GtkWidget *bat_level;
@@ -229,6 +231,7 @@ static const GActionEntry actions[] = {
 typedef struct {
     ShellConfig *cfg;   /* police, theme d'icones, clair ou sombre           */
     gboolean apercu;    /* valeurs fixes dans le panneau                     */
+    gboolean centre;    /* ouvre le centre de notifications au demarrage      */
     gboolean ouvrir;    /* ouvre le panneau au demarrage                     */
 } Options;
 
@@ -248,6 +251,37 @@ on_config_reloaded (ShellConfig *cfg, gpointer window)
     shell_styles_load (cfg->theme);
     shell_config_apply (cfg);
     shell_config_free (cfg);
+}
+
+/* LA CLOCHE PREND EXACTEMENT LA HAUTEUR DE LA PILULE.
+ *
+ * Mesuree, et non ecrite dans la feuille de style. La hauteur de la pilule
+ * depend de sa police — l'heure est son element le plus haut — et la police
+ * se regle dans shell.conf : un « min-height » en dur aurait ete juste sur
+ * cette machine et faux des qu'on change de corps.
+ *
+ * L'allocation plutot que la mesure naturelle : elle exclut les marges CSS,
+ * alors que gtk_widget_measure() les inclut. C'est bien la hauteur peinte
+ * qu'on veut egaler, pas l'encombrement.
+ *
+ * Carree, donc, puisque le rayon de la cloche depasse la moitie : elle reste
+ * ronde quelle que soit la valeur. */
+/* Banc d'essai seulement : ouvre le centre comme le ferait un clic. */
+static gboolean
+ouvrir_centre_une_fois (gpointer data)
+{
+    g_signal_emit_by_name (notifs_cloche ((Notifs *) data), "clicked");
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean
+cloche_caler (gpointer data)
+{
+    Status *st = data;
+    int h = gtk_widget_get_height (st->pilule);
+    if (h > 0)
+        gtk_widget_set_size_request (notifs_cloche (st->notifs), h, h);
+    return G_SOURCE_REMOVE;
 }
 
 static void
@@ -332,9 +366,11 @@ on_activate (GtkApplication *app, gpointer user_data)
      * Console, et non a la cloche : c'est ce qui leur donne exactement son
      * bord droit. Accrochees a la cloche, elles se seraient alignees sur le
      * bord gauche de la barre. */
+    st->pilule = button;
     st->notifs = notifs_new (opt->apercu);
     notifs_ancrer (st->notifs, button);
     notifs_suivre_console (st->notifs, console);
+    notifs_nappe (st->notifs, window);
 
     GtkWidget *rangee = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_halign (rangee, GTK_ALIGN_END);
@@ -353,6 +389,11 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     if (opt->ouvrir)
         g_idle_add (open_panel_once, button);
+    if (opt->centre)
+        g_idle_add (ouvrir_centre_une_fois, st->notifs);
+
+    /* Apres presentation : la pilule n'a d'allocation qu'une fois posee. */
+    g_idle_add (cloche_caler, st);
 
     clock_update (st);
     battery_update (st);
@@ -363,11 +404,12 @@ on_activate (GtkApplication *app, gpointer user_data)
 int
 main (int argc, char **argv)
 {
-    /* --ouvrir : ouvre le panneau au demarrage, avec les vraies sources.
+    /* --ouvrir : ouvre la Console au demarrage, avec les vraies sources.
+     * --centre : ouvre le centre de notifications, meme usage.
      * --apercu : idem, mais avec des valeurs fixes, pour juger la mise en
      *            page quand aucun service n'est present. Une aide au banc
      *            d'essai, qui ne prouve rien du branchement D-Bus. */
-    Options opt = { shell_config_load (), FALSE, FALSE };
+    Options opt = { shell_config_load (), FALSE, FALSE, FALSE };
 
     /* Les options de ligne de commande priment sur le fichier : pratique
      * pour essayer un theme sans toucher a sa configuration. */
@@ -376,6 +418,10 @@ main (int argc, char **argv)
         if (g_strcmp0 (argv[i], "--light") == 0)  opt.cfg->dark = FALSE;
         if (g_strcmp0 (argv[i], "--ouvrir") == 0) opt.ouvrir = TRUE;
         if (g_strcmp0 (argv[i], "--apercu") == 0) opt.apercu = opt.ouvrir = TRUE;
+        /* --centre : ouvre le centre de notifications au demarrage. Meme
+         * usage que --ouvrir pour la Console — juger l'empilement des deux
+         * surfaces au banc, ou l'on ne peut pas cliquer. */
+        if (g_strcmp0 (argv[i], "--centre") == 0) opt.centre = TRUE;
     }
 
     GtkApplication *app = gtk_application_new ("os.claude.shell.status",

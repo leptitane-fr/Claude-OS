@@ -6,6 +6,8 @@
 #include "notifications.h"
 #include "panel.h"
 
+#include <gtk4-layer-shell.h>
+
 #include <string.h>
 
 /* Combien de temps la banniere reste a l'ecran quand l'emetteur ne dit rien.
@@ -100,6 +102,7 @@ struct _Notifs {
     GtkWidget   *banniere;     /* GtkPopover : l'arrivante                   */
     guint        banniere_timer;
 
+    GtkWidget   *fenetre;      /* la barre d'etat : sert de nappe            */
     int          hauteur_console;   /* 0 quand elle est fermee               */
     int          largeur_console;   /* imposee aux deux surfaces             */
     GtkWidget   *centre_boite;      /* contenu du centre, pour sa largeur    */
@@ -107,6 +110,54 @@ struct _Notifs {
 
 static void centre_reconstruire (Notifs *n);
 static void positionner (Notifs *n);
+
+/* -------------------------------------------------------------------------
+ * La nappe
+ * ------------------------------------------------------------------------- */
+/* Etendre la fenetre de la barre a tout l'ecran, ou la rendre a son coin.
+ *
+ * Elle ne dessine rien de plus : « window.shell » est transparente, et son
+ * contenu reste cale en bas a droite. Seule sa zone d'entree change, ce qui
+ * suffit a recevoir le clic exterieur. On ne touche PAS a la zone exclusive
+ * — elle vaut -1, la barre ne reserve rien et ne repousse aucune fenetre,
+ * etendue ou non. */
+static void
+nappe_deployer (Notifs *n, gboolean deployee)
+{
+    if (n->fenetre == NULL)
+        return;
+    gtk_layer_set_anchor (GTK_WINDOW (n->fenetre), GTK_LAYER_SHELL_EDGE_LEFT, deployee);
+    gtk_layer_set_anchor (GTK_WINDOW (n->fenetre), GTK_LAYER_SHELL_EDGE_TOP,  deployee);
+}
+
+static void
+centre_fermer (Notifs *n)
+{
+    gtk_popover_popdown (GTK_POPOVER (n->centre));
+    nappe_deployer (n, FALSE);
+}
+
+/* Un clic recu par la fenetre elle-meme est forcement « a cote » : tout ce
+ * qui se clique — la cloche, la pilule, le centre — est un widget qui
+ * revendique le geste avant que la fenetre ne le voie. */
+static void
+on_nappe_clic (GtkGestureClick *g, int n_press, double x, double y, gpointer data)
+{
+    Notifs *n = data;
+    (void) g; (void) n_press; (void) x; (void) y;
+    if (gtk_widget_get_visible (n->centre))
+        centre_fermer (n);
+}
+
+void
+notifs_nappe (Notifs *n, GtkWidget *fenetre)
+{
+    n->fenetre = fenetre;
+    GtkGesture *g = gtk_gesture_click_new ();
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (g), 0);   /* tous les boutons */
+    g_signal_connect (g, "pressed", G_CALLBACK (on_nappe_clic), n);
+    gtk_widget_add_controller (fenetre, GTK_EVENT_CONTROLLER (g));
+}
 
 /* -------------------------------------------------------------------------
  * Une notification
@@ -726,7 +777,7 @@ on_cloche (GtkButton *b, gpointer data)
     (void) b;
 
     if (gtk_widget_get_visible (n->centre)) {
-        gtk_popover_popdown (GTK_POPOVER (n->centre));
+        centre_fermer (n);
         return;
     }
 
