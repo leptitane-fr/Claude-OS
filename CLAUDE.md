@@ -6,11 +6,13 @@ Ce fichier est chargé automatiquement à l'ouverture d'une session. Il dit
 
 ---
 
-## Où en est le projet — 7 septembre 2026
+## Où en est le projet — 8 septembre 2026
 
-**Le bureau est en service.** Firmware UEFI flashé, Debian 13 installée,
-`greetd` ouvre l'écran de connexion Claude OS, le mot de passe est accepté et
-la session labwc s'ouvre avec le dock, la barre d'état et le lanceur.
+**Le bureau est en service et harmonisé.** Firmware UEFI flashé, Debian 13
+installée, `greetd` ouvre l'écran de connexion Claude OS, le mot de passe est
+accepté et la session labwc s'ouvre avec le dock, la Console et le lanceur.
+Les fenêtres portent des boutons réduire/agrandir, et le thème sort du shell
+pour atteindre Chromium, Claude Desktop, le terminal et les barres de titre.
 
 La machine est un **HP Chromebook x360 14b-cb0000sf**, board `MADOO`,
 Pentium Silver N6000, **4 Go de RAM soudée**. Compte utilisateur : `stef`.
@@ -19,18 +21,37 @@ Accès SSH actif — c'est le filet de secours de toute intervention.
 Versions constatées sur la machine : labwc 0.8.3, greetd 0.10.3,
 xwayland 2:24.1.6, libgtk4-layer-shell0 1.0.4, dbus-user-session 1.16.2.
 
+Le fil chronologique complet — ce qui a été fait, dans quel ordre, et ce qui a
+été mesuré — est dans
+[`docs/07`](docs/07-journal-des-seances.md).
+
+### En attente de confirmation à l'écran
+
+Deux corrections sont écrites et éprouvées au banc d'essai, **aucune n'a été
+vue sur MADOO**. Le geste est le même pour les deux :
+
+```sh
+cd ~/Claude-OS && git pull
+sudo bash install/bascule-session.sh --deployer
+sudo bash install/bascule-session.sh --compiler
+# puis fermer et rouvrir la session
+```
+
+| À confirmer | Ce qu'on doit voir |
+|---|---|
+| **Thème global** | Basculer clair/sombre dans les Réglages : Chromium (option « suivre le thème du système »), Claude Desktop, le terminal et les barres de titre suivent **sans être relancés** |
+| **Luminosité** | Le curseur de la Console commande l'écran **immédiatement**, sans rouvrir de session |
+
 ### Ce qui reste ouvert
 
 | Sujet | État |
 |---|---|
-| **Audio** | **EN ÉCHEC.** `sof_rt5682 jsl_rt5682_def: probe with driver sof_rt5682 failed with error -22`, précédé de `ipc tx timed out` et `failed to load DSP topology`. Le DSP démarre mais la topologie ne se charge pas. C'est le risque n°1 identifié dès `docs/01`. |
-| Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le même conflit de terminal virtuel que l'invariant n°5 — à reconfirmer maintenant que greetd est sur le tty7. |
-| Thème global | **La chaîne est vivante sur la machine** : le portail y répond `uint32 2` en clair, `gsettings` conserve la valeur, `~/.config/labwc/themerc-override` est engendré à l'ouverture. Le 8 septembre, il manquait uniquement la **recompilation** du panneau de réglages — voir l'invariant n°3. Reste à confirmer à l'écran, après `--compiler` et réouverture de session, que Chromium (option « suivre le thème du système ») et Claude Desktop suivent la bascule. |
+| **Audio** | **EN ÉCHEC — chantier n°1.** `sof_rt5682 jsl_rt5682_def: probe with driver sof_rt5682 failed with error -22`, précédé de `ipc tx timed out` et `failed to load DSP topology`. Le DSP démarre, la topologie ne se charge pas. Marche à suivre proposée dans `docs/07`. |
+| Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le conflit de terminal virtuel de l'invariant n°5 — **à reconfirmer** maintenant que greetd est sur le tty7, et à ne pas déclarer résolu sans l'avoir revu. |
 | Rangée supérieure du clavier | Non câblée. `tools/probe-keys.sh` relève les codes, les liaisons labwc restent à écrire. |
-| Reports | rclone (Drive, OneDrive), notifications, icônes sur le bureau. |
 | Volume dans la Console | Le curseur est en place mais **ne commande rien tant que l'audio est en panne** : sans carte son, `wpctl` ne trouve aucune sortie et la rangée se désactive d'elle-même en le disant. |
-| Luminosité dans la Console | **Passe par logind** (`SetBrightness` sur le bus système) : aucun groupe, aucune réouverture de session. La signature `(ssu)` est lue dans le binaire de `systemd-logind`, et l'appel est éprouvé contre un service de paille — mais **jamais contre le vrai logind**, faute de siège au banc d'essai. Le groupe `video` et la règle udev restent en filet si logind refuse. |
 | Luminosité automatique | Non implémentée : elle suppose un capteur de luminosité ambiante dont la présence sur MADOO n'a pas été constatée. À vérifier avec `ls /sys/bus/iio/devices/` avant d'écrire quoi que ce soit. |
+| Reports | rclone (Drive, OneDrive), notifications, icônes sur le bureau. |
 
 ---
 
