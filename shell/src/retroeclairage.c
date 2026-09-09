@@ -3,6 +3,9 @@
 #include <gio/gio.h>
 #include <glib/gstdio.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <string.h>
 
 static struct {
     gboolean    tente;         /* init deja passee                          */
@@ -94,6 +97,18 @@ shell_retro_lire (void)
     return (int) (brut * 100.0 / R.maxi + 0.5);
 }
 
+/* ON N'ECRIT PAS DANS SYSFS AVEC g_file_set_contents().
+ *
+ * Elle ecrit de facon ATOMIQUE : elle cree un fichier temporaire a cote de
+ * la cible, y ecrit, puis renomme. Or on ne cree pas de fichier dans sysfs.
+ * L'echec ne dit meme pas cela -- il parle d'un « brightness.79UMV3 »
+ * introuvable, ce qui envoie chercher du cote des droits.
+ *
+ * Constate le 9 septembre 2026 : le fichier etait pourtant root:video en
+ * g+w et le compte bien dans « video ». Rien a voir avec les permissions.
+ *
+ * Un open/write/close sur le fichier existant, donc. C'est aussi ce que
+ * sysfs attend : une seule ecriture, pas de troncature prealable. */
 static void
 ecrire_sysfs (int valeur)
 {
@@ -103,10 +118,18 @@ ecrire_sysfs (int valeur)
         return;
     }
     g_autofree char *chemin = g_build_filename (R.dir, "brightness", NULL);
-    g_autofree char *texte  = g_strdup_printf ("%d", valeur);
-    g_autoptr(GError) err = NULL;
-    if (!g_file_set_contents (chemin, texte, -1, &err))
-        g_message ("retroeclairage : sysfs refuse — %s", err->message);
+    g_autofree char *texte  = g_strdup_printf ("%d\n", valeur);
+
+    int fd = open (chemin, O_WRONLY);
+    if (fd < 0) {
+        g_message ("retroeclairage : ouverture de %s refusee — %s",
+                   chemin, g_strerror (errno));
+        return;
+    }
+    if (write (fd, texte, strlen (texte)) < 0)
+        g_message ("retroeclairage : ecriture refusee — %s",
+                   g_strerror (errno));
+    close (fd);
 }
 
 /* LIRE LA REPONSE DE LOGIND N'EST PAS FACULTATIF.

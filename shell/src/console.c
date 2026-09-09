@@ -11,6 +11,9 @@
 
 #include <gio/gio.h>
 #include <glib/gstdio.h>   /* g_access */
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -378,17 +381,32 @@ lumiere_renoncer (Lumiere *l, const char *cause)
  * ouvert au groupe « video » ET que le compte y appartienne — ce qui, pour
  * l'appartenance, ne prend effet qu'a la session suivante. C'est precisement
  * la raison pour laquelle ce n'est plus la voie principale. */
+/* g_file_set_contents() NE PEUT PAS ecrire dans sysfs : elle passe par un
+ * fichier temporaire cree a cote de la cible, puis un renommage. Sysfs ne
+ * laisse creer aucun fichier, et l'erreur parle d'un « brightness.79UMV3 »
+ * introuvable -- ce qui envoie chercher du cote des droits, a tort.
+ *
+ * Ce repli n'avait donc JAMAIS fonctionne. Personne ne l'avait vu parce que
+ * logind, la voie principale, reussit toujours en session normale ; le
+ * defaut ne se decouvre que la ou logind manque. Trouve le 9 septembre 2026
+ * depuis le module d'energie, qui portait le meme code. */
 static gboolean
 lumiere_par_sysfs (Lumiere *l, int valeur)
 {
     g_autofree char *chemin = g_build_filename (l->dir, "brightness", NULL);
     g_autofree char *texte  = g_strdup_printf ("%d\n", valeur);
-    g_autoptr(GError) err = NULL;
 
-    if (g_file_set_contents (chemin, texte, -1, &err))
-        return TRUE;
-    g_message ("luminosite : sysfs refuse — %s", err->message);
-    return FALSE;
+    int fd = open (chemin, O_WRONLY);
+    if (fd < 0) {
+        g_message ("luminosite : ouverture de %s refusee — %s",
+                   chemin, g_strerror (errno));
+        return FALSE;
+    }
+    gboolean ok = (write (fd, texte, strlen (texte)) >= 0);
+    if (!ok)
+        g_message ("luminosite : ecriture refusee — %s", g_strerror (errno));
+    close (fd);
+    return ok;
 }
 
 /* LA REPONSE PEUT ARRIVER APRES LA FERMETURE DU PANNEAU.
@@ -865,7 +883,12 @@ console_energie_new (gboolean apercu)
     const ShellModeEnergie *modes = shell_energie_modes ();
     for (int i = 0; modes[i].id != NULL && i < (int) G_N_ELEMENTS (en->btn); i++) {
         en->btn[i] = gtk_toggle_button_new_with_label (modes[i].nom);
+        /* « qs-alim » donne la forme, « qs-mode » l'etat coche. Deux classes
+         * plutot qu'une : les boutons de la rangee Alimentation partagent la
+         * forme mais sont des ACTIONS, jamais cochees. Styler leur classe
+         * commune pour l'etat coche aurait melange les deux natures. */
         gtk_widget_add_css_class (en->btn[i], "qs-alim");
+        gtk_widget_add_css_class (en->btn[i], "qs-mode");
         if (i > 0)
             gtk_toggle_button_set_group (GTK_TOGGLE_BUTTON (en->btn[i]),
                                          GTK_TOGGLE_BUTTON (en->btn[0]));
