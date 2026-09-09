@@ -18,6 +18,7 @@
  * ========================================================================= */
 
 #include <gtk/gtk.h>
+#include <string.h>   /* strlen */
 
 #include "config.h"
 
@@ -393,28 +394,51 @@ commutateur (gboolean actif, Modif apply)
 }
 
 /* ------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------
+ * Les volets
+ *
+ * AJOUTER UNE SECTION, C'EST AJOUTER UNE FONCTION ET UNE LIGNE DE TABLE.
+ * Rien d'autre : ni bouton a cabler, ni page a nommer deux fois. Le panneau
+ * n'etait dessine que pour l'interface ; il doit accueillir l'energie, puis
+ * ce qui viendra, sans qu'on reecrive sa charpente a chaque fois.
+ *
+ * Chaque fabrique renvoie le CONTENU du volet, pas son defilement : c'est
+ * on_activate qui enveloppe, pour que toutes les sections defilent pareil.
+ * ------------------------------------------------------------------------- */
+typedef GtkWidget *(*ConstructeurVolet) (ShellConfig *cfg, GtkWidget *window);
+
+typedef struct {
+    const char        *id;      /* nom de page dans la pile                 */
+    const char        *titre;   /* libelle du bouton                        */
+    const char        *icone;
+    ConstructeurVolet  construire;
+} Volet;
+
+static GtkWidget *construire_interface (ShellConfig *cfg, GtkWidget *window);
+static GtkWidget *construire_energie   (ShellConfig *cfg, GtkWidget *window);
+
+static const Volet VOLETS[] = {
+    { "interface", "Interface", "preferences-desktop-symbolic", construire_interface },
+    { "energie",   "Énergie",   "battery-good-symbolic",        construire_energie   },
+    { NULL, NULL, NULL, NULL },
+};
+
+/* Volet a ouvrir au demarrage, pose par la ligne de commande. NULL : le
+ * premier de la table. */
+static const char *volet_demande = NULL;
+
 static void
-on_activate (GtkApplication *app, gpointer user_data)
+on_volet (GtkToggleButton *b, gpointer pile)
 {
-    ShellConfig *cfg = user_data;
+    if (!gtk_toggle_button_get_active (b))
+        return;   /* le groupe emet aussi pour celui qu'on vient de quitter */
+    gtk_stack_set_visible_child_name (
+        GTK_STACK (pile), g_object_get_data (G_OBJECT (b), "volet"));
+}
 
-    shell_config_apply (cfg);
-
-    apres_modif = reappliquer;
-
-    /* Le panneau utilise des widgets GTK ordinaires -- listes deroulantes,
-     * commutateurs, selecteur de fichier -- que notre feuille de style ne
-     * redessine pas. Sans cela, la barre de titre et les boutons resteraient
-     * clairs sur un panneau sombre. */
-    g_object_set (gtk_settings_get_default (),
-                  "gtk-application-prefer-dark-theme", cfg->dark, NULL);
-
-    GtkWidget *window = gtk_application_window_new (app);
-    gtk_widget_add_css_class (window, "shell");
-    gtk_widget_add_css_class (window, "reglages");
-    gtk_window_set_title (GTK_WINDOW (window), "Réglages");
-    gtk_window_set_default_size (GTK_WINDOW (window), 520, 600);
-
+static GtkWidget *
+construire_interface (ShellConfig *cfg, GtkWidget *window)
+{
     GtkWidget *pile = gtk_box_new (GTK_ORIENTATION_VERTICAL, 14);
     gtk_widget_add_css_class (pile, "reglages-pile");
 
@@ -498,11 +522,252 @@ on_activate (GtkApplication *app, gpointer user_data)
            gtk_label_new (""));
     gtk_box_append (GTK_BOX (pile), dock);
 
-    GtkWidget *defil = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (defil),
-                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (defil), pile);
-    gtk_window_set_child (GTK_WINDOW (window), defil);
+    return pile;
+}
+
+/* -------------------------------------------------------------------------
+ * Volet Energie
+ *
+ * ON NE REGLE QUE DES DUREES, JAMAIS LA NATURE DES ETAGES.
+ *
+ * L'ordre attenuer -> eteindre -> suspendre n'est pas un choix de
+ * l'utilisateur : c'est ce que le module sait faire, et l'exposer comme
+ * modifiable inviterait a fabriquer des combinaisons qui n'ont pas de sens
+ * -- eteindre avant d'attenuer, suspendre sans eteindre. On expose donc des
+ * durees, un niveau, et rien d'autre.
+ *
+ * Des listes de durees plutot que des champs libres : « 90 » saisi dans une
+ * case ne dit pas s'il s'agit de secondes ou de minutes, et un delai de
+ * trois secondes tape par erreur rendrait la machine inutilisable.
+ * ------------------------------------------------------------------------- */
+static void set_e_active   (ShellConfig *c, gpointer d) { c->energie_active = GPOINTER_TO_INT (d); }
+static void set_e_niveau   (ShellConfig *c, gpointer d) { c->energie_niveau = GPOINTER_TO_INT (d); }
+static void set_e_sect_att (ShellConfig *c, gpointer d) { c->energie_secteur_attenuer  = GPOINTER_TO_INT (d); }
+static void set_e_sect_ete (ShellConfig *c, gpointer d) { c->energie_secteur_eteindre  = GPOINTER_TO_INT (d); }
+static void set_e_batt_att (ShellConfig *c, gpointer d) { c->energie_batterie_attenuer = GPOINTER_TO_INT (d); }
+static void set_e_batt_ete (ShellConfig *c, gpointer d) { c->energie_batterie_eteindre = GPOINTER_TO_INT (d); }
+
+/* Adresses stables, pour les passer en donnee utilisateur d'un signal sans
+ * transformer un pointeur de fonction en gpointer -- ce que le C ne
+ * garantit pas. */
+static const Modif MODIF_NIVEAU   = set_e_niveau;
+static const Modif MODIF_SECT_ATT = set_e_sect_att;
+static const Modif MODIF_SECT_ETE = set_e_sect_ete;
+static const Modif MODIF_BATT_ATT = set_e_batt_att;
+static const Modif MODIF_BATT_ETE = set_e_batt_ete;
+
+static const int   DUREES[]     = { 0, 30, 60, 120, 180, 300, 600, 900, 1800 };
+static const char *DUREES_NOM[] = { "Jamais", "30 s", "1 min", "2 min",
+                                    "3 min", "5 min", "10 min", "15 min",
+                                    "30 min" };
+#define DUREES_N ((int) G_N_ELEMENTS (DUREES))
+
+static const int   NIVEAUX[]     = { 10, 20, 30, 40, 50 };
+static const char *NIVEAUX_NOM[] = { "10 %", "20 %", "30 %", "40 %", "50 %" };
+#define NIVEAUX_N ((int) G_N_ELEMENTS (NIVEAUX))
+
+static void
+on_choix_duree (GObject *dd, GParamSpec *ps, gpointer modif)
+{
+    (void) ps;
+    guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
+    if (i == GTK_INVALID_LIST_POSITION || (int) i >= DUREES_N)
+        return;
+    modifier (*(const Modif *) modif, GINT_TO_POINTER (DUREES[i]));
+}
+
+static void
+on_choix_niveau (GObject *dd, GParamSpec *ps, gpointer modif)
+{
+    (void) ps;
+    guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
+    if (i == GTK_INVALID_LIST_POSITION || (int) i >= NIVEAUX_N)
+        return;
+    modifier (*(const Modif *) modif, GINT_TO_POINTER (NIVEAUX[i]));
+}
+
+/* Une liste de durees positionnee sur la valeur courante. Une valeur absente
+ * de la liste -- shell.conf s'edite a la main -- retient la duree connue
+ * immediatement inferieure plutot que de retomber sur « Jamais », qui
+ * desactiverait l'etage a l'insu de celui qui a ecrit le fichier. */
+static GtkWidget *
+liste_duree (int valeur, const Modif *modif)
+{
+    GtkStringList *l = gtk_string_list_new (NULL);
+    for (int i = 0; i < DUREES_N; i++)
+        gtk_string_list_append (l, DUREES_NOM[i]);
+
+    int choisi = 0;
+    for (int i = 0; i < DUREES_N; i++)
+        if (DUREES[i] <= valeur)
+            choisi = i;
+    if (valeur <= 0)
+        choisi = 0;
+
+    GtkWidget *dd = gtk_drop_down_new (G_LIST_MODEL (l), NULL);
+    gtk_drop_down_set_selected (GTK_DROP_DOWN (dd), choisi);
+    g_signal_connect (dd, "notify::selected",
+                      G_CALLBACK (on_choix_duree), (gpointer) modif);
+    return dd;
+}
+
+static GtkWidget *
+construire_energie (ShellConfig *cfg, GtkWidget *window)
+{
+    (void) window;
+
+    GtkWidget *pile = gtk_box_new (GTK_ORIENTATION_VERTICAL, 14);
+    gtk_widget_add_css_class (pile, "reglages-pile");
+
+    /* --- Veille de l'ecran --- */
+    GtkWidget *ecran = carte ("Veille de l'écran");
+    ligne (ecran, "Activer la veille progressive",
+           "Le rétroéclairage est le premier poste de consommation de cette "
+           "machine : environ 1 à 2 W sur 6,8 W mesurés.",
+           commutateur (cfg->energie_active, set_e_active));
+
+    GtkStringList *niv = gtk_string_list_new (NULL);
+    int niv_choisi = 2;
+    for (int i = 0; i < NIVEAUX_N; i++) {
+        gtk_string_list_append (niv, NIVEAUX_NOM[i]);
+        if (NIVEAUX[i] == cfg->energie_niveau)
+            niv_choisi = i;
+    }
+    GtkWidget *dd_niv = gtk_drop_down_new (G_LIST_MODEL (niv), NULL);
+    gtk_drop_down_set_selected (GTK_DROP_DOWN (dd_niv), niv_choisi);
+    g_signal_connect (dd_niv, "notify::selected",
+                      G_CALLBACK (on_choix_niveau), (gpointer) &MODIF_NIVEAU);
+    ligne (ecran, "Luminosité atténuée",
+           "Assez bas pour que le gain soit réel, assez haut pour qu'on "
+           "comprenne que la machine s'assoupit plutôt qu'elle ne s'éteint.",
+           dd_niv);
+    gtk_box_append (GTK_BOX (pile), ecran);
+
+    /* --- Secteur --- */
+    GtkWidget *sect = carte ("Sur secteur");
+    ligne (sect, "Atténuer après", NULL,
+           liste_duree (cfg->energie_secteur_attenuer, &MODIF_SECT_ATT));
+    ligne (sect, "Éteindre l'écran après",
+           "Toute activité du clavier ou du pavé tactile rallume et "
+           "restaure la luminosité d'avant.",
+           liste_duree (cfg->energie_secteur_eteindre, &MODIF_SECT_ETE));
+    gtk_box_append (GTK_BOX (pile), sect);
+
+    /* --- Batterie --- */
+    GtkWidget *batt = carte ("Sur batterie");
+    ligne (batt, "Atténuer après", NULL,
+           liste_duree (cfg->energie_batterie_attenuer, &MODIF_BATT_ATT));
+    ligne (batt, "Éteindre l'écran après", NULL,
+           liste_duree (cfg->energie_batterie_eteindre, &MODIF_BATT_ETE));
+    gtk_box_append (GTK_BOX (pile), batt);
+
+    /* --- Ce qui n'est pas reglable, et pourquoi ---
+     *
+     * Une case grisee sans explication passe pour une panne. Celle-ci dit
+     * ce qui manque et ce qu'il faudrait pour l'ouvrir. */
+    GtkWidget *ordi = carte ("Mise en veille de l'ordinateur");
+    GtkWidget *etat = gtk_label_new (
+        cfg->energie_suspendre_permis
+        ? "Autorisée."
+        : "Verrouillée. Le 9 septembre 2026, onze suspensions consécutives "
+          "n'ont pas repris : la machine redémarrait au lieu de se réveiller. "
+          "Tant que la reprise n'est pas fiable, endormir l'ordinateur ferait "
+          "perdre la session. L'étage existe et se règle, mais il reste fermé.");
+    gtk_widget_add_css_class (etat, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (etat), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (etat), 46);
+    gtk_widget_set_halign (etat, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (ordi), etat);
+    gtk_box_append (GTK_BOX (pile), ordi);
+
+    return pile;
+}
+
+static void
+on_activate (GtkApplication *app, gpointer user_data)
+{
+    ShellConfig *cfg = user_data;
+
+    shell_config_apply (cfg);
+
+    apres_modif = reappliquer;
+
+    /* Le panneau utilise des widgets GTK ordinaires -- listes deroulantes,
+     * commutateurs, selecteur de fichier -- que notre feuille de style ne
+     * redessine pas. Sans cela, la barre de titre et les boutons resteraient
+     * clairs sur un panneau sombre. */
+    g_object_set (gtk_settings_get_default (),
+                  "gtk-application-prefer-dark-theme", cfg->dark, NULL);
+
+    GtkWidget *window = gtk_application_window_new (app);
+    gtk_widget_add_css_class (window, "shell");
+    gtk_widget_add_css_class (window, "reglages");
+    gtk_window_set_title (GTK_WINDOW (window), "Réglages");
+    /* 760 et non 520 : la colonne de navigation prend sa place a gauche, et
+     * les textes explicatifs des lignes ont besoin de la leur a droite. En
+     * dessous, les listes deroulantes se collaient aux libelles. */
+    gtk_window_set_default_size (GTK_WINDOW (window), 760, 620);
+
+    GtkWidget *contenu = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+
+    GtkWidget *volets = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+    gtk_widget_add_css_class (volets, "reglages-volets");
+
+    GtkWidget *pile_volets = gtk_stack_new ();
+    gtk_widget_set_hexpand (pile_volets, TRUE);
+    gtk_stack_set_transition_type (GTK_STACK (pile_volets),
+                                   GTK_STACK_TRANSITION_TYPE_CROSSFADE);
+    /* 90 ms : assez pour que l'oeil suive le changement de volet, assez peu
+     * pour qu'un aller-retour entre deux sections ne donne pas l'impression
+     * d'attendre. */
+    gtk_stack_set_transition_duration (GTK_STACK (pile_volets), 90);
+
+    /* « --volet=energie » ouvre directement la bonne section. La Console s'en
+     * sert : proposer un reglage puis obliger a le chercher dans une liste
+     * est une facon sure de le rendre introuvable. */
+    GtkWidget *premier = NULL, *demande = NULL;
+    for (int v = 0; VOLETS[v].id != NULL; v++) {
+        GtkWidget *page = VOLETS[v].construire (cfg, window);
+
+        GtkWidget *defil = gtk_scrolled_window_new ();
+        gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (defil),
+                                        GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+        gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (defil), page);
+        gtk_stack_add_named (GTK_STACK (pile_volets), defil, VOLETS[v].id);
+
+        GtkWidget *b = gtk_toggle_button_new ();
+        gtk_widget_add_css_class (b, "reglages-volet");
+
+        GtkWidget *rangee = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
+        gtk_box_append (GTK_BOX (rangee),
+                        gtk_image_new_from_icon_name (VOLETS[v].icone));
+        GtkWidget *nom = gtk_label_new (VOLETS[v].titre);
+        gtk_widget_add_css_class (nom, "reglages-volet-nom");
+        gtk_widget_set_halign (nom, GTK_ALIGN_START);
+        gtk_box_append (GTK_BOX (rangee), nom);
+        gtk_button_set_child (GTK_BUTTON (b), rangee);
+
+        if (premier == NULL)
+            premier = b;
+        else
+            gtk_toggle_button_set_group (GTK_TOGGLE_BUTTON (b),
+                                         GTK_TOGGLE_BUTTON (premier));
+        if (volet_demande != NULL && g_strcmp0 (volet_demande, VOLETS[v].id) == 0)
+            demande = b;
+
+        /* L'identifiant de page voyage avec le bouton : le rappel n'a besoin
+         * de rien d'autre, et ajouter un volet ne demande pas d'y toucher. */
+        g_object_set_data (G_OBJECT (b), "volet", (gpointer) VOLETS[v].id);
+        g_signal_connect (b, "toggled", G_CALLBACK (on_volet), pile_volets);
+        gtk_box_append (GTK_BOX (volets), b);
+    }
+    GtkWidget *actif = (demande != NULL) ? demande : premier;
+    if (actif != NULL)
+        gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (actif), TRUE);
+
+    gtk_box_append (GTK_BOX (contenu), volets);
+    gtk_box_append (GTK_BOX (contenu), pile_volets);
+    gtk_window_set_child (GTK_WINDOW (window), contenu);
 
     gtk_window_present (GTK_WINDOW (window));
 }
@@ -510,7 +775,12 @@ on_activate (GtkApplication *app, gpointer user_data)
 int
 main (int argc, char **argv)
 {
-    (void) argc; (void) argv;
+    for (int i = 1; i < argc; i++) {
+        if (g_str_has_prefix (argv[i], "--volet="))
+            volet_demande = argv[i] + strlen ("--volet=");
+        else
+            g_message ("reglages : argument ignore — %s", argv[i]);
+    }
 
     ShellConfig *cfg = shell_config_load ();
     GtkApplication *app = gtk_application_new ("os.claude.shell.reglages",

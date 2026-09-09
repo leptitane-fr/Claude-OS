@@ -374,6 +374,47 @@ popover.dock-windows-popover > contents {
    s'en détachent. Aucune valeur littérale — le thème décide. */
 window.reglages { background-color: @surface-alt; }
 
+/* --- Réglages : navigation par volets -------------------------------------
+ *
+ * Le panneau n'avait qu'une section, Interface, et empilait ses cartes dans
+ * une seule colonne défilante. Il doit désormais en accueillir d'autres au
+ * fur et à mesure qu'elles s'écrivent — l'énergie d'abord.
+ *
+ * Une barre latérale plutôt que des onglets en haut : les sections vont se
+ * multiplier, et une colonne les accepte toutes sans que les libellés
+ * rétrécissent. C'est aussi la disposition qu'ont ChromeOS et GNOME, donc
+ * celle qu'on cherche du regard. */
+.reglages-volets {
+  background-color: @surface-sunk;
+  border-right: 1px solid @border;
+  padding: 12px 8px;
+  min-width: 168px;
+}
+
+.reglages-volet {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: @text;
+  transition: background-color 120ms ease-out;
+}
+
+.reglages-volet:hover { background-color: @surface-alt; }
+
+/* Le volet courant porte la couleur d'accent : c'est le seul repère qui dise
+ * où l'on se trouve, la barre latérale ne se refermant jamais. */
+.reglages-volet:checked {
+  background-color: @accent;
+  color: @on-accent;
+}
+
+.reglages-volet:checked:hover { background-color: @accent-hover; }
+
+.reglages-volet-nom { font-weight: 500; }
+
 .reglages-pile { padding: 16px; }
 
 .reglages-carte {

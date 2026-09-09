@@ -119,6 +119,27 @@ réouverture de session. Vérifier la portée avant de conclure :
 grep -oE 'session-[0-9]+\.scope|app-com[^/]*\.scope' /proc/$(pgrep -x claude-os-statu)/cgroup
 ```
 
+### Le panneau Réglages, en volets
+
+Restructuré le 9 septembre 2026. Il n'était dessiné que pour l'interface :
+une colonne de cartes dans un défilement, sans navigation. Il porte
+désormais une barre latérale et une `GtkStack`.
+
+**Ajouter une section, c'est ajouter une fonction et une ligne de table** —
+`VOLETS[]` dans `settings.c`. Ni bouton à câbler, ni page à nommer deux
+fois. Chaque fabrique renvoie le *contenu* du volet ; `on_activate`
+enveloppe dans le défilement, pour que toutes les sections défilent pareil.
+
+`claude-os-reglages --volet=energie` ouvre directement une section.
+Proposer un réglage puis obliger à le chercher dans une liste est une façon
+sûre de le rendre introuvable.
+
+Le volet **Énergie** n'expose que des durées et un niveau, jamais l'ordre
+des étages : atténuer → éteindre → suspendre est ce que le module sait
+faire, et l'ouvrir inviterait à fabriquer des combinaisons sans
+signification. Listes de durées et non champs libres — « 90 » saisi dans
+une case ne dit pas s'il s'agit de secondes ou de minutes.
+
 ### Le centre de notifications
 
 Écrit le 8 septembre 2026. La machine n'avait **aucun** démon : ni dunst, ni
