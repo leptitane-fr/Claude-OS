@@ -6,6 +6,7 @@
 #include <gtk/gtk.h>
 #include <gdk/wayland/gdkwayland.h>
 #include <wayland-client.h>
+#include <glib-unix.h>        /* g_unix_fd_add */
 
 #include <string.h>            /* strcmp */
 
@@ -14,6 +15,25 @@
 typedef enum { PREAVIS = 0, ATTENUER, ETEINDRE, SUSPENDRE, ETAGES } Etage;
 
 static struct {
+    /* NOTRE PROPRE CONNEXION AU COMPOSITEUR, ET C'EST DELIBERE.
+     *
+     * La premiere version accrochait ses objets a la connexion de GTK, par
+     * gdk_wayland_display_get_wl_display(). Ils atterrissaient donc dans la
+     * file d'evenements PAR DEFAUT, que GDK ne s'engage pas a vider : les
+     * « idled » s'y accumulaient et n'etaient depiles que lorsqu'une
+     * operation GTK provoquait incidemment un aller-retour.
+     *
+     * Le symptome, le 9 septembre 2026 : des etages atteints par salves
+     * irregulieres puis plus rien du tout, pendant qu'un client d'essai
+     * isole, lui, recevait ses evenements a la seconde. Meme compositeur,
+     * meme instant -- ce qui a mis la faute hors du protocole et dans la
+     * facon de s'y brancher.
+     *
+     * Une seconde connexion coute une socket. C'est le prix d'une file
+     * qu'on vide soi-meme, depuis une source GLib branchee sur son propre
+     * descripteur : plus aucune dependance au bon vouloir de GDK. */
+    struct wl_display               *display;
+    guint                            source;
     struct ext_idle_notifier_v1     *notifier;
     struct wl_seat                  *seat;
     struct ext_idle_notification_v1 *notifs[ETAGES];
@@ -215,15 +235,11 @@ reconstruire (void)
         armes++;
     }
 
-    /* Les requetes partent dans la file par defaut. GTK vide cette file a
-     * chaque tour de boucle, mais l'init a lieu AVANT que la boucle ne
-     * tourne : sans ce flush, les notifications ne seraient creees qu'au
-     * premier evenement recu par GTK -- c'est-a-dire, sur un bureau au
-     * repos, peut-etre jamais. */
-    GdkDisplay *gdk = gdk_display_get_default ();
-    if (GDK_IS_WAYLAND_DISPLAY (gdk))
-        wl_display_flush (gdk_wayland_display_get_wl_display (
-                              GDK_WAYLAND_DISPLAY (gdk)));
+    /* Sans ce flush, les requetes resteraient dans le tampon d'emission :
+     * la boucle GLib ne l'ecrit que lorsqu'elle a autre chose a faire, et
+     * sur un bureau au repos -- la situation meme qu'on veut detecter --
+     * cela peut ne jamais arriver. */
+    wl_display_flush (E.display);
 
     g_message ("energie : mode %s, %d etage(s) arme(s) — preavis %ds, "
                "attenuer %ds, eteindre %ds, suspendre %ds%s",
@@ -266,6 +282,10 @@ on_global (void *data, struct wl_registry *registry, uint32_t name,
     if (strcmp (interface, ext_idle_notifier_v1_interface.name) == 0)
         E.notifier = wl_registry_bind (registry, name,
                                        &ext_idle_notifier_v1_interface, 1);
+    /* Le siege vient de NOTRE registre, pas de GDK : un objet d'une autre
+     * connexion ne peut pas etre passe en argument d'une requete. */
+    else if (strcmp (interface, wl_seat_interface.name) == 0 && E.seat == NULL)
+        E.seat = wl_registry_bind (registry, name, &wl_seat_interface, 1);
 }
 
 static void
@@ -275,6 +295,27 @@ on_global_remove (void *d, struct wl_registry *r, uint32_t n)
 static const struct wl_registry_listener registry_listener = {
     on_global, on_global_remove,
 };
+
+/* Le descripteur est lisible : wl_display_dispatch() ne bloquera donc pas.
+ * Une erreur ici n'est pas rattrapable -- le compositeur a ferme la
+ * connexion -- on le dit et on rend la source. */
+static gboolean
+on_wayland_lisible (gint fd, GIOCondition cond, gpointer data)
+{
+    (void) fd; (void) data;
+
+    if (cond & (G_IO_ERR | G_IO_HUP)) {
+        g_message ("energie : connexion Wayland rompue, module inactif");
+        E.source = 0;
+        return G_SOURCE_REMOVE;
+    }
+    if (wl_display_dispatch (E.display) < 0) {
+        g_message ("energie : lecture Wayland en echec, module inactif");
+        E.source = 0;
+        return G_SOURCE_REMOVE;
+    }
+    return G_SOURCE_CONTINUE;
+}
 
 void
 shell_energie_init (const ShellConfig *cfg)
@@ -298,28 +339,29 @@ shell_energie_init (const ShellConfig *cfg)
         return;
     }
 
-    GdkSeat *gdk_seat = gdk_display_get_default_seat (gdk);
-    if (gdk_seat == NULL) {
-        g_message ("energie : aucun siege GDK, module inactif");
-        return;
-    }
-    E.seat = gdk_wayland_seat_get_wl_seat (GDK_WAYLAND_SEAT (gdk_seat));
-    if (E.seat == NULL) {
-        g_message ("energie : le siege GDK n'a pas de wl_seat, module inactif");
+    E.display = wl_display_connect (NULL);
+    if (E.display == NULL) {
+        g_message ("energie : seconde connexion Wayland refusee, module inactif");
         return;
     }
 
-    struct wl_display  *display  =
-        gdk_wayland_display_get_wl_display (GDK_WAYLAND_DISPLAY (gdk));
-    struct wl_registry *registry = wl_display_get_registry (display);
+    struct wl_registry *registry = wl_display_get_registry (E.display);
     wl_registry_add_listener (registry, &registry_listener, NULL);
-    wl_display_roundtrip (display);
+    wl_display_roundtrip (E.display);
 
-    if (E.notifier == NULL) {
-        g_message ("energie : le compositeur n'annonce pas "
-                   "ext_idle_notifier_v1, module inactif");
+    if (E.notifier == NULL || E.seat == NULL) {
+        g_message ("energie : le compositeur n'annonce pas %s, module inactif",
+                   E.notifier == NULL ? "ext_idle_notifier_v1" : "wl_seat");
+        wl_display_disconnect (E.display);
+        E.display = NULL;
         return;
     }
+
+    /* Une source GLib sur NOTRE descripteur : la boucle principale nous
+     * reveille quand le compositeur parle, et nous depilons nous-memes. Ce
+     * n'est pas de la scrutation -- la source dort tant que rien n'arrive. */
+    E.source = g_unix_fd_add (wl_display_get_fd (E.display), G_IO_IN,
+                              on_wayland_lisible, NULL);
 
     appliquer_config (cfg);
     reconstruire ();
