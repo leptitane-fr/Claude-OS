@@ -53,6 +53,15 @@ typedef struct {
      * Zero le supprime. */
     int       energie_preavis;
 
+    /* Verrouillage de l'ecran. Le delai se compte DEPUIS L'EXTINCTION, pas
+     * depuis le debut de l'inactivite : c'est un sursis. On revient dans la
+     * minute, un geste rend la main sans rien taper ; au-dela, le code PIN.
+     *
+     * Sans etage « eteindre », pas de verrouillage : le verrou s'ancre sur
+     * lui, et un ecran qui ne s'eteint jamais n'a pas de reveil. */
+    gboolean  energie_verrou;
+    int       energie_verrou_delai;
+
     /* L'etage « suspendre » ne s'ouvre que si CE drapeau est vrai, quels que
      * soient les delais. Il vaut FALSE par defaut : le 9 septembre 2026,
      * onze suspensions consecutives n'ont pas repris sur cette machine. */

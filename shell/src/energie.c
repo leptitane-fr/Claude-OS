@@ -22,6 +22,7 @@ typedef enum {
     ATTENUER,
     PREAVIS_ETE,       /* avant l'extinction                               */
     ETEINDRE,
+    VERROU,            /* apres l'extinction, si le reglage le demande     */
     SUSPENDRE,
     ETAGES
 } Etage;
@@ -53,6 +54,7 @@ static struct {
     int      delais[ETAGES];      /* secondes ; 0 = etage ferme            */
     int      niveau;              /* pourcent de l'etage « attenuer »      */
     int      preavis_s;           /* duree du compte a rebours             */
+    GPid     verrou;              /* le verrou d'ecran, 0 si aucun         */
     gboolean suspendre_permis;
     gboolean actif;
     const ShellModeEnergie *mode;
@@ -128,6 +130,37 @@ machine_occupee (void)
  * Les etages
  * ------------------------------------------------------------------------- */
 
+/* Le verrou est un processus separe, et c'est deliberé : s'il tombe, la
+ * barre d'etat ne tombe pas avec lui. C'est aussi ce que le protocole
+ * impose -- le client du verrouillage doit vivre aussi longtemps que le
+ * verrou tient. */
+static void
+verrou_termine (GPid pid, gint statut, gpointer donnee)
+{
+    (void) statut; (void) donnee;
+    g_spawn_close_pid (pid);
+    if (E.verrou == pid)
+        E.verrou = 0;
+    g_message ("energie : verrou d'ecran termine");
+}
+
+static void
+verrouiller_ecran (void)
+{
+    char *argv[] = { (char *) "claude-os-verrou", NULL };
+    g_autoptr(GError) err = NULL;
+
+    if (!g_spawn_async (NULL, argv, NULL,
+                        G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD,
+                        NULL, NULL, &E.verrou, &err)) {
+        g_message ("energie : verrou d'ecran indisponible — %s", err->message);
+        E.verrou = 0;
+        return;
+    }
+    g_child_watch_add (E.verrou, verrou_termine, NULL);
+    g_message ("energie : verrou d'ecran lance");
+}
+
 static void
 suspendre_la_machine (void)
 {
@@ -185,6 +218,17 @@ on_idled (void *data, struct ext_idle_notification_v1 *n)
         if (E.avant < 0)
             E.avant = shell_retro_lire ();   /* etage 1 ferme : noter ici */
         shell_retro_ecrire (0);
+        break;
+
+    case VERROU:
+        /* UN SEUL VERROU A LA FOIS. L'utilisateur qui touche le clavier pour
+         * voir l'ecran de saisie declenche « resumed » : les etages se
+         * rearment, et sans ce garde-fou un second verrou serait lance par
+         * dessus le premier -- que le compositeur refuserait, en laissant
+         * une trace incomprehensible dans le journal. */
+        if (E.verrou != 0)
+            break;
+        verrouiller_ecran ();
         break;
 
     case SUSPENDRE:
@@ -256,10 +300,12 @@ reconstruire (void)
     wl_display_flush (E.display);
 
     g_message ("energie : mode %s, %d etage(s) arme(s) — preavis %ds "
-               "(a %ds et %ds), attenuer %ds, eteindre %ds, suspendre %ds%s",
+               "(a %ds et %ds), attenuer %ds, eteindre %ds, verrou %ds, "
+               "suspendre %ds%s",
                E.mode != NULL ? E.mode->id : "?", armes, E.preavis_s,
                E.delais[PREAVIS_ATT], E.delais[PREAVIS_ETE],
-               E.delais[ATTENUER], E.delais[ETEINDRE], E.delais[SUSPENDRE],
+               E.delais[ATTENUER], E.delais[ETEINDRE], E.delais[VERROU],
+               E.delais[SUSPENDRE],
                E.suspendre_permis ? "" : " (suspension verrouillee)");
 }
 
@@ -292,6 +338,13 @@ appliquer_config (const ShellConfig *cfg)
                              && ete - E.preavis_s > att)
                             ? ete - E.preavis_s : 0;
     E.delais[ETEINDRE]    = ete;
+
+    /* Le verrou s'ancre sur l'extinction, jamais sur l'inactivite brute :
+     * « zero » verrouille au moment ou l'ecran s'eteint, une valeur
+     * positive laisse ce sursis. Sans etage « eteindre », pas de verrou. */
+    E.delais[VERROU] = (cfg->energie_verrou && ete > 0)
+                       ? ete + MAX (cfg->energie_verrou_delai, 0) : 0;
+
     E.delais[SUSPENDRE]   = sus;
 }
 

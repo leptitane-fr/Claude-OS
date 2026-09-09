@@ -1212,6 +1212,8 @@ construire_interface (ShellConfig *cfg, GtkWidget *window)
 static void set_e_active   (ShellConfig *c, gpointer d) { c->energie_active = GPOINTER_TO_INT (d); }
 static void set_e_niveau   (ShellConfig *c, gpointer d) { c->energie_niveau = GPOINTER_TO_INT (d); }
 static void set_e_opacite  (ShellConfig *c, gpointer d) { c->energie_opacite = GPOINTER_TO_INT (d); }
+static void set_verrou     (ShellConfig *c, gpointer d) { c->energie_verrou = GPOINTER_TO_INT (d); }
+static void set_verrou_del (ShellConfig *c, gpointer d) { c->energie_verrou_delai = GPOINTER_TO_INT (d); }
 
 static void set_preavis    (ShellConfig *c, gpointer d) { c->energie_preavis = GPOINTER_TO_INT (d); }
 static void set_trav_att   (ShellConfig *c, gpointer d) { c->energie_travail_attenuer = GPOINTER_TO_INT (d); }
@@ -1230,6 +1232,7 @@ static void set_nom_sus    (ShellConfig *c, gpointer d) { c->energie_nomade_susp
  * garantit pas. */
 static const Modif M_NIVEAU   = set_e_niveau;
 static const Modif M_OPACITE  = set_e_opacite;
+static const Modif M_VERROU_D = set_verrou_del;
 static const Modif M_PREAVIS  = set_preavis;
 static const Modif M_TRAV_ATT = set_trav_att;
 static const Modif M_TRAV_ETE = set_trav_ete;
@@ -1358,6 +1361,24 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
            liste (OPACITES, OPACITES_NOM, OPACITES_N,
                   cfg->energie_opacite, &M_OPACITE));
     gtk_box_append (GTK_BOX (pile), ecran);
+
+    /* --- Reprise de la session ---
+     *
+     * Le délai se compte DEPUIS L'EXTINCTION et non depuis le début de
+     * l'inactivité : c'est un sursis. On revient dans la minute, un geste
+     * rend la main ; au-delà, le code PIN. « Immédiat » verrouille au
+     * moment même où l'écran s'éteint. */
+    GtkWidget *rep = carte ("Reprise de la session");
+    ligne (rep, "Demander le code PIN au réveil",
+           "L'écran se verrouille sans fermer la session : les applications "
+           "continuent, les téléchargements aussi. Le mot de passe reste "
+           "accepté si le code PIN n'est pas disponible.",
+           commutateur (cfg->energie_verrou, set_verrou));
+    ligne (rep, "Après l'extinction de l'écran",
+           "Sursis avant le verrouillage. Sans étage « éteindre », le "
+           "verrouillage ne se déclenche pas : il s'ancre sur lui.",
+           LISTE_DUREE (cfg->energie_verrou_delai, &M_VERROU_D));
+    gtk_box_append (GTK_BOX (pile), rep);
 
     /* --- Un volet par mode, dans l'ordre de la table --- */
     const ShellModeEnergie *modes = shell_energie_modes ();

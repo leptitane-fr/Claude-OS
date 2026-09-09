@@ -171,6 +171,8 @@ shell_config_load (void)
     cfg->energie_niveau   = 30;
     cfg->energie_opacite  = 55;
     cfg->energie_preavis  = 10;    /* 10 s, commun aux trois modes */
+    cfg->energie_verrou       = FALSE;
+    cfg->energie_verrou_delai = 60;   /* une minute de sursis */
     cfg->energie_suspendre_permis = FALSE;
 
     cfg->energie_travail_attenuer = 600;   /* 10 min */
@@ -231,6 +233,8 @@ shell_config_load (void)
      * ensuite, qui prime. */
     lire_entier (kf, "travail_preavis",  &cfg->energie_preavis);
     lire_entier (kf, "preavis",          &cfg->energie_preavis);
+    lire_bool   (kf, "verrou",           &cfg->energie_verrou);
+    lire_entier (kf, "verrou_delai",     &cfg->energie_verrou_delai);
 
     lire_entier (kf, "travail_attenuer", &cfg->energie_travail_attenuer);
     lire_entier (kf, "travail_eteindre", &cfg->energie_travail_eteindre);
@@ -315,6 +319,8 @@ shell_config_save (const ShellConfig *cfg, GError **error)
     g_key_file_set_integer (kf, "energie", "niveau", cfg->energie_niveau);
     g_key_file_set_integer (kf, "energie", "opacite", cfg->energie_opacite);
     g_key_file_set_integer (kf, "energie", "preavis", cfg->energie_preavis);
+    g_key_file_set_boolean (kf, "energie", "verrou", cfg->energie_verrou);
+    g_key_file_set_integer (kf, "energie", "verrou_delai", cfg->energie_verrou_delai);
     g_key_file_set_boolean (kf, "energie", "suspendre_permis",
                             cfg->energie_suspendre_permis);
     g_key_file_set_integer (kf, "energie", "travail_attenuer", cfg->energie_travail_attenuer);
