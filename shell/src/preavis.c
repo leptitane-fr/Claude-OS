@@ -21,21 +21,33 @@
  * Cent images par mise en veille, et rien entre deux. */
 #define PAS_MS      100
 
-/* DOUZE GRADUATIONS, comme un cadran d'horloge.
+/* SOIXANTE GRADUATIONS, comme un vrai cadran de chronometre.
  *
- * Assez pour que la disparition soit progressive, assez peu pour qu'on la
- * remarque : avec un preavis de dix secondes, un trait s'eteint toutes les
- * huit dixiemes de seconde. Soixante graduations auraient fait un
- * scintillement, quatre un clignotement. */
-#define RAYONS      12
+ * Douze faisaient une etoile, pas un chronometre : l'ecart entre deux
+ * traits etait trop grand pour qu'on y lise une echelle. Soixante donnent
+ * la trame qu'on reconnait sans la compter.
+ *
+ * TROIS LONGUEURS, celles d'un cadran horloger, et rien d'ecrit :
+ *   les quarts   -- 12, 3, 6, 9        -- les plus longs et les plus epais
+ *   les cinq     -- 5, 10, 20, 25...   -- intermediaires
+ *   les minutes  -- tout le reste      -- courts et fins
+ *
+ * Avec dix secondes de preavis, un trait s'eteint toutes les 167 ms : ce
+ * n'est plus une disparition, c'est un balayage -- exactement le geste
+ * d'une trotteuse. */
+#define RAYONS      60
 
 /* Proportions du soleil, en fraction du rayon total. Le disque central ne
  * bouge JAMAIS : c'est lui qui dit « lumiere », et une lumiere qui se
  * retracte donnerait le message inverse de celle qui s'eteint d'un coup. */
 #define DISQUE      0.42
-#define RAYON_DEB   0.58
-#define RAYON_FIN   0.92
-#define TRAIT       0.085
+#define RAYON_FIN   0.96      /* les traits finissent tous au meme rayon   */
+#define DEB_QUART   0.70      /* 12, 3, 6, 9                               */
+#define DEB_CINQ    0.79
+#define DEB_MINUTE  0.87
+#define TRAIT_QUART  0.048
+#define TRAIT_CINQ   0.036
+#define TRAIT_MINUTE 0.022
 
 static struct {
     GtkWidget *fenetre;
@@ -77,26 +89,29 @@ dessiner (GtkDrawingArea *aire, cairo_t *cr, int largeur, int hauteur,
     cairo_arc (cr, cx, cy, R * DISQUE, 0, 2 * G_PI);
     cairo_fill (cr);
 
-    /* Les graduations : rayons de soleil et graduations de chronometre a la
+    /* Les graduations : rayons de soleil et cadran de chronometre a la
      * fois. Elles s'eteignent une a une, dans le sens horaire depuis midi --
      * celui d'une aiguille, donc celui qu'on lit sans y penser.
      *
      * Une graduation eteinte n'est pas effacee : il en reste une trace tres
      * faible. Sans elle, un cadran a deux traits ne dirait pas s'il en a
-     * perdu dix ou s'il n'en a jamais eu que deux. Meme raison que la piste
-     * du disque precedent. */
+     * perdu cinquante-huit ou s'il n'en a jamais eu que deux. */
     int restants = (int) ceil (P.fraction * RAYONS);
-    cairo_set_line_width (cr, R * TRAIT);
     cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND);
 
     for (int i = 0; i < RAYONS; i++) {
-        double a = -G_PI_2 + (2 * G_PI * i) / RAYONS;
-        double ca = cos (a), sa = sin (a);
-        gboolean vif = (i < restants);
+        double deb, epaisseur;
+        if (i % 15 == 0)      { deb = DEB_QUART;  epaisseur = TRAIT_QUART;  }
+        else if (i % 5 == 0)  { deb = DEB_CINQ;   epaisseur = TRAIT_CINQ;   }
+        else                  { deb = DEB_MINUTE; epaisseur = TRAIT_MINUTE; }
 
+        double a  = -G_PI_2 + (2 * G_PI * i) / RAYONS;
+        double ca = cos (a), sa = sin (a);
+
+        cairo_set_line_width (cr, R * epaisseur);
         cairo_set_source_rgba (cr, c.red, c.green, c.blue,
-                               vif ? c.alpha : c.alpha * 0.16);
-        cairo_move_to (cr, cx + ca * R * RAYON_DEB, cy + sa * R * RAYON_DEB);
+                               (i < restants) ? c.alpha : c.alpha * 0.16);
+        cairo_move_to (cr, cx + ca * R * deb,       cy + sa * R * deb);
         cairo_line_to (cr, cx + ca * R * RAYON_FIN, cy + sa * R * RAYON_FIN);
         cairo_stroke (cr);
     }
@@ -190,10 +205,10 @@ shell_preavis_reference (GtkWidget *pilule)
  * valeurs RVB : le cadran suit donc les themes clair et sombre comme
  * avant, et seul son degre de presence change.
  *
- * Le fond est un cran plus opaque que le disque -- rapport fixe, non
- * reglable. Un fond plus transparent que ce qu'il porte laisserait lire le
- * bureau a travers le disque, ce qui brouille la seule chose qu'on demande
- * a ce cadran : etre lisible d'un coup d'oeil. */
+ * PLUS AUCUN FOND. Le disque translucide qui portait le cadran en faisait
+ * une pastille posee sur le bureau ; on ne veut que le soleil et ses
+ * graduations, flottant sur ce qui se trouve dessous. La fenetre est donc
+ * entierement transparente, et seul le trace se voit. */
 static void
 opacite_appliquer (void)
 {
@@ -201,13 +216,9 @@ opacite_appliquer (void)
         return;
 
     double a = CLAMP (P.opacite, 5, 100) / 100.0;
-    double fond = MIN (a * 1.3, 1.0);
 
     g_autofree char *css = g_strdup_printf (
-        ".preavis-cadran {"
-        "  color: alpha(@accent, %.3f);"
-        "  background-color: alpha(@surface, %.3f);"
-        "}", a, fond);
+        ".preavis-cadran { color: alpha(@accent, %.3f); }", a);
 
     if (P.style == NULL) {
         P.style = gtk_css_provider_new ();

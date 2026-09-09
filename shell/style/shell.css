@@ -428,18 +428,23 @@ window.reglages { background-color: @surface-alt; }
  *
  * Les opacites ci-dessous ne sont que le point de depart : preavis.c les
  * reecrit d'apres le reglage « opacite » de shell.conf. */
-/* NI OMBRE NI BORDURE. L'ombre donnait au cadran le relief d'un objet posé
- * sur le bureau, alors qu'on veut l'inverse : quelque chose qui affleure.
- * La bordure, elle, coûtait deux pixels de contenu — GTK la déduit de la
- * zone de tracé — et le disque cessait de faire la largeur de la barre.
+/* NI OMBRE, NI BORDURE, NI FOND.
  *
- * Les opacités ci-dessous ne sont que le point de départ : preavis.c les
- * réécrit d'après le réglage « opacite » de shell.conf. */
+ * L'ombre donnait au cadran le relief d'un objet posé sur le bureau, alors
+ * qu'on veut l'inverse : quelque chose qui affleure. La bordure coûtait
+ * deux pixels de contenu — GTK la déduit de la zone de tracé — et le disque
+ * cessait de faire la largeur de la barre. Le fond, lui, en faisait une
+ * pastille : on ne veut que le soleil et ses graduations, flottant sur ce
+ * qui se trouve dessous.
+ *
+ * Ne reste donc que « color », que le tracé cairo lit par
+ * gtk_widget_get_color() — teinte ET opacité, cette dernière réécrite par
+ * preavis.c d'après le réglage « opacite » de shell.conf. */
 .preavis-cadran {
   color: alpha(@accent, 0.55);
-  background-color: alpha(@surface, 0.70);
+  background: none;
+  background-color: transparent;
   border: none;
-  border-radius: 999px;
 }
 
 .reglages-volets {
