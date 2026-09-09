@@ -25,8 +25,19 @@ Documentation=file:/home/stef/Claude-OS/docs/09-code-pin.md
 [Socket]
 ListenStream=/run/claude-os/coffre.sock
 SocketUser=_greetd
-SocketGroup=_greetd
-SocketMode=0600
+# GROUPE « users », ET NON « _greetd ».
+#
+# Le verrou d'écran tourne sous le compte de l'utilisateur et doit joindre
+# le coffre pour déverrouiller au code PIN. « users » est choisi parce que
+# le compte y appartient DÉJÀ : créer un groupe dédié aurait obligé à
+# rouvrir la session pour que l'appartenance prenne effet — le piège que
+# console.c documente à propos du groupe « video ».
+#
+# Ce n'est pas la socket qui décide : coffre.c revérifie l'appelant par
+# SO_PEERCRED, et un compte ordinaire n'obtient que son propre coffre, en
+# lecture et ouverture seulement.
+SocketGroup=users
+SocketMode=0660
 Accept=yes
 MaxConnections=4
 

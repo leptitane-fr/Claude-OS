@@ -825,6 +825,9 @@ verbe_oublier (const char *compte)
  * root est admis pour que le coffre puisse être éprouvé sans l'écran de
  * connexion — c'est ce qui permet de le tester seul, avant de toucher à la
  * porte de la machine. */
+static uid_t    appelant_uid;
+static gboolean appelant_privilegie;   /* root ou _greetd : tous les coffres */
+
 static gboolean
 appelant_admis (void)
 {
@@ -840,14 +843,59 @@ appelant_admis (void)
         return FALSE;
     }
 
-    if (pair.uid == 0)
+    if (pair.uid == 0) {
+        appelant_uid = 0;
+        appelant_privilegie = TRUE;
         return TRUE;
+    }
 
     struct passwd *g = getpwnam ("_greetd");
-    if (g != NULL && pair.uid == g->pw_uid)
+    if (g != NULL && pair.uid == g->pw_uid) {
+        appelant_uid = pair.uid;
+        appelant_privilegie = TRUE;
         return TRUE;
+    }
+
+    /* LA SESSION DE L'UTILISATEUR EST ADMISE, MAIS POUR SON SEUL COFFRE.
+     *
+     * Le verrou d'écran tourne sous le compte de l'utilisateur : il lui faut
+     * cette porte. On ne l'ouvre pas en grand pour autant. Un compte
+     * ordinaire est accepté ici, puis « utilisateur_permis » lui interdit
+     * de nommer quelqu'un d'autre que lui-même — c'est cette seconde règle
+     * qui fait le travail, la première ne fait que laisser entrer.
+     *
+     * Ce que cela change, à savoir : un programme tournant déjà sous ce
+     * compte peut tenter un PIN. Le compteur d'essais le borne à cinq. Un
+     * tel programme pouvait de toute façon enregistrer la frappe du mot de
+     * passe ; l'élargissement est réel mais il n'ouvre pas une porte qui
+     * était fermée. */
+    if (pair.uid >= 1000) {
+        appelant_uid = pair.uid;
+        appelant_privilegie = FALSE;
+        return TRUE;
+    }
 
     journal ("appelant refusé : uid %u", (unsigned) pair.uid);
+    return FALSE;
+}
+
+/* L'appelant a-t-il le droit de parler de CE compte ?
+ *
+ * Sans cette règle, ouvrir la socket au compte de la session reviendrait à
+ * laisser n'importe quel programme de la session tenter le PIN de
+ * n'importe quel utilisateur de la machine. */
+static gboolean
+utilisateur_permis (const char *utilisateur)
+{
+    if (appelant_privilegie)
+        return TRUE;
+
+    struct passwd *p = getpwuid (appelant_uid);
+    if (p != NULL && g_strcmp0 (p->pw_name, utilisateur) == 0)
+        return TRUE;
+
+    journal ("uid %u a demandé le coffre de « %s » : refusé",
+             (unsigned) appelant_uid, utilisateur != NULL ? utilisateur : "?");
     return FALSE;
 }
 
@@ -938,6 +986,25 @@ main (void)
     if (compte == NULL) {
         journal ("compte refusé : « %s »", demande);
         repondre_erreur ("compte_inconnu", -1);
+        return 1;
+    }
+
+    if (!utilisateur_permis (compte)) {
+        repondre_erreur ("interdit", -1);
+        return 1;
+    }
+
+    /* MOINDRE PRIVILEGE : un appelant ordinaire consulte et ouvre, rien de
+     * plus. Sceller ou effacer reste au greeter, qui n'appelle « enroler »
+     * qu'après un « success » de greetd. Un programme de la session ne peut
+     * donc ni remplacer le coffre par un scellé de son choix, ni l'effacer
+     * pour forcer le retour au mot de passe. */
+    if (!appelant_privilegie
+        && g_strcmp0 (verbe, "etat") != 0
+        && g_strcmp0 (verbe, "ouvrir") != 0) {
+        journal ("uid %u a tenté « %s » : réservé au greeter",
+                 (unsigned) appelant_uid, verbe);
+        repondre_erreur ("interdit", -1);
         return 1;
     }
 
