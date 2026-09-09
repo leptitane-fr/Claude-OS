@@ -390,17 +390,27 @@ window.reglages { background-color: @surface-alt; }
  * le paragraphe pour déchiffrer trois mots — l'interruption même qu'on
  * voulait éviter. Un disque qui se vide se perçoit sans se lire.
  *
- * La teinte vient de « color » : le tracé cairo la lit par
- * gtk_widget_get_color(), donc aucune couleur n'est écrite dans le C et le
- * cadran suit les thèmes clair et sombre sans une ligne de plus. */
+ * GRAND ET TRANSPARENT. Le premier essai faisait 44 px et opaque : il se
+ * laissait ignorer trop facilement. Le cadran prend désormais la largeur de
+ * la pilule de la barre d'état — 172 px mesurés — ce qui en fait une vraie
+ * alerte ; la transparence l'empêche d'être intrusif pour autant. L'un sans
+ * l'autre donnerait soit un signal qu'on ne voit pas, soit une pastille qui
+ * occupe le coin de l'écran.
+ *
+ * La teinte ET SON ALPHA viennent de « color » : le tracé cairo les lit par
+ * gtk_widget_get_color(), donc l'opacité du disque se règle ici, en CSS, et
+ * pas une couleur n'est écrite dans le C.
+ *
+ * border-radius généreux plutôt qu'une valeur exacte : le diamètre suit la
+ * pilule et change avec elle, un rayon fixe cesserait d'arrondir. */
 .preavis { background: none; background-color: transparent; }
 
 .preavis-cadran {
-  color: @accent;
-  background-color: alpha(@surface, 0.92);
-  border: 1px solid @border;
-  border-radius: 22px;
-  box-shadow: 0 6px 20px @shadow;
+  color: alpha(@accent, 0.55);
+  background-color: alpha(@surface, 0.70);
+  border: 1px solid alpha(@border, 0.55);
+  border-radius: 999px;
+  box-shadow: 0 10px 32px alpha(@shadow, 0.7);
 }
 
 .reglages-volets {

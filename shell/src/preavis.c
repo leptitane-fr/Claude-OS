@@ -7,7 +7,11 @@
  * raisonnement que BANDE_DOCK dans launcher.c : le dock mesure 88 px, on
  * arrondit pour que le cadran ne flotte pas au ras des icones. */
 #define BANDE_BASSE 108
-#define COTE        44     /* diametre du cadran, en pixels                 */
+/* Diametre de repli, si aucune reference n'a ete posee. La pilule mesurait
+ * 172 px le 9 septembre 2026 ; on s'en approche sans en dependre. */
+#define COTE_REPLI  160
+#define COTE_MINI   80     /* garde-fous : une reference non encore allouee */
+#define COTE_MAXI   320    /* rend 0, un theme geant rendrait un absurde    */
 
 /* 100 ms : le cadran perd 3,6 degres par image sur un decompte de dix
  * secondes, ce qui suffit largement a paraitre continu. Plus rapide ne se
@@ -19,6 +23,7 @@
 static struct {
     GtkWidget *fenetre;
     GtkWidget *cadran;
+    GtkWidget *reference;   /* la pilule de la barre : donne la largeur     */
     guint      minuterie;
     gint64     debut;      /* horloge monotone, en microsecondes            */
     double     total;      /* duree demandee, en secondes                   */
@@ -41,7 +46,10 @@ dessiner (GtkDrawingArea *aire, cairo_t *cr, int largeur, int hauteur,
 
     /* La piste : ce que le disque etait au depart. Sans elle, un disque aux
      * trois quarts vide ne dirait pas s'il se vide ou s'il se remplit. */
-    cairo_set_source_rgba (cr, c.red, c.green, c.blue, c.alpha * 0.18);
+    /* 0,3 de l'opacite du disque, et non une valeur absolue : le disque
+     * etant lui-meme translucide, une piste fixe deviendrait plus marquee
+     * que ce qu'elle accompagne. */
+    cairo_set_source_rgba (cr, c.red, c.green, c.blue, c.alpha * 0.30);
     cairo_arc (cr, cx, cy, r, 0, 2 * G_PI);
     cairo_fill (cr);
 
@@ -117,16 +125,40 @@ construire (void)
     gtk_layer_set_anchor (GTK_WINDOW (P.fenetre), GTK_LAYER_SHELL_EDGE_RIGHT,  TRUE);
     gtk_layer_set_margin (GTK_WINDOW (P.fenetre), GTK_LAYER_SHELL_EDGE_BOTTOM,
                           BANDE_BASSE);
-    gtk_layer_set_margin (GTK_WINDOW (P.fenetre), GTK_LAYER_SHELL_EDGE_RIGHT, 16);
+    /* 12 px : la trame du bureau, celle que le dock et la barre gardent
+     * deja avec le bord de l'ecran (« margin: 0 12px 12px 0 »). Le cadran
+     * s'aligne donc a droite exactement sur la pilule dont il prend la
+     * largeur. */
+    gtk_layer_set_margin (GTK_WINDOW (P.fenetre), GTK_LAYER_SHELL_EDGE_RIGHT, 12);
 
     P.cadran = gtk_drawing_area_new ();
     gtk_widget_add_css_class (P.cadran, "preavis-cadran");
-    gtk_widget_set_size_request (P.cadran, COTE, COTE);
     gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (P.cadran),
                                     dessiner, NULL, NULL);
 
     gtk_window_set_child (GTK_WINDOW (P.fenetre), P.cadran);
     g_signal_connect (P.fenetre, "realize", G_CALLBACK (on_realise), NULL);
+}
+
+void
+shell_preavis_reference (GtkWidget *pilule)
+{
+    P.reference = pilule;
+}
+
+/* La largeur est relue A CHAQUE AFFICHAGE, pas retenue : la pilule change
+ * de largeur quand l'heure passe de « 9:05 » a « 11:44 », et un cadran
+ * fige finirait par ne plus s'aligner sur rien. */
+static int
+cote (void)
+{
+    int c = COTE_REPLI;
+    if (P.reference != NULL) {
+        int l = gtk_widget_get_width (P.reference);
+        if (l > 0)
+            c = l;
+    }
+    return CLAMP (c, COTE_MINI, COTE_MAXI);
 }
 
 void
@@ -136,6 +168,8 @@ shell_preavis_montrer (int secondes)
         return;
 
     construire ();
+    int d = cote ();
+    gtk_widget_set_size_request (P.cadran, d, d);
     P.total    = secondes;
     P.debut    = g_get_monotonic_time ();
     P.fraction = 1.0;

@@ -25,6 +25,7 @@
 #include "visibility.h"
 #include "notifications.h"
 #include "energie.h"
+#include "preavis.h"
 #include "panel.h"
 #include "sysfs.h"
 
@@ -391,8 +392,11 @@ on_activate (GtkApplication *app, gpointer user_data)
     shell_visibility_init (on_visibilite, window);
     shell_config_watch (on_config_reloaded, window);
 
-    /* APRES gtk_window_present : le module accroche le registre Wayland de
-     * GTK, qui n'existe qu'une fois la premiere surface creee. */
+    /* Le cadran du preavis prend la largeur de la pilule -- la barre sans
+     * sa cloche. C'est ici, et nulle part ailleurs, qu'on sait quel widget
+     * c'est. */
+    shell_preavis_reference (button);
+
     shell_energie_init (opt->cfg);
 
     if (opt->ouvrir)
