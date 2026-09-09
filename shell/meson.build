@@ -59,7 +59,8 @@ idle_code = custom_target('idle-code',
 # Sources communes aux deux composants. La bascule de visibilite doit se
 # comporter exactement pareil dans le dock et dans la barre, sinon les deux
 # se desynchronisent a l'ecran.
-commun = ['src/config.c', 'src/visibility.c', 'src/sysfs.c']
+commun = ['src/config.c', 'src/visibility.c', 'src/sysfs.c',
+          'src/modes-energie.c']
 
 # Repertoire des feuilles de style, resolu a la compilation.
 data_dir = get_option('prefix') / get_option('datadir') / 'claude-os-shell'
@@ -85,6 +86,7 @@ executable('claude-os-dock',
 executable('claude-os-status',
   'src/status.c', 'src/panel.c', 'src/console.c', 'src/notifications.c',
   'src/wifi.c', 'src/bluetooth.c', 'src/energie.c', 'src/retroeclairage.c',
+  'src/preavis.c',
   idle_header, idle_code, commun,
   dependencies : [gtk, layershell, giounix, wlclient, pangocairo],
   install : true)

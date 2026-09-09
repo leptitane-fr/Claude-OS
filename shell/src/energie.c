@@ -1,6 +1,7 @@
 #include "energie.h"
 #include "retroeclairage.h"
 #include "sysfs.h"
+#include "preavis.h"
 
 #include <gtk/gtk.h>
 #include <gdk/wayland/gdkwayland.h>
@@ -10,7 +11,7 @@
 
 #include "ext-idle-notify-v1-client-protocol.h"
 
-typedef enum { ATTENUER = 0, ETEINDRE = 1, SUSPENDRE = 2, ETAGES = 3 } Etage;
+typedef enum { PREAVIS = 0, ATTENUER, ETEINDRE, SUSPENDRE, ETAGES } Etage;
 
 static struct {
     struct ext_idle_notifier_v1     *notifier;
@@ -19,9 +20,10 @@ static struct {
 
     int      delais[ETAGES];      /* secondes ; 0 = etage ferme            */
     int      niveau;              /* pourcent de l'etage « attenuer »      */
+    int      preavis_s;           /* duree du compte a rebours             */
     gboolean suspendre_permis;
     gboolean actif;
-    gboolean profil_secteur;      /* profil en vigueur, pas l'etat reel    */
+    const ShellModeEnergie *mode;
 
     /* Luminosite d'avant l'attenuation, a restaurer. -1 : pas attenue.
      * Elle est relue dans sysfs plutot que gardee de la fois precedente :
@@ -121,7 +123,14 @@ on_idled (void *data, struct ext_idle_notification_v1 *n)
     g_message ("energie : etage %d atteint", (int) e);
 
     switch (e) {
+    case PREAVIS:
+        /* On ne touche a rien : on previent. Le geste de l'utilisateur, s'il
+         * vient, annulera la suite par « resumed ». */
+        shell_preavis_montrer (E.preavis_s);
+        break;
+
     case ATTENUER:
+        shell_preavis_cacher ();
         /* On note la luminosite AVANT de la baisser, et une seule fois :
          * un second passage enregistrerait la valeur attenuee et la
          * « restauration » laisserait l'ecran sombre. */
@@ -164,6 +173,11 @@ on_resumed (void *data, struct ext_idle_notification_v1 *n)
 {
     (void) data; (void) n;
 
+    /* Le decompte disparait avant tout le reste : c'est la reponse
+     * immediate au geste de l'utilisateur, et la seule qu'il verra si
+     * l'ecran n'avait pas encore baisse. */
+    shell_preavis_cacher ();
+
     /* Chaque etage deja inactif emet son « resumed » : ce rappel arrive
      * plusieurs fois pour une seule touche pressee. Le garde ci-dessous le
      * rend idempotent. */
@@ -171,18 +185,6 @@ on_resumed (void *data, struct ext_idle_notification_v1 *n)
         shell_retro_ecrire (E.avant);
         E.avant = -1;
     }
-
-    /* La source d'alimentation est reevaluee ICI, et nulle part ailleurs.
-     *
-     * Surveiller /sys/class/power_supply demanderait une scrutation, et
-     * UPower un demon de plus -- sysfs.h explique pourquoi ce projet s'en
-     * passe. Or « resumed » arrive a chaque interaction : en pratique le
-     * profil est rafraichi en permanence, pour zero cout.
-     *
-     * Consequence assumee : brancher le secteur pendant que la machine est
-     * deja inactive ne change rien avant la prochaine interaction. */
-    if (shell_sur_secteur () != E.profil_secteur)
-        reconstruire ();
 }
 
 static const struct ext_idle_notification_v1_listener ecouteur = {
@@ -201,8 +203,6 @@ reconstruire (void)
 
     if (!E.actif || E.notifier == NULL || E.seat == NULL)
         return;
-
-    E.profil_secteur = shell_sur_secteur ();
 
     int armes = 0;
     for (int i = 0; i < ETAGES; i++) {
@@ -225,9 +225,9 @@ reconstruire (void)
         wl_display_flush (gdk_wayland_display_get_wl_display (
                               GDK_WAYLAND_DISPLAY (gdk)));
 
-    g_message ("energie : profil %s, %d etage(s) arme(s) — "
+    g_message ("energie : mode %s, %d etage(s) arme(s) — preavis %ds, "
                "attenuer %ds, eteindre %ds, suspendre %ds%s",
-               E.profil_secteur ? "secteur" : "batterie", armes,
+               E.mode != NULL ? E.mode->id : "?", armes, E.preavis_s,
                E.delais[ATTENUER], E.delais[ETEINDRE], E.delais[SUSPENDRE],
                E.suspendre_permis ? "" : " (suspension verrouillee)");
 }
@@ -238,23 +238,20 @@ appliquer_config (const ShellConfig *cfg)
     E.actif            = cfg->energie_active;
     E.niveau           = cfg->energie_niveau;
     E.suspendre_permis = cfg->energie_suspendre_permis;
+    E.mode             = shell_energie_mode_actif (cfg);
 
-    /* Le mode force le profil ; « auto » suit la prise. */
-    gboolean secteur = shell_sur_secteur ();
-    if (g_strcmp0 (cfg->energie_mode, "normal") == 0)
-        secteur = TRUE;
-    else if (g_strcmp0 (cfg->energie_mode, "econome") == 0)
-        secteur = FALSE;
+    int pre, att, ete, sus;
+    shell_energie_delais (cfg, &pre, &att, &ete, &sus);
 
-    if (secteur) {
-        E.delais[ATTENUER]  = cfg->energie_secteur_attenuer;
-        E.delais[ETEINDRE]  = cfg->energie_secteur_eteindre;
-        E.delais[SUSPENDRE] = cfg->energie_secteur_suspendre;
-    } else {
-        E.delais[ATTENUER]  = cfg->energie_batterie_attenuer;
-        E.delais[ETEINDRE]  = cfg->energie_batterie_eteindre;
-        E.delais[SUSPENDRE] = cfg->energie_batterie_suspendre;
-    }
+    /* Le preavis est un etage a part entiere, arme AVANT l'attenuation.
+     * S'il ne tient pas dans le delai -- preavis plus long que le delai
+     * lui-meme -- on l'abandonne plutot que de l'afficher a l'envers. */
+    E.preavis_s       = (att > pre) ? pre : 0;
+    E.delais[PREAVIS] = (E.preavis_s > 0) ? att - E.preavis_s : 0;
+
+    E.delais[ATTENUER]  = att;
+    E.delais[ETEINDRE]  = ete;
+    E.delais[SUSPENDRE] = sus;
 }
 
 /* -------------------------------------------------------------------------
@@ -336,6 +333,7 @@ shell_energie_reconfigurer (const ShellConfig *cfg)
 
     /* Un changement de reglage pendant que l'ecran est attenue laisserait
      * l'utilisateur dans le noir : on remonte d'abord. */
+    shell_preavis_cacher ();
     if (E.avant >= 0) {
         shell_retro_ecrire (E.avant);
         E.avant = -1;

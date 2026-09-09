@@ -21,6 +21,7 @@
 #include <string.h>   /* strlen */
 
 #include "config.h"
+#include "energie.h"   /* la table des modes, definie une seule fois */
 
 /* -------------------------------------------------------------------------
  * Enregistrement
@@ -528,13 +529,14 @@ construire_interface (ShellConfig *cfg, GtkWidget *window)
 /* -------------------------------------------------------------------------
  * Volet Energie
  *
- * ON NE REGLE QUE DES DUREES, JAMAIS LA NATURE DES ETAGES.
+ * ON REGLE DES DUREES, JAMAIS CE QU'UN MODE EST.
  *
- * L'ordre attenuer -> eteindre -> suspendre n'est pas un choix de
- * l'utilisateur : c'est ce que le module sait faire, et l'exposer comme
- * modifiable inviterait a fabriquer des combinaisons qui n'ont pas de sens
- * -- eteindre avant d'attenuer, suspendre sans eteindre. On expose donc des
- * durees, un niveau, et rien d'autre.
+ * Les trois modes viennent de shell_energie_modes() et n'existent nulle
+ * part ailleurs. Ce volet ne peut donc ni en ajouter, ni en retirer, ni
+ * changer l'ordre attenuer -> eteindre -> suspendre : il n'expose que les
+ * durees de chacun. Exposer davantage inviterait a fabriquer des
+ * combinaisons sans signification -- eteindre avant d'attenuer, ou faire
+ * dormir un mode « Travail » dont c'est precisement le contraire.
  *
  * Des listes de durees plutot que des champs libres : « 90 » saisi dans une
  * case ne dit pas s'il s'agit de secondes ou de minutes, et un delai de
@@ -542,74 +544,95 @@ construire_interface (ShellConfig *cfg, GtkWidget *window)
  * ------------------------------------------------------------------------- */
 static void set_e_active   (ShellConfig *c, gpointer d) { c->energie_active = GPOINTER_TO_INT (d); }
 static void set_e_niveau   (ShellConfig *c, gpointer d) { c->energie_niveau = GPOINTER_TO_INT (d); }
-static void set_e_sect_att (ShellConfig *c, gpointer d) { c->energie_secteur_attenuer  = GPOINTER_TO_INT (d); }
-static void set_e_sect_ete (ShellConfig *c, gpointer d) { c->energie_secteur_eteindre  = GPOINTER_TO_INT (d); }
-static void set_e_batt_att (ShellConfig *c, gpointer d) { c->energie_batterie_attenuer = GPOINTER_TO_INT (d); }
-static void set_e_batt_ete (ShellConfig *c, gpointer d) { c->energie_batterie_eteindre = GPOINTER_TO_INT (d); }
+
+static void set_trav_pre   (ShellConfig *c, gpointer d) { c->energie_travail_preavis  = GPOINTER_TO_INT (d); }
+static void set_trav_att   (ShellConfig *c, gpointer d) { c->energie_travail_attenuer = GPOINTER_TO_INT (d); }
+static void set_trav_ete   (ShellConfig *c, gpointer d) { c->energie_travail_eteindre = GPOINTER_TO_INT (d); }
+
+static void set_auto_att   (ShellConfig *c, gpointer d) { c->energie_auto_attenuer  = GPOINTER_TO_INT (d); }
+static void set_auto_ete   (ShellConfig *c, gpointer d) { c->energie_auto_eteindre  = GPOINTER_TO_INT (d); }
+static void set_auto_sus   (ShellConfig *c, gpointer d) { c->energie_auto_suspendre = GPOINTER_TO_INT (d); }
+
+static void set_nom_att    (ShellConfig *c, gpointer d) { c->energie_nomade_attenuer  = GPOINTER_TO_INT (d); }
+static void set_nom_ete    (ShellConfig *c, gpointer d) { c->energie_nomade_eteindre  = GPOINTER_TO_INT (d); }
+static void set_nom_sus    (ShellConfig *c, gpointer d) { c->energie_nomade_suspendre = GPOINTER_TO_INT (d); }
 
 /* Adresses stables, pour les passer en donnee utilisateur d'un signal sans
  * transformer un pointeur de fonction en gpointer -- ce que le C ne
  * garantit pas. */
-static const Modif MODIF_NIVEAU   = set_e_niveau;
-static const Modif MODIF_SECT_ATT = set_e_sect_att;
-static const Modif MODIF_SECT_ETE = set_e_sect_ete;
-static const Modif MODIF_BATT_ATT = set_e_batt_att;
-static const Modif MODIF_BATT_ETE = set_e_batt_ete;
+static const Modif M_NIVEAU   = set_e_niveau;
+static const Modif M_TRAV_PRE = set_trav_pre;
+static const Modif M_TRAV_ATT = set_trav_att;
+static const Modif M_TRAV_ETE = set_trav_ete;
+static const Modif M_AUTO_ATT = set_auto_att;
+static const Modif M_AUTO_ETE = set_auto_ete;
+static const Modif M_AUTO_SUS = set_auto_sus;
+static const Modif M_NOM_ATT  = set_nom_att;
+static const Modif M_NOM_ETE  = set_nom_ete;
+static const Modif M_NOM_SUS  = set_nom_sus;
 
-static const int   DUREES[]     = { 0, 30, 60, 120, 180, 300, 600, 900, 1800 };
-static const char *DUREES_NOM[] = { "Jamais", "30 s", "1 min", "2 min",
+static const int   DUREES[]     = { 0, 30, 45, 60, 120, 180, 300, 600, 900, 1200, 1800 };
+static const char *DUREES_NOM[] = { "Jamais", "30 s", "45 s", "1 min", "2 min",
                                     "3 min", "5 min", "10 min", "15 min",
-                                    "30 min" };
+                                    "20 min", "30 min" };
 #define DUREES_N ((int) G_N_ELEMENTS (DUREES))
+
+/* Le preavis se compte en secondes : au-dela d'une demi-minute il cesse
+ * d'etre un coup d'oeil et devient un element de decor. */
+static const int   PREAVIS[]     = { 0, 5, 10, 20, 30 };
+static const char *PREAVIS_NOM[] = { "Aucun", "5 s", "10 s", "20 s", "30 s" };
+#define PREAVIS_N ((int) G_N_ELEMENTS (PREAVIS))
 
 static const int   NIVEAUX[]     = { 10, 20, 30, 40, 50 };
 static const char *NIVEAUX_NOM[] = { "10 %", "20 %", "30 %", "40 %", "50 %" };
 #define NIVEAUX_N ((int) G_N_ELEMENTS (NIVEAUX))
 
-static void
-on_choix_duree (GObject *dd, GParamSpec *ps, gpointer modif)
-{
-    (void) ps;
-    guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
-    if (i == GTK_INVALID_LIST_POSITION || (int) i >= DUREES_N)
-        return;
-    modifier (*(const Modif *) modif, GINT_TO_POINTER (DUREES[i]));
-}
+/* Une liste de valeurs positionnee sur la valeur courante. Une valeur
+ * absente de la table -- shell.conf s'edite a la main -- retient la valeur
+ * connue immediatement inferieure plutot que de retomber sur la premiere,
+ * qui fermerait l'etage a l'insu de celui qui a ecrit le fichier. */
+typedef struct {
+    const int   *valeurs;
+    int          n;
+    const Modif *modif;
+} Choix;
 
 static void
-on_choix_niveau (GObject *dd, GParamSpec *ps, gpointer modif)
+on_choix (GObject *dd, GParamSpec *ps, gpointer data)
 {
     (void) ps;
+    Choix *c = data;
     guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
-    if (i == GTK_INVALID_LIST_POSITION || (int) i >= NIVEAUX_N)
+    if (i == GTK_INVALID_LIST_POSITION || (int) i >= c->n)
         return;
-    modifier (*(const Modif *) modif, GINT_TO_POINTER (NIVEAUX[i]));
+    modifier (*c->modif, GINT_TO_POINTER (c->valeurs[i]));
 }
 
-/* Une liste de durees positionnee sur la valeur courante. Une valeur absente
- * de la liste -- shell.conf s'edite a la main -- retient la duree connue
- * immediatement inferieure plutot que de retomber sur « Jamais », qui
- * desactiverait l'etage a l'insu de celui qui a ecrit le fichier. */
 static GtkWidget *
-liste_duree (int valeur, const Modif *modif)
+liste (const int *valeurs, const char **noms, int n, int courant,
+       const Modif *modif)
 {
     GtkStringList *l = gtk_string_list_new (NULL);
-    for (int i = 0; i < DUREES_N; i++)
-        gtk_string_list_append (l, DUREES_NOM[i]);
+    for (int i = 0; i < n; i++)
+        gtk_string_list_append (l, noms[i]);
 
     int choisi = 0;
-    for (int i = 0; i < DUREES_N; i++)
-        if (DUREES[i] <= valeur)
+    for (int i = 0; i < n; i++)
+        if (valeurs[i] <= courant)
             choisi = i;
-    if (valeur <= 0)
-        choisi = 0;
 
     GtkWidget *dd = gtk_drop_down_new (G_LIST_MODEL (l), NULL);
     gtk_drop_down_set_selected (GTK_DROP_DOWN (dd), choisi);
-    g_signal_connect (dd, "notify::selected",
-                      G_CALLBACK (on_choix_duree), (gpointer) modif);
+
+    Choix *c = g_new0 (Choix, 1);
+    c->valeurs = valeurs; c->n = n; c->modif = modif;
+    g_object_set_data_full (G_OBJECT (dd), "choix", c, g_free);
+    g_signal_connect (dd, "notify::selected", G_CALLBACK (on_choix), c);
     return dd;
 }
+
+#define LISTE_DUREE(v, m)   liste (DUREES,  DUREES_NOM,  DUREES_N,  (v), (m))
+#define LISTE_PREAVIS(v, m) liste (PREAVIS, PREAVIS_NOM, PREAVIS_N, (v), (m))
 
 static GtkWidget *
 construire_energie (ShellConfig *cfg, GtkWidget *window)
@@ -619,7 +642,7 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
     GtkWidget *pile = gtk_box_new (GTK_ORIENTATION_VERTICAL, 14);
     gtk_widget_add_css_class (pile, "reglages-pile");
 
-    /* --- Veille de l'ecran --- */
+    /* --- Commun aux trois modes --- */
     GtkWidget *ecran = carte ("Veille de l'écran");
     ligne (ecran, "Activer la veille progressive",
            "Le rétroéclairage est le premier poste de consommation de cette "
@@ -635,31 +658,65 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
     }
     GtkWidget *dd_niv = gtk_drop_down_new (G_LIST_MODEL (niv), NULL);
     gtk_drop_down_set_selected (GTK_DROP_DOWN (dd_niv), niv_choisi);
-    g_signal_connect (dd_niv, "notify::selected",
-                      G_CALLBACK (on_choix_niveau), (gpointer) &MODIF_NIVEAU);
+    Choix *cn = g_new0 (Choix, 1);
+    cn->valeurs = NIVEAUX; cn->n = NIVEAUX_N; cn->modif = &M_NIVEAU;
+    g_object_set_data_full (G_OBJECT (dd_niv), "choix", cn, g_free);
+    g_signal_connect (dd_niv, "notify::selected", G_CALLBACK (on_choix), cn);
     ligne (ecran, "Luminosité atténuée",
            "Assez bas pour que le gain soit réel, assez haut pour qu'on "
            "comprenne que la machine s'assoupit plutôt qu'elle ne s'éteint.",
            dd_niv);
     gtk_box_append (GTK_BOX (pile), ecran);
 
-    /* --- Secteur --- */
-    GtkWidget *sect = carte ("Sur secteur");
-    ligne (sect, "Atténuer après", NULL,
-           liste_duree (cfg->energie_secteur_attenuer, &MODIF_SECT_ATT));
-    ligne (sect, "Éteindre l'écran après",
-           "Toute activité du clavier ou du pavé tactile rallume et "
-           "restaure la luminosité d'avant.",
-           liste_duree (cfg->energie_secteur_eteindre, &MODIF_SECT_ETE));
-    gtk_box_append (GTK_BOX (pile), sect);
+    /* --- Un volet par mode, dans l'ordre de la table --- */
+    const ShellModeEnergie *modes = shell_energie_modes ();
 
-    /* --- Batterie --- */
-    GtkWidget *batt = carte ("Sur batterie");
-    ligne (batt, "Atténuer après", NULL,
-           liste_duree (cfg->energie_batterie_attenuer, &MODIF_BATT_ATT));
-    ligne (batt, "Éteindre l'écran après", NULL,
-           liste_duree (cfg->energie_batterie_eteindre, &MODIF_BATT_ETE));
-    gtk_box_append (GTK_BOX (pile), batt);
+    GtkWidget *trav = carte (modes[0].nom);
+    GtkWidget *d_trav = gtk_label_new (modes[0].resume);
+    gtk_widget_add_css_class (d_trav, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (d_trav), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (d_trav), 46);
+    gtk_widget_set_halign (d_trav, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (trav), d_trav);
+    ligne (trav, "Compte à rebours",
+           "Affiché avant l'atténuation, en bas à droite. Il ne prend ni le "
+           "clavier ni le clic : un geste suffit à l'annuler.",
+           LISTE_PREAVIS (cfg->energie_travail_preavis, &M_TRAV_PRE));
+    ligne (trav, "Atténuer après", NULL,
+           LISTE_DUREE (cfg->energie_travail_attenuer, &M_TRAV_ATT));
+    ligne (trav, "Éteindre l'écran après", NULL,
+           LISTE_DUREE (cfg->energie_travail_eteindre, &M_TRAV_ETE));
+    gtk_box_append (GTK_BOX (pile), trav);
+
+    GtkWidget *au = carte (modes[1].nom);
+    GtkWidget *d_au = gtk_label_new (modes[1].resume);
+    gtk_widget_add_css_class (d_au, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (d_au), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (d_au), 46);
+    gtk_widget_set_halign (d_au, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (au), d_au);
+    ligne (au, "Atténuer après", NULL,
+           LISTE_DUREE (cfg->energie_auto_attenuer, &M_AUTO_ATT));
+    ligne (au, "Éteindre l'écran après", NULL,
+           LISTE_DUREE (cfg->energie_auto_eteindre, &M_AUTO_ETE));
+    ligne (au, "Veille de l'ordinateur après", NULL,
+           LISTE_DUREE (cfg->energie_auto_suspendre, &M_AUTO_SUS));
+    gtk_box_append (GTK_BOX (pile), au);
+
+    GtkWidget *nom = carte (modes[2].nom);
+    GtkWidget *d_nom = gtk_label_new (modes[2].resume);
+    gtk_widget_add_css_class (d_nom, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (d_nom), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (d_nom), 46);
+    gtk_widget_set_halign (d_nom, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (nom), d_nom);
+    ligne (nom, "Atténuer après", NULL,
+           LISTE_DUREE (cfg->energie_nomade_attenuer, &M_NOM_ATT));
+    ligne (nom, "Éteindre l'écran après", NULL,
+           LISTE_DUREE (cfg->energie_nomade_eteindre, &M_NOM_ETE));
+    ligne (nom, "Veille de l'ordinateur après", NULL,
+           LISTE_DUREE (cfg->energie_nomade_suspendre, &M_NOM_SUS));
+    gtk_box_append (GTK_BOX (pile), nom);
 
     /* --- Ce qui n'est pas reglable, et pourquoi ---
      *
@@ -671,8 +728,8 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
         ? "Autorisée."
         : "Verrouillée. Le 9 septembre 2026, onze suspensions consécutives "
           "n'ont pas repris : la machine redémarrait au lieu de se réveiller. "
-          "Tant que la reprise n'est pas fiable, endormir l'ordinateur ferait "
-          "perdre la session. L'étage existe et se règle, mais il reste fermé.");
+          "Tant que la reprise n'est pas fiable, les durées ci-dessus sont "
+          "enregistrées mais sans effet.");
     gtk_widget_add_css_class (etat, "reglages-detail");
     gtk_label_set_wrap (GTK_LABEL (etat), TRUE);
     gtk_label_set_max_width_chars (GTK_LABEL (etat), 46);

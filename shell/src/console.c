@@ -7,6 +7,7 @@
 #include "console.h"
 #include "sysfs.h"
 #include "config.h"   /* ShellConfig : la rangee de veille lit et ecrit shell.conf */
+#include "energie.h"  /* la table des modes, definie une seule fois */
 
 #include <gio/gio.h>
 #include <glib/gstdio.h>   /* g_access */
@@ -699,46 +700,62 @@ action_new (Action *a, const char *libelle, const char *icone_nom,
 }
 
 /* -------------------------------------------------------------------------
- * Veille de l'ecran : Auto / Normal / Econome
+ * Veille de l'ecran : Travail / Automatique / Nomade
+ *
+ * LES MODES NE SONT PAS DEFINIS ICI. Ils viennent de shell_energie_modes(),
+ * et les durees de shell_energie_delais(). Cette rangee ne fait que montrer
+ * et ecrire : si elle recalculait les delais de son cote, elle finirait par
+ * annoncer autre chose que ce que le module applique -- c'est exactement la
+ * sorte d'ecart qu'on ne voit qu'apres l'avoir subi.
  * ------------------------------------------------------------------------- */
 typedef struct {
-    GtkWidget *btn[3];         /* auto, normal, econome                     */
-    GtkWidget *etat;           /* la ligne qui dit ce que le profil fait    */
+    GtkWidget *btn[8];         /* un par mode, table terminee par NULL      */
+    int        n;
+    GtkWidget *resume;         /* ce que le mode fait, en une phrase        */
+    GtkWidget *etat;           /* les durees effectives                     */
     gboolean   apercu;
-    gboolean   pose_en_cours;  /* garde-fou : voir energie_poser()          */
+    gboolean   pose_en_cours;
 } Energie;
 
-static const char *ENERGIE_MODES[3] = { "auto", "normal", "econome" };
-
-/* Ce que le profil en vigueur va reellement faire, en clair.
- *
- * Un bouton « Econome » ne dit pas au bout de combien de temps l'ecran
- * s'attenue. Sans cette ligne, le seul moyen de le savoir serait d'attendre
- * pour voir -- ce qui est exactement l'inverse d'un reglage lisible. */
+/* « 45 s », « 10 min », « jamais ». Les minutes rondes s'ecrivent en
+ * minutes : « 600 s » est exact et illisible. */
 static char *
-energie_resume (const ShellConfig *cfg)
+duree_texte (int s)
 {
-    gboolean secteur = shell_sur_secteur ();
-    if (g_strcmp0 (cfg->energie_mode, "normal") == 0)       secteur = TRUE;
-    else if (g_strcmp0 (cfg->energie_mode, "econome") == 0) secteur = FALSE;
+    if (s <= 0)        return g_strdup ("jamais");
+    if (s < 60)        return g_strdup_printf ("%d s", s);
+    if (s % 60 == 0)   return g_strdup_printf ("%d min", s / 60);
+    return g_strdup_printf ("%d min %d s", s / 60, s % 60);
+}
 
-    int att = secteur ? cfg->energie_secteur_attenuer : cfg->energie_batterie_attenuer;
-    int ete = secteur ? cfg->energie_secteur_eteindre : cfg->energie_batterie_eteindre;
-
+static char *
+energie_durees (const ShellConfig *cfg)
+{
     if (!cfg->energie_active)
-        return g_strdup ("Désactivée");
+        return g_strdup ("Veille désactivée.");
 
-    g_autofree char *a = (att > 0)
-        ? g_strdup_printf ("atténue à %d %% après %s", cfg->energie_niveau,
-                           att >= 60 ? g_strdup_printf ("%d min", att / 60)
-                                     : g_strdup_printf ("%d s", att))
-        : g_strdup ("n'atténue pas");
-    g_autofree char *e = (ete > 0)
-        ? ((ete >= 60) ? g_strdup_printf (", éteint après %d min", ete / 60)
-                       : g_strdup_printf (", éteint après %d s", ete))
-        : g_strdup ("");
+    int pre, att, ete, sus;
+    shell_energie_delais (cfg, &pre, &att, &ete, &sus);
 
-    return g_strdup_printf ("%s : %s%s", secteur ? "Secteur" : "Batterie", a, e);
+    g_autofree char *a = duree_texte (att);
+    g_autofree char *e = duree_texte (ete);
+    g_autoptr(GString) t = g_string_new (NULL);
+    g_string_append_printf (t, "Atténue après %s, éteint après %s", a, e);
+
+    if (sus > 0) {
+        g_autofree char *v = duree_texte (sus);
+        /* On dit « verrouillée » plutot que de taire l'etage : un mode qui
+         * annonce une veille qui n'arrive jamais est un mode qui ment. */
+        g_string_append_printf (t, ", veille de l'ordinateur après %s%s", v,
+                                cfg->energie_suspendre_permis
+                                ? "" : " (verrouillée)");
+    }
+    if (pre > 0)
+        g_string_append_printf (t, ". Compte à rebours %d s avant.", pre);
+    else
+        g_string_append_c (t, '.');
+
+    return g_string_free (g_steal_pointer (&t), FALSE);
 }
 
 static void
@@ -748,23 +765,24 @@ energie_poser (GtkToggleButton *b, gpointer data)
 
     /* Le groupe emet aussi pour le bouton qu'on vient de relacher, et
      * console_energie_relire() coche un bouton par programme. Sans ce
-     * garde-fou, chaque changement ecrirait shell.conf deux fois -- et la
-     * relecture reecrirait ce qu'elle vient de lire, en boucle. */
+     * garde-fou, chaque changement ecrirait shell.conf deux fois. */
     if (en->pose_en_cours || !gtk_toggle_button_get_active (b))
         return;
 
+    const ShellModeEnergie *modes = shell_energie_modes ();
     int i = 0;
-    for (; i < 3; i++)
+    for (; i < en->n; i++)
         if (en->btn[i] == GTK_WIDGET (b))
             break;
-    if (i == 3)
+    if (i == en->n)
         return;
 
     g_autoptr(ShellConfig) cfg = shell_config_load ();
     g_free (cfg->energie_mode);
-    cfg->energie_mode = g_strdup (ENERGIE_MODES[i]);
+    cfg->energie_mode = g_strdup (modes[i].id);
 
-    g_autofree char *txt = energie_resume (cfg);
+    gtk_label_set_text (GTK_LABEL (en->resume), modes[i].resume);
+    g_autofree char *txt = energie_durees (cfg);
     gtk_label_set_text (GTK_LABEL (en->etat), txt);
 
     if (en->apercu)
@@ -775,6 +793,18 @@ energie_poser (GtkToggleButton *b, gpointer data)
         g_message ("energie : shell.conf non ecrit — %s", err->message);
 }
 
+static void
+energie_ouvrir_reglages (GtkButton *b, gpointer data)
+{
+    (void) b; (void) data;
+    /* Directement sur la bonne section : proposer un reglage puis obliger a
+     * le chercher dans une liste est une facon sure de le rendre
+     * introuvable. */
+    g_autoptr(GError) err = NULL;
+    if (!g_spawn_command_line_async ("claude-os-reglages --volet=energie", &err))
+        g_message ("energie : reglages indisponibles — %s", err->message);
+}
+
 void
 console_energie_relire (GtkWidget *rangee)
 {
@@ -783,14 +813,17 @@ console_energie_relire (GtkWidget *rangee)
         return;
 
     g_autoptr(ShellConfig) cfg = shell_config_load ();
+    const ShellModeEnergie *actif = shell_energie_mode_actif (cfg);
+    const ShellModeEnergie *modes = shell_energie_modes ();
+
     en->pose_en_cours = TRUE;
-    for (int i = 0; i < 3; i++)
-        gtk_toggle_button_set_active (
-            GTK_TOGGLE_BUTTON (en->btn[i]),
-            g_strcmp0 (cfg->energie_mode, ENERGIE_MODES[i]) == 0);
+    for (int i = 0; i < en->n; i++)
+        gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (en->btn[i]),
+                                      &modes[i] == actif);
     en->pose_en_cours = FALSE;
 
-    g_autofree char *txt = energie_resume (cfg);
+    gtk_label_set_text (GTK_LABEL (en->resume), actif->resume);
+    g_autofree char *txt = energie_durees (cfg);
     gtk_label_set_text (GTK_LABEL (en->etat), txt);
 }
 
@@ -803,17 +836,27 @@ console_energie_new (gboolean apercu)
     GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 8);
     gtk_widget_add_css_class (boite, "qs-rangee");
 
+    GtkWidget *entete = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
     GtkWidget *titre = gtk_label_new ("Veille de l'écran");
     gtk_widget_add_css_class (titre, "qs-alim-nom");
     gtk_widget_set_halign (titre, GTK_ALIGN_START);
-    gtk_box_append (GTK_BOX (boite), titre);
+    gtk_widget_set_hexpand (titre, TRUE);
+    gtk_box_append (GTK_BOX (entete), titre);
+
+    GtkWidget *regler = gtk_button_new_from_icon_name ("emblem-system-symbolic");
+    gtk_widget_add_css_class (regler, "qs-reglages");
+    gtk_widget_set_tooltip_text (regler, "Régler les durées");
+    g_signal_connect (regler, "clicked",
+                      G_CALLBACK (energie_ouvrir_reglages), NULL);
+    gtk_box_append (GTK_BOX (entete), regler);
+    gtk_box_append (GTK_BOX (boite), entete);
 
     GtkWidget *rangee = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_set_homogeneous (GTK_BOX (rangee), TRUE);
 
-    static const char *libelles[3] = { "Auto", "Normal", "Économe" };
-    for (int i = 0; i < 3; i++) {
-        en->btn[i] = gtk_toggle_button_new_with_label (libelles[i]);
+    const ShellModeEnergie *modes = shell_energie_modes ();
+    for (int i = 0; modes[i].id != NULL && i < (int) G_N_ELEMENTS (en->btn); i++) {
+        en->btn[i] = gtk_toggle_button_new_with_label (modes[i].nom);
         gtk_widget_add_css_class (en->btn[i], "qs-alim");
         if (i > 0)
             gtk_toggle_button_set_group (GTK_TOGGLE_BUTTON (en->btn[i]),
@@ -821,8 +864,15 @@ console_energie_new (gboolean apercu)
         g_signal_connect (en->btn[i], "toggled",
                           G_CALLBACK (energie_poser), en);
         gtk_box_append (GTK_BOX (rangee), en->btn[i]);
+        en->n = i + 1;
     }
     gtk_box_append (GTK_BOX (boite), rangee);
+
+    en->resume = gtk_label_new ("");
+    gtk_widget_add_css_class (en->resume, "qs-etat");
+    gtk_widget_set_halign (en->resume, GTK_ALIGN_START);
+    gtk_label_set_wrap (GTK_LABEL (en->resume), TRUE);
+    gtk_box_append (GTK_BOX (boite), en->resume);
 
     en->etat = gtk_label_new ("");
     gtk_widget_add_css_class (en->etat, "qs-etat");

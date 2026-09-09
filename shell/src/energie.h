@@ -38,6 +38,40 @@
 #include <glib.h>
 #include "config.h"
 
+/* -------------------------------------------------------------------------
+ * Les trois modes, en un seul endroit
+ *
+ * LE MODE EST UN CHOIX, PAS UNE DEDUCTION. La version precedente derivait
+ * le comportement de la prise ; personne ne savait dire ce que la machine
+ * allait faire sans regarder le cable.
+ *
+ * La table est LA definition des modes. La Console y prend ses libelles, le
+ * panneau de reglages ses titres, le module ses etages. Un mode ne peut donc
+ * pas etre dénaturé depuis l'interface : on regle des durees, jamais ce
+ * qu'un mode est.
+ * ------------------------------------------------------------------------- */
+typedef struct {
+    const char *id;          /* ce qui s'ecrit dans shell.conf              */
+    const char *nom;         /* « Travail »                                 */
+    const char *icone;
+    const char *resume;      /* une phrase, montree sous les boutons        */
+    gboolean    veille_ordi; /* le mode autorise-t-il l'etage « suspendre » */
+} ShellModeEnergie;
+
+/* Table terminee par un id NULL. */
+const ShellModeEnergie *shell_energie_modes (void);
+
+/* Le mode en vigueur, jamais NULL : un identifiant inconnu -- fichier d'une
+ * version anterieure -- renvoie « automatique ». */
+const ShellModeEnergie *shell_energie_mode_actif (const ShellConfig *cfg);
+
+/* Les delais du mode en vigueur, en secondes. Zero ferme l'etage. Sert au
+ * resume affiche par la Console et par les Reglages : ceux-ci ne
+ * reimplementent pas le choix des durees, ils le demandent. */
+void shell_energie_delais (const ShellConfig *cfg,
+                           int *preavis, int *attenuer,
+                           int *eteindre, int *suspendre);
+
 /* A appeler une fois la fenetre presentee : la connexion Wayland de GTK doit
  * deja exister. Sans compositeur compatible, ou sans retroeclairage
  * pilotable, le module s'efface et la barre continue normalement. */

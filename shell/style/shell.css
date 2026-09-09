@@ -384,6 +384,32 @@ window.reglages { background-color: @surface-alt; }
  * multiplier, et une colonne les accepte toutes sans que les libellés
  * rétrécissent. C'est aussi la disposition qu'ont ChromeOS et GNOME, donc
  * celle qu'on cherche du regard. */
+/* --- Compte à rebours avant l'atténuation ---------------------------------
+ *
+ * Il doit se voir du coin de l'œil sans réclamer l'attention : c'est un
+ * avertissement, pas une alarme. Fond translucide et texte discret, posé
+ * au-dessus du dock, du côté où le regard revient déjà chercher l'heure. */
+.preavis { background: none; background-color: transparent; }
+
+.preavis-pastille {
+  background-color: alpha(@surface, 0.92);
+  border: 1px solid @border;
+  border-radius: 14px;
+  padding: 10px 16px;
+  box-shadow: 0 8px 24px @shadow;
+}
+
+.preavis-compte {
+  font-size: 15px;
+  font-weight: 600;
+  color: @text;
+}
+
+.preavis-aide {
+  font-size: 11px;
+  color: @text-dim;
+}
+
 .reglages-volets {
   background-color: @surface-sunk;
   border-right: 1px solid @border;

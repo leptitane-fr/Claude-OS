@@ -141,28 +141,34 @@ shell_config_load (void)
 
     /* Defauts de la veille progressive.
      *
-     * Sur SECTEUR, on attenue tard et on n'eteint qu'apres un quart d'heure :
-     * la machine est branchee, l'enjeu n'est pas l'autonomie mais l'usure de
-     * la dalle et le confort. Aucune suspension : un telechargement ou une
-     * compilation ne doit pas etre interrompu parce qu'on a quitte la piece.
+     * TRAVAIL : l'ordinateur ne dort jamais, mais l'ecran a quand meme une
+     * duree de vie -- un ecran allume toute la nuit sur un article qu'on ne
+     * lit plus n'aide personne. Les delais sont longs, et l'attenuation est
+     * annoncee par un compte a rebours : voir energie_travail_preavis.
      *
-     * Sur BATTERIE, les delais se resserrent nettement -- c'est la que le
-     * watt compte. La suspension est configuree a dix minutes mais reste
-     * FERMEE par energie_suspendre_permis tant que la reprise n'est pas sure.
+     * AUTOMATIQUE : l'equilibre, et le defaut.
+     *
+     * NOMADE : le plus econome. C'est la que le watt compte.
      *
      * 30 % pour l'attenuation : assez bas pour que le gain soit reel, assez
      * haut pour qu'on lise encore l'ecran et qu'on comprenne que la machine
-     * s'assoupit au lieu de croire qu'elle s'eteint. */
-    cfg->energie_active    = TRUE;
-    cfg->energie_mode      = g_strdup ("auto");
-    cfg->energie_niveau    = 30;
+     * s'assoupit au lieu de s'eteindre. */
+    cfg->energie_active   = TRUE;
+    cfg->energie_mode     = g_strdup ("automatique");
+    cfg->energie_niveau   = 30;
     cfg->energie_suspendre_permis = FALSE;
-    cfg->energie_secteur_attenuer   = 300;    /*  5 min */
-    cfg->energie_secteur_eteindre   = 900;    /* 15 min */
-    cfg->energie_secteur_suspendre  = 0;      /* jamais */
-    cfg->energie_batterie_attenuer  = 60;     /*  1 min */
-    cfg->energie_batterie_eteindre  = 180;    /*  3 min */
-    cfg->energie_batterie_suspendre = 600;    /* 10 min, sous condition */
+
+    cfg->energie_travail_preavis  = 10;    /* 10 s de compte a rebours */
+    cfg->energie_travail_attenuer = 600;   /* 10 min */
+    cfg->energie_travail_eteindre = 1200;  /* 20 min */
+
+    cfg->energie_auto_attenuer    = 120;   /*  2 min */
+    cfg->energie_auto_eteindre    = 300;   /*  5 min */
+    cfg->energie_auto_suspendre   = 900;   /* 15 min, sous condition */
+
+    cfg->energie_nomade_attenuer  = 45;
+    cfg->energie_nomade_eteindre  = 120;   /*  2 min */
+    cfg->energie_nomade_suspendre = 300;   /*  5 min, sous condition */
 
     if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, NULL))
         return cfg;   /* pas de fichier : les defauts suffisent */
@@ -204,20 +210,30 @@ shell_config_load (void)
     if (e == NULL)
         cfg->reserve_space = reserve;
 
-    lire_bool   (kf, "active",            &cfg->energie_active);
-    lire_bool   (kf, "suspendre_permis",  &cfg->energie_suspendre_permis);
-    lire_entier (kf, "niveau",            &cfg->energie_niveau);
-    lire_entier (kf, "secteur_attenuer",  &cfg->energie_secteur_attenuer);
-    lire_entier (kf, "secteur_eteindre",  &cfg->energie_secteur_eteindre);
-    lire_entier (kf, "secteur_suspendre", &cfg->energie_secteur_suspendre);
-    lire_entier (kf, "batterie_attenuer", &cfg->energie_batterie_attenuer);
-    lire_entier (kf, "batterie_eteindre", &cfg->energie_batterie_eteindre);
-    lire_entier (kf, "batterie_suspendre",&cfg->energie_batterie_suspendre);
+    lire_bool   (kf, "active",           &cfg->energie_active);
+    lire_bool   (kf, "suspendre_permis", &cfg->energie_suspendre_permis);
+    lire_entier (kf, "niveau",           &cfg->energie_niveau);
 
+    lire_entier (kf, "travail_preavis",  &cfg->energie_travail_preavis);
+    lire_entier (kf, "travail_attenuer", &cfg->energie_travail_attenuer);
+    lire_entier (kf, "travail_eteindre", &cfg->energie_travail_eteindre);
+
+    lire_entier (kf, "automatique_attenuer",  &cfg->energie_auto_attenuer);
+    lire_entier (kf, "automatique_eteindre",  &cfg->energie_auto_eteindre);
+    lire_entier (kf, "automatique_suspendre", &cfg->energie_auto_suspendre);
+
+    lire_entier (kf, "nomade_attenuer",  &cfg->energie_nomade_attenuer);
+    lire_entier (kf, "nomade_eteindre",  &cfg->energie_nomade_eteindre);
+    lire_entier (kf, "nomade_suspendre", &cfg->energie_nomade_suspendre);
+
+    /* Un mode inconnu -- fichier d'une version anterieure, ou faute de
+     * frappe -- laisse le defaut en place plutot que d'inventer un
+     * comportement. Les anciens noms « auto », « normal » et « econome »
+     * tombent donc naturellement sur « automatique ». */
     g_autofree char *mode = g_key_file_get_string (kf, "energie", "mode", NULL);
-    if (mode != NULL && (g_strcmp0 (mode, "auto")    == 0 ||
-                         g_strcmp0 (mode, "normal")  == 0 ||
-                         g_strcmp0 (mode, "econome") == 0)) {
+    if (mode != NULL && (g_strcmp0 (mode, "travail")     == 0 ||
+                         g_strcmp0 (mode, "automatique") == 0 ||
+                         g_strcmp0 (mode, "nomade")      == 0)) {
         g_free (cfg->energie_mode);
         cfg->energie_mode = g_steal_pointer (&mode);
     }
@@ -282,12 +298,15 @@ shell_config_save (const ShellConfig *cfg, GError **error)
     g_key_file_set_integer (kf, "energie", "niveau", cfg->energie_niveau);
     g_key_file_set_boolean (kf, "energie", "suspendre_permis",
                             cfg->energie_suspendre_permis);
-    g_key_file_set_integer (kf, "energie", "secteur_attenuer",   cfg->energie_secteur_attenuer);
-    g_key_file_set_integer (kf, "energie", "secteur_eteindre",   cfg->energie_secteur_eteindre);
-    g_key_file_set_integer (kf, "energie", "secteur_suspendre",  cfg->energie_secteur_suspendre);
-    g_key_file_set_integer (kf, "energie", "batterie_attenuer",  cfg->energie_batterie_attenuer);
-    g_key_file_set_integer (kf, "energie", "batterie_eteindre",  cfg->energie_batterie_eteindre);
-    g_key_file_set_integer (kf, "energie", "batterie_suspendre", cfg->energie_batterie_suspendre);
+    g_key_file_set_integer (kf, "energie", "travail_preavis",  cfg->energie_travail_preavis);
+    g_key_file_set_integer (kf, "energie", "travail_attenuer", cfg->energie_travail_attenuer);
+    g_key_file_set_integer (kf, "energie", "travail_eteindre", cfg->energie_travail_eteindre);
+    g_key_file_set_integer (kf, "energie", "automatique_attenuer",  cfg->energie_auto_attenuer);
+    g_key_file_set_integer (kf, "energie", "automatique_eteindre",  cfg->energie_auto_eteindre);
+    g_key_file_set_integer (kf, "energie", "automatique_suspendre", cfg->energie_auto_suspendre);
+    g_key_file_set_integer (kf, "energie", "nomade_attenuer",  cfg->energie_nomade_attenuer);
+    g_key_file_set_integer (kf, "energie", "nomade_eteindre",  cfg->energie_nomade_eteindre);
+    g_key_file_set_integer (kf, "energie", "nomade_suspendre", cfg->energie_nomade_suspendre);
 
     return g_key_file_save_to_file (kf, path, error);
 }
