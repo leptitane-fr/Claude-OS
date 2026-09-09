@@ -16,6 +16,18 @@
  * fenetre declare donc un mode clavier « aucun » et une region d'entree
  * VIDE : elle se voit et ne s'attrape pas.
  *
+ * UN CADRAN, PAS UN NOMBRE.
+ *
+ * La premiere version affichait « Veille dans 8 s ». Constate a l'usage le
+ * 9 septembre 2026 : un texte appelle la LECTURE. L'oeil quitte le
+ * paragraphe pour dechiffrer trois mots, ce qui est exactement
+ * l'interruption qu'on voulait eviter -- le remede reproduisait la
+ * maladie.
+ *
+ * Un disque qui se vide se lit sans se lire : on en percoit l'etat d'un
+ * coup d'oeil, sans decodage, comme on percoit qu'un verre est a moitie
+ * plein. C'est ce qu'on demande a un signal peripherique.
+ *
  * Elle ne coute rien quand elle ne sert pas : la fenetre n'est construite
  * qu'au premier affichage, et la minuterie ne tourne que pendant le
  * decompte -- quelques secondes par mise en veille, jamais en continu.

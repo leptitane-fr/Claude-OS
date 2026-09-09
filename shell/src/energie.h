@@ -72,6 +72,15 @@ void shell_energie_delais (const ShellConfig *cfg,
                            int *preavis, int *attenuer,
                            int *eteindre, int *suspendre);
 
+/* Les delais d'un mode DONNE, pas forcement celui en vigueur. La Console en
+ * a besoin pour decrire chaque bouton avant qu'on l'ait choisi : une
+ * infobulle qui annoncerait les durees du mode courant sur les trois
+ * boutons serait pire que pas d'infobulle du tout. */
+void shell_energie_delais_mode (const ShellConfig *cfg,
+                                const ShellModeEnergie *mode,
+                                int *preavis, int *attenuer,
+                                int *eteindre, int *suspendre);
+
 /* A appeler une fois la fenetre presentee : la connexion Wayland de GTK doit
  * deja exister. Sans compositeur compatible, ou sans retroeclairage
  * pilotable, le module s'efface et la barre continue normalement. */

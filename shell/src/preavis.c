@@ -1,42 +1,83 @@
 #include "preavis.h"
-#include "config.h"
 
 #include <gtk/gtk.h>
 #include <gtk4-layer-shell.h>
 
 /* Hauteur laissee libre en bas pour le dock et la barre d'etat. Meme
  * raisonnement que BANDE_DOCK dans launcher.c : le dock mesure 88 px, on
- * arrondit pour que le decompte ne flotte pas au ras des icones. */
+ * arrondit pour que le cadran ne flotte pas au ras des icones. */
 #define BANDE_BASSE 108
+#define COTE        44     /* diametre du cadran, en pixels                 */
+
+/* 100 ms : le cadran perd 3,6 degres par image sur un decompte de dix
+ * secondes, ce qui suffit largement a paraitre continu. Plus rapide ne se
+ * verrait pas et reveillerait le compositeur pour rien -- un module dont
+ * l'objet est d'economiser n'a pas le droit d'etre desinvolte la-dessus.
+ * Cent images par mise en veille, et rien entre deux. */
+#define PAS_MS      100
 
 static struct {
     GtkWidget *fenetre;
-    GtkWidget *texte;
+    GtkWidget *cadran;
     guint      minuterie;
-    int        reste;
+    gint64     debut;      /* horloge monotone, en microsecondes            */
+    double     total;      /* duree demandee, en secondes                   */
+    double     fraction;   /* 1,0 au depart, 0,0 a l'echeance               */
 } P;
 
 static void
-peindre (void)
+dessiner (GtkDrawingArea *aire, cairo_t *cr, int largeur, int hauteur,
+          gpointer data)
 {
-    g_autofree char *t = g_strdup_printf ("Veille dans %d s", P.reste);
-    gtk_label_set_text (GTK_LABEL (P.texte), t);
+    (void) data;
+    double cx = largeur / 2.0, cy = hauteur / 2.0;
+    double r  = MIN (largeur, hauteur) / 2.0 - 3.0;
+
+    /* La couleur vient de la feuille de style, propriete « color » de
+     * .preavis-cadran. Le theme clair et le theme sombre la posent chacun,
+     * et le cadran suit sans qu'une seule teinte soit ecrite ici. */
+    GdkRGBA c;
+    gtk_widget_get_color (GTK_WIDGET (aire), &c);
+
+    /* La piste : ce que le disque etait au depart. Sans elle, un disque aux
+     * trois quarts vide ne dirait pas s'il se vide ou s'il se remplit. */
+    cairo_set_source_rgba (cr, c.red, c.green, c.blue, c.alpha * 0.18);
+    cairo_arc (cr, cx, cy, r, 0, 2 * G_PI);
+    cairo_fill (cr);
+
+    if (P.fraction <= 0.0)
+        return;
+
+    /* Le fromage. Depart en haut et sens horaire : c'est le sens d'une
+     * aiguille, donc celui qu'on lit sans y penser. */
+    cairo_set_source_rgba (cr, c.red, c.green, c.blue, c.alpha);
+    cairo_move_to (cr, cx, cy);
+    cairo_arc (cr, cx, cy, r, -G_PI_2, -G_PI_2 + 2 * G_PI * P.fraction);
+    cairo_close_path (cr);
+    cairo_fill (cr);
 }
 
 static gboolean
 on_tic (gpointer data)
 {
     (void) data;
-    if (--P.reste <= 0) {
-        /* On ne masque pas ici : c'est l'etage « attenuer » qui suit
-         * immediatement et qui appellera shell_preavis_cacher(). Masquer
-         * maintenant ferait clignoter l'ecran juste avant qu'il ne baisse. */
-        P.reste = 0;
-        peindre ();
+
+    /* Le reste se calcule sur l'horloge monotone, pas en comptant les
+     * images : une minuterie GLib n'est pas exacte, et dix secondes
+     * comptees a 100 ms pres deriveraient visiblement. */
+    double ecoule = (g_get_monotonic_time () - P.debut) / 1000000.0;
+    P.fraction = (P.total > 0.0) ? 1.0 - ecoule / P.total : 0.0;
+
+    if (P.fraction <= 0.0) {
+        P.fraction = 0.0;
+        gtk_widget_queue_draw (P.cadran);
+        /* On ne masque pas ici : l'etage « attenuer » suit immediatement et
+         * appellera shell_preavis_cacher(). Masquer maintenant ferait
+         * clignoter l'ecran juste avant qu'il ne baisse. */
         P.minuterie = 0;
         return G_SOURCE_REMOVE;
     }
-    peindre ();
+    gtk_widget_queue_draw (P.cadran);
     return G_SOURCE_CONTINUE;
 }
 
@@ -69,27 +110,22 @@ construire (void)
     gtk_layer_init_for_window (GTK_WINDOW (P.fenetre));
     gtk_layer_set_layer (GTK_WINDOW (P.fenetre), GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_namespace (GTK_WINDOW (P.fenetre), "claude-os-preavis");
-    /* Aucun clavier : le decompte ne doit pas interrompre une frappe. */
+    /* Aucun clavier : le cadran ne doit pas interrompre une frappe. */
     gtk_layer_set_keyboard_mode (GTK_WINDOW (P.fenetre),
                                  GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
     gtk_layer_set_anchor (GTK_WINDOW (P.fenetre), GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
     gtk_layer_set_anchor (GTK_WINDOW (P.fenetre), GTK_LAYER_SHELL_EDGE_RIGHT,  TRUE);
     gtk_layer_set_margin (GTK_WINDOW (P.fenetre), GTK_LAYER_SHELL_EDGE_BOTTOM,
                           BANDE_BASSE);
-    gtk_layer_set_margin (GTK_WINDOW (P.fenetre), GTK_LAYER_SHELL_EDGE_RIGHT, 12);
+    gtk_layer_set_margin (GTK_WINDOW (P.fenetre), GTK_LAYER_SHELL_EDGE_RIGHT, 16);
 
-    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
-    gtk_widget_add_css_class (boite, "preavis-pastille");
+    P.cadran = gtk_drawing_area_new ();
+    gtk_widget_add_css_class (P.cadran, "preavis-cadran");
+    gtk_widget_set_size_request (P.cadran, COTE, COTE);
+    gtk_drawing_area_set_draw_func (GTK_DRAWING_AREA (P.cadran),
+                                    dessiner, NULL, NULL);
 
-    P.texte = gtk_label_new ("");
-    gtk_widget_add_css_class (P.texte, "preavis-compte");
-    gtk_box_append (GTK_BOX (boite), P.texte);
-
-    GtkWidget *aide = gtk_label_new ("Un geste suffit à l'annuler");
-    gtk_widget_add_css_class (aide, "preavis-aide");
-    gtk_box_append (GTK_BOX (boite), aide);
-
-    gtk_window_set_child (GTK_WINDOW (P.fenetre), boite);
+    gtk_window_set_child (GTK_WINDOW (P.fenetre), P.cadran);
     g_signal_connect (P.fenetre, "realize", G_CALLBACK (on_realise), NULL);
 }
 
@@ -100,12 +136,14 @@ shell_preavis_montrer (int secondes)
         return;
 
     construire ();
-    P.reste = secondes;
-    peindre ();
+    P.total    = secondes;
+    P.debut    = g_get_monotonic_time ();
+    P.fraction = 1.0;
+    gtk_widget_queue_draw (P.cadran);
 
     if (P.minuterie != 0)
         g_source_remove (P.minuterie);
-    P.minuterie = g_timeout_add_seconds (1, on_tic, NULL);
+    P.minuterie = g_timeout_add (PAS_MS, on_tic, NULL);
 
     gtk_widget_set_visible (P.fenetre, TRUE);
 }

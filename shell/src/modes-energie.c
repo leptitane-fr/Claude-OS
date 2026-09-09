@@ -46,8 +46,18 @@ void
 shell_energie_delais (const ShellConfig *cfg, int *preavis, int *attenuer,
                       int *eteindre, int *suspendre)
 {
-    const ShellModeEnergie *m = shell_energie_mode_actif (cfg);
+    shell_energie_delais_mode (cfg, shell_energie_mode_actif (cfg),
+                               preavis, attenuer, eteindre, suspendre);
+}
+
+void
+shell_energie_delais_mode (const ShellConfig *cfg, const ShellModeEnergie *m,
+                           int *preavis, int *attenuer, int *eteindre,
+                           int *suspendre)
+{
     int pre = 0, att, ete, sus;
+    if (m == NULL)
+        m = shell_energie_mode_actif (cfg);
 
     if (g_strcmp0 (m->id, "travail") == 0) {
         pre = cfg->energie_travail_preavis;

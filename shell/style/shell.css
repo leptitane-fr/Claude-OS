@@ -386,28 +386,21 @@ window.reglages { background-color: @surface-alt; }
  * celle qu'on cherche du regard. */
 /* --- Compte à rebours avant l'atténuation ---------------------------------
  *
- * Il doit se voir du coin de l'œil sans réclamer l'attention : c'est un
- * avertissement, pas une alarme. Fond translucide et texte discret, posé
- * au-dessus du dock, du côté où le regard revient déjà chercher l'heure. */
+ * Un cadran et non un texte : un nombre appelle la lecture, et l'œil quitte
+ * le paragraphe pour déchiffrer trois mots — l'interruption même qu'on
+ * voulait éviter. Un disque qui se vide se perçoit sans se lire.
+ *
+ * La teinte vient de « color » : le tracé cairo la lit par
+ * gtk_widget_get_color(), donc aucune couleur n'est écrite dans le C et le
+ * cadran suit les thèmes clair et sombre sans une ligne de plus. */
 .preavis { background: none; background-color: transparent; }
 
-.preavis-pastille {
+.preavis-cadran {
+  color: @accent;
   background-color: alpha(@surface, 0.92);
   border: 1px solid @border;
-  border-radius: 14px;
-  padding: 10px 16px;
-  box-shadow: 0 8px 24px @shadow;
-}
-
-.preavis-compte {
-  font-size: 15px;
-  font-weight: 600;
-  color: @text;
-}
-
-.preavis-aide {
-  font-size: 11px;
-  color: @text-dim;
+  border-radius: 22px;
+  box-shadow: 0 6px 20px @shadow;
 }
 
 .reglages-volets {

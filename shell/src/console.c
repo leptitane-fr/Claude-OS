@@ -711,8 +711,6 @@ action_new (Action *a, const char *libelle, const char *icone_nom,
 typedef struct {
     GtkWidget *btn[8];         /* un par mode, table terminee par NULL      */
     int        n;
-    GtkWidget *resume;         /* ce que le mode fait, en une phrase        */
-    GtkWidget *etat;           /* les durees effectives                     */
     gboolean   apercu;
     gboolean   pose_en_cours;
 } Energie;
@@ -728,18 +726,26 @@ duree_texte (int s)
     return g_strdup_printf ("%d min %d s", s / 60, s % 60);
 }
 
+/* CE TEXTE VA DANS UNE INFOBULLE, PAS DANS LA CONSOLE.
+ *
+ * Il y etait, sous les boutons, et il deformait le panneau : une etiquette
+ * qui passe a la ligne fait varier la largeur de la Console selon le mode
+ * choisi, et une surface qui change de taille sous le doigt est desagreable
+ * a viser. Constate a l'usage le 9 septembre 2026.
+ *
+ * L'infobulle dit la meme chose, ne prend aucune place, et ne se montre
+ * qu'a qui la cherche en s'attardant sur un bouton. */
 static char *
-energie_durees (const ShellConfig *cfg)
+energie_description (const ShellConfig *cfg, const ShellModeEnergie *mode)
 {
-    if (!cfg->energie_active)
-        return g_strdup ("Veille désactivée.");
-
     int pre, att, ete, sus;
-    shell_energie_delais (cfg, &pre, &att, &ete, &sus);
+    shell_energie_delais_mode (cfg, mode, &pre, &att, &ete, &sus);
+
+    g_autoptr(GString) t = g_string_new (mode->resume);
+    g_string_append (t, "\n\n");
 
     g_autofree char *a = duree_texte (att);
     g_autofree char *e = duree_texte (ete);
-    g_autoptr(GString) t = g_string_new (NULL);
     g_string_append_printf (t, "Atténue après %s, éteint après %s", a, e);
 
     if (sus > 0) {
@@ -754,6 +760,9 @@ energie_durees (const ShellConfig *cfg)
         g_string_append_printf (t, ". Compte à rebours %d s avant.", pre);
     else
         g_string_append_c (t, '.');
+
+    if (!cfg->energie_active)
+        g_string_append (t, "\n\nVeille désactivée dans les Réglages.");
 
     return g_string_free (g_steal_pointer (&t), FALSE);
 }
@@ -780,10 +789,6 @@ energie_poser (GtkToggleButton *b, gpointer data)
     g_autoptr(ShellConfig) cfg = shell_config_load ();
     g_free (cfg->energie_mode);
     cfg->energie_mode = g_strdup (modes[i].id);
-
-    gtk_label_set_text (GTK_LABEL (en->resume), modes[i].resume);
-    g_autofree char *txt = energie_durees (cfg);
-    gtk_label_set_text (GTK_LABEL (en->etat), txt);
 
     if (en->apercu)
         return;
@@ -817,14 +822,17 @@ console_energie_relire (GtkWidget *rangee)
     const ShellModeEnergie *modes = shell_energie_modes ();
 
     en->pose_en_cours = TRUE;
-    for (int i = 0; i < en->n; i++)
+    for (int i = 0; i < en->n; i++) {
         gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (en->btn[i]),
                                       &modes[i] == actif);
+        /* Les infobulles sont refaites a chaque relecture : les durees ont
+         * pu changer dans les Reglages pendant que la Console etait
+         * fermee, et une infobulle perimee ment plus surement qu'une
+         * etiquette perimee -- on la consulte justement pour savoir. */
+        g_autofree char *info = energie_description (cfg, &modes[i]);
+        gtk_widget_set_tooltip_text (en->btn[i], info);
+    }
     en->pose_en_cours = FALSE;
-
-    gtk_label_set_text (GTK_LABEL (en->resume), actif->resume);
-    g_autofree char *txt = energie_durees (cfg);
-    gtk_label_set_text (GTK_LABEL (en->etat), txt);
 }
 
 GtkWidget *
@@ -867,18 +875,6 @@ console_energie_new (gboolean apercu)
         en->n = i + 1;
     }
     gtk_box_append (GTK_BOX (boite), rangee);
-
-    en->resume = gtk_label_new ("");
-    gtk_widget_add_css_class (en->resume, "qs-etat");
-    gtk_widget_set_halign (en->resume, GTK_ALIGN_START);
-    gtk_label_set_wrap (GTK_LABEL (en->resume), TRUE);
-    gtk_box_append (GTK_BOX (boite), en->resume);
-
-    en->etat = gtk_label_new ("");
-    gtk_widget_add_css_class (en->etat, "qs-etat");
-    gtk_widget_set_halign (en->etat, GTK_ALIGN_START);
-    gtk_label_set_wrap (GTK_LABEL (en->etat), TRUE);
-    gtk_box_append (GTK_BOX (boite), en->etat);
 
     g_object_set_data_full (G_OBJECT (boite), "energie", en, g_free);
     console_energie_relire (boite);
