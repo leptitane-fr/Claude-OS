@@ -1,0 +1,11 @@
+# Claude OS — authentification du verrou d'écran.
+#
+# UNIQUEMENT « auth ». Le verrou ne rouvre pas de session : elle n'a jamais
+# été fermée. Il vérifie une identité, rien de plus. Y mettre « session »
+# relancerait pam_gnome_keyring sur un trousseau déjà ouvert, et
+# « account » n'a pas de sens pour un compte dont la session tourne.
+#
+# common-auth porte pam_unix, qui délègue à unix_chkpwd — setgid shadow,
+# donc utilisable depuis un compte ordinaire. C'est ce qui permet au verrou
+# de tourner sans le moindre privilège.
+auth    include    common-auth

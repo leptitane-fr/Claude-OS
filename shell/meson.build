@@ -76,6 +76,25 @@ idle_code = custom_target('idle-code',
   output  : 'ext-idle-notify-v1-protocol.c',
   command : [wlscanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 
+# ext-session-lock-v1 : le verrou d'ecran. Verse dans le depot comme les
+# autres, pour que le code genere ne bouge pas sous nos pieds a la faveur
+# d'une mise a jour de wayland-protocols.
+verrou_xml = 'protocols/ext-session-lock-v1.xml'
+
+verrou_header = custom_target('verrou-header',
+  input   : verrou_xml,
+  output  : 'ext-session-lock-v1-client-protocol.h',
+  command : [wlscanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+verrou_code = custom_target('verrou-code',
+  input   : verrou_xml,
+  output  : 'ext-session-lock-v1-protocol.c',
+  command : [wlscanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
+pam        = cc.find_library('pam', required : true)
+xkb        = dependency('xkbcommon')
+cairo      = dependency('cairo')
+
 # Sources communes aux deux composants. La bascule de visibilite doit se
 # comporter exactement pareil dans le dock et dans la barre, sinon les deux
 # se desynchronisent a l'ecran.
@@ -154,6 +173,16 @@ executable('claude-os-reglages',
 executable('claude-os-lecteurs-auto',
   'src/lecteurs-auto.c', 'src/reseau.c',
   dependencies : [giounix, secret],
+  install : true)
+
+# LE VERROU N'EST PAS UNE APPLICATION GTK, et c'est explique en tete de
+# verrou.c : le protocole demande une surface d'un type que GTK ne sait pas
+# produire, et aucune bibliotheque equivalente a gtk4-layer-shell n'existe
+# pour le verrouillage dans Debian trixie. D'ou wayland-client, cairo et
+# pango a nu -- mais pas gtk.
+executable('claude-os-verrou',
+  'src/verrou.c', verrou_header, verrou_code,
+  dependencies : [wlclient, xkb, cairo, pangocairo, giounix, jsonglib, pam],
   install : true)
 
 install_data(['data/claude-os-reglages.desktop',
