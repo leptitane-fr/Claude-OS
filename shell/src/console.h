@@ -53,6 +53,25 @@ void console_son_relire (GtkWidget *rangee);
 GtkWidget *console_lumiere_new (gboolean apercu);
 void       console_lumiere_relire (GtkWidget *rangee);
 
+/* --- Veille de l'ecran ---------------------------------------------------
+ *
+ * Choisit le profil de mise en veille progressive. « Auto » suit la prise :
+ * Normal sur secteur, Econome sur batterie. Les deux autres forcent, ce qui
+ * sert dans les deux sens -- garder l'ecran allume pendant une presentation
+ * alors qu'on est sur batterie, ou economiser alors qu'on est branche.
+ *
+ * La rangee N'APPELLE PAS le module d'energie. Elle ecrit shell.conf, et
+ * c'est shell_config_watch qui previent tout le monde -- y compris ce
+ * processus. C'est le mecanisme deja utilise par le panneau de reglages :
+ * la configuration reste la seule source de verite, et il n'y a aucun
+ * protocole a inventer entre une rangee et un module du meme binaire. */
+GtkWidget *console_energie_new (gboolean apercu);
+
+/* Remet les boutons en accord avec shell.conf. Comme pour le son et la
+ * luminosite : le fichier a pu changer depuis le panneau de reglages
+ * pendant que la Console etait fermee. */
+void console_energie_relire (GtkWidget *rangee);
+
 /* --- Alimentation --------------------------------------------------------
  *
  * Eteindre, redemarrer, mettre en veille — par logind sur le bus systeme.

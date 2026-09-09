@@ -49,6 +49,76 @@ pas seulement au banc d'essai :
 | **Thème global** | La bascule clair/sombre des Réglages est suivie par **toutes** les applications — Chromium, Claude Desktop, le terminal, les barres de titre — sans qu'aucune soit relancée. |
 | **Luminosité** | Le curseur de la Console commande l'écran immédiatement, par logind, sans appartenance au groupe `video` ni réouverture de session. |
 
+### La veille progressive de l'écran
+
+Écrite le 9 septembre 2026, et **vue fonctionner sur MADOO** : l'écran
+descend à 30 % après le délai, et remonte dès qu'on touche le pavé tactile.
+
+Le rétroéclairage est le premier poste de consommation de la machine —
+environ 1 à 2 W sur les 6,8 W mesurés. C'est le plus gros levier
+d'autonomie restant, et il est entièrement logiciel.
+
+`shell/src/energie.c` vit dans `claude-os-status`, comme le centre de
+notifications et pour la même raison : un processus séparé aurait coûté un
+runtime GTK4 complet, ~40 Mo mesurés, sur 4 Go soudés. La barre est déjà
+résidente, déjà cliente Wayland, et tient déjà la connexion logind.
+
+Deux profils, choisis sur la prise, forçables d'un clic dans la Console
+(rangée « Veille de l'écran ») :
+
+| | Secteur — « Normal » | Batterie — « Économe » |
+|---|---|---|
+| Atténuer à 30 % | 3 min | 1 min |
+| Éteindre | 10 min | 3 min |
+| Suspendre | jamais | 10 min, **verrouillé** |
+
+**Aucune scrutation.** `ext_idle_notifier_v1` prévient ; entre deux
+événements le module ne coûte rien. Les trois signaux qui affinent la
+décision — charge CPU, son en lecture, source d'alimentation — sont lus une
+seule fois, au moment où un étage va se déclencher. La source est
+réévaluée sur `resumed`, donc à chaque interaction : ni scrutation ni
+UPower.
+
+**Les inhibiteurs sont gratuits.** La spécification impose au compositeur
+de ne pas rendre la notification inactive tant qu'un
+`zwp_idle_inhibitor_v1` existe sur une surface visible. Un lecteur vidéo
+n'est jamais interrompu, sans une ligne de code. Vérifié dans les deux
+sens : aucun événement tant que Claude Desktop tenait son verrou d'éveil,
+les trois étages à l'heure dès qu'il l'a relâché.
+
+**TROIS DÉFAILLANCES MUETTES ont coûté une séance entière**, toutes du même
+genre, toutes corrigées. L'invariant n°4 ne parle pas que des `>/dev/null` :
+il vaut aussi pour un `return` anticipé et pour un appel D-Bus asynchrone.
+
+- Deux `return` silencieux dans `shell_energie_init` : sans affichage
+  Wayland ou sans siège, le module renonçait sans un mot.
+- **Aucun `wl_display_flush`** après `get_idle_notification`. L'init a lieu
+  avant que la boucle GTK ne tourne ; les requêtes restaient dans la file.
+  Sur un bureau au repos — la situation même qu'on veut détecter — rien ne
+  la vidait. *Le module de veille ne démarrait qu'une fois qu'il se passait
+  quelque chose.*
+- `g_dbus_proxy_call` avec `NULL` comme rappel, au motif que « personne ne
+  regarde ». Le plus coûteux des trois.
+
+**Et un piège de méthode, à retenir absolument :**
+
+```
+labwc, claude-os-fond   → session-N.scope   (seat0, tty7)
+claude-desktop, et tout ce qui en est lancé
+                        → user@1000.service/app.slice/app-com.anthropic.Claude
+```
+
+**Claude Desktop vit hors de la session du siège.** Or `logind` n'accepte
+`SetBrightness` que de la session active. Un composant relancé à la main
+depuis un terminal de Claude Desktop se le voit refuser — et le module
+paraît cassé alors qu'il ne l'est pas. **Un composant qui touche à logind
+ne se teste QUE démarré par l'autostart de labwc**, c'est-à-dire après une
+réouverture de session. Vérifier la portée avant de conclure :
+
+```sh
+grep -oE 'session-[0-9]+\.scope|app-com[^/]*\.scope' /proc/$(pgrep -x claude-os-statu)/cgroup
+```
+
 ### Le centre de notifications
 
 Écrit le 8 septembre 2026. La machine n'avait **aucun** démon : ni dunst, ni
@@ -113,7 +183,8 @@ barre de 34 px au-dessus des onglets.
 |---|---|
 | **Audio** | **Réparé le 8 septembre 2026**, cette ligne ne décrit plus la machine. Le `probe failed with error -22` a disparu des journaux, PipeWire énumère cinq sorties dont « Jasper Lake HD Audio » par défaut, et les touches de volume la commandent — confirmé à l'oreille. L'historique de la panne reste dans `docs/07`. |
 | Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le conflit de terminal virtuel de l'invariant n°5 — **à reconfirmer** maintenant que greetd est sur le tty7, et à ne pas déclarer résolu sans l'avoir revu. |
-| Luminosité automatique | **Impossible par capteur — mesuré le 8 septembre 2026.** `/sys/bus/iio/devices/` expose `cros-ec-accel` ×2, `cros-ec-gyro` et `cros-ec-lid-angle`. Aucun capteur de luminosité ambiante sur MADOO. La question est close. **Ce qui reste ouvert, et vaut bien davantage :** l'asservissement à l'**inactivité** — baisser le rétroéclairage après quelques minutes sans interaction. Le rétroéclairage est le premier poste de consommation de la machine (~1 à 2 W sur 6,8 W) ; c'est le plus gros levier d'autonomie qui reste, et il est logiciel. Mécanisme pressenti : `ext-idle-notify-v1`, **présence à confirmer sur labwc 0.8.3**. |
+| Luminosité automatique | **Impossible par capteur — mesuré le 8 septembre 2026.** Aucun capteur de luminosité ambiante sur MADOO : `/sys/bus/iio/devices/` n'expose que deux accéléromètres, un gyroscope et un angle d'écran. Question close. **L'asservissement à l'inactivité, lui, est FAIT et VU FONCTIONNER** le 9 septembre — voir la veille progressive ci-dessus. |
+| **Reprise après suspension** | **CASSÉE, et c'est le chantier le plus important qui reste.** Le 9 septembre 2026, onze suspensions consécutives déclenchées par la fermeture du capot n'ont jamais repris : le journal s'arrête net sur `PM: suspend entry (s2idle)` et la machine réapparaît avec un nouvel identifiant de démarrage. Fermer le capot coûte donc une session. Une seule reprise a réussi, le matin du 9. Piste **non vérifiée** : `rtw88` a un historique de problèmes de reprise en s2idle, et le journal montre NetworkManager libérant `wlp1s0` juste avant. Tant que ce point n'est pas réglé, `energie.suspendre_permis` reste à `false`. |
 | Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
 
 ---

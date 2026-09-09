@@ -100,6 +100,7 @@ typedef struct {
     GtkWidget *bat_icon;
     GtkWidget *son;             /* rangee volume                             */
     GtkWidget *lumiere;         /* rangee luminosite                         */
+    GtkWidget *energie;         /* rangee veille de l'ecran                  */
     guint      watt_timer;      /* 0 quand le panneau est ferme              */
     guint      suivi_timer;     /* idem : son et luminosite                  */
     gboolean   services_sondes; /* NetworkManager et BlueZ deja contactes ?  */
@@ -716,6 +717,12 @@ on_panel_show (GtkWidget *popover, gpointer data)
     console_son_relire (p->son);
     console_lumiere_relire (p->lumiere);
 
+    /* Le profil de veille, lui, ne bouge pas tout seul : il est relu ICI,
+     * a l'ouverture, et PAS dans la minuterie de suivi. Relire shell.conf
+     * deux fois par seconde pour un reglage que seul un clic modifie
+     * serait exactement la scrutation que ce projet s'interdit. */
+    console_energie_relire (p->energie);
+
     battery_refresh (p);
     if (p->watt_timer == 0)
         p->watt_timer = g_timeout_add (WATT_REFRESH_MS, on_watt_tick, p);
@@ -939,6 +946,11 @@ panel_new (gboolean apercu)
      * avec le bord de l'ecran (« margin: 0 12px 12px 0 » dans shell.css).
      * La Console se pose donc sur la meme trame que le reste du bureau. */
     gtk_popover_set_offset (GTK_POPOVER (popover), 0, -PANEL_ECART_BARRE_PX);
+
+    /* La veille juste avant l'alimentation : ce sont deux facons de gerer
+     * la meme chose -- ce que la machine fait quand on ne s'en sert plus. */
+    p->energie = console_energie_new (apercu);
+    gtk_box_append (GTK_BOX (box), p->energie);
 
     gtk_box_append (GTK_BOX (box), console_alimentation_new (popover, apercu));
 
