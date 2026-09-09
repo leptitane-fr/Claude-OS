@@ -494,12 +494,41 @@ deployer() {
 	info "commit  : $(git -C "$DEPOT" log --oneline -1 2>/dev/null || echo '?')"
 
 	cp -a "$DEPOT/rootfs/." /
-	chmod +x /usr/local/bin/claude-os-claude /usr/local/bin/claude-os-shell-basculer \
-	         /usr/local/bin/claude-os-session /usr/local/bin/claude-os-greeter \
-	         /usr/local/bin/claude-os-theme \
-	         /etc/xdg/labwc/autostart /etc/xdg/labwc-greeter/autostart \
-	         /usr/local/lib/claude-os/filet-session 2>/dev/null || true
-	ok "fichiers copiés" "/usr/local/bin, /etc/xdg, /usr/local/lib"
+
+	# TOUT CE QUI ARRIVE DANS / APPARTIENT À ROOT. CE N'EST PAS COSMÉTIQUE.
+	#
+	# « cp -a » conserve la propriété de la SOURCE, c'est-à-dire celle du
+	# dépôt — donc l'utilisateur. Le 9 septembre 2026, tous les fichiers
+	# déployés se retrouvaient ainsi en « stef:stef 664 », dont :
+	#
+	#   /etc/systemd/system/claude-os-coffre@.service   (User=root)
+	#   /etc/systemd/system/claude-os-filet.service     (root)
+	#   /etc/systemd/system/greetd.service.d/…          (ExecStartPre root)
+	#   /usr/local/lib/claude-os/filet-session          (lancé par root)
+	#   /usr/local/bin/claude-os-greeter                (lancé par _greetd)
+	#   /etc/pam.d/claude-os-verrou                     (authentification)
+	#
+	# Autrement dit : n'importe quel programme tournant sous le compte de
+	# l'utilisateur pouvait réécrire l'ExecStart d'un service root, déclencher
+	# le service, et obtenir root. Sans exploit, avec un éditeur de texte.
+	# Toute la protection du coffre — « la socket, et rien d'autre » — tombait
+	# avec, puisque l'unité qui définit la socket était elle-même réinscriptible.
+	#
+	# On reprend donc chaque chemin livré par rootfs/ et on le remet à root,
+	# en 755 pour les répertoires et les exécutables, 644 pour le reste. Les
+	# ajustements particuliers qui suivent (journal du greeter, X11-unix)
+	# passent APRÈS et gardent le dernier mot.
+	( cd "$DEPOT/rootfs" && find . -mindepth 1 -printf '%P\n' ) | while IFS= read -r rel; do
+		cible="/$rel"
+		[ -e "$cible" ] || continue
+		chown root:root "$cible"
+		if [ -d "$cible" ] || [ -x "$DEPOT/rootfs/$rel" ]; then
+			chmod 755 "$cible"
+		else
+			chmod 644 "$cible"
+		fi
+	done
+	ok "fichiers copiés" "root:root — 755 pour les exécutables, 644 sinon"
 
 	# Le journal de l'écran de connexion doit appartenir à « _greetd », sans
 	# quoi le greeter ne peut pas y écrire et sa panne reste muette.
