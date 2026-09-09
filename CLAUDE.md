@@ -339,7 +339,12 @@ barre de 34 px au-dessus des onglets.
 | Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le conflit de terminal virtuel de l'invariant n°5 — **à reconfirmer** maintenant que greetd est sur le tty7, et à ne pas déclarer résolu sans l'avoir revu. |
 | Luminosité automatique | **Impossible par capteur — mesuré le 8 septembre 2026.** Aucun capteur de luminosité ambiante sur MADOO : `/sys/bus/iio/devices/` n'expose que deux accéléromètres, un gyroscope et un angle d'écran. Question close. **L'asservissement à l'inactivité, lui, est FAIT et VU FONCTIONNER** le 9 septembre — voir la veille progressive ci-dessus. |
 | **Reprise après suspension** | **CASSÉE, et c'est le chantier le plus important qui reste.** Le 9 septembre 2026, onze suspensions consécutives déclenchées par la fermeture du capot n'ont jamais repris : le journal s'arrête net sur `PM: suspend entry (s2idle)` et la machine réapparaît avec un nouvel identifiant de démarrage. Fermer le capot coûte donc une session. Une seule reprise a réussi, le matin du 9. Piste **non vérifiée** : `rtw88` a un historique de problèmes de reprise en s2idle, et le journal montre NetworkManager libérant `wlp1s0` juste avant. Tant que ce point n'est pas réglé, `energie.suspendre_permis` reste à `false`. |
-| Reports | rclone (Drive, OneDrive), icônes sur le bureau. Les **lecteurs réseau** ne sont plus un report : voir ci-dessus. |
+| **Clavier tactile du verrou** | **ABSENT — premier chantier.** En mode tablette il faut le clavier physique pour déverrouiller, ce qui est exactement la situation où l'on n'en a pas. `clavier.c` existe mais est en GTK4, et le verrou est en Wayland brut : soit redessiner le pavé en cairo avec `wl_touch`, soit revoir le choix de protocole. |
+| **Veille profonde** | Irréalisable en l'état : swap réel 3,0 Gio pour 3,7 Gio de RAM, et `resume=` absent de la ligne de commande. Hiberner perdrait la session. Décision à prendre — agrandir le swap, ou renoncer au nom. |
+| Réglages : durées brutes | Le panneau montre ce qui est écrit, pas ce qui est appliqué après bornage par `shell_energie_delais_mode()`. La Console, elle, dit vrai. |
+| `console.c` non converti | Le rétroéclairage y est encore soudé au widget du curseur, en double de `retroeclairage.c`. |
+| Capot par mode | Le verrou s'ancre sur l'extinction ; le capot reste géré par logind, donc identique pour les trois modes. |
+| Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
 
 ---
 

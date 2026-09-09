@@ -659,3 +659,259 @@ La machine a tranché.
 l'écran de connexion — vu sombre à l'écran, alors qu'il n'avait jamais pu
 l'être — et le piège du focus des claviers tactiles, éprouvé au doigt et non
 déduit d'un banc d'essai qui ne sait pas cliquer.
+
+---
+
+## 9 septembre 2026 — la veille progressive, et une porte grande ouverte
+
+Demandé : que l'écran s'assoupisse au lieu de rester allumé pour personne.
+Le rétroéclairage est le premier poste de consommation de la machine —
+**environ 1 à 2 W sur les 6,8 W mesurés à la batterie**, plus que tout le
+reste réuni.
+
+### Ce qui a été livré
+
+`shell/src/energie.c` vit dans `claude-os-status`, comme le centre de
+notifications et pour la même raison : un processus séparé aurait coûté un
+runtime GTK4 complet, **~40 Mo mesurés**, sur 4 Go soudés.
+
+Trois modes nommés — **Travail, Automatique, Nomade** — et le mode est un
+*choix*, pas une déduction de la prise. La version précédente dérivait le
+comportement du câble : commode et illisible, personne ne pouvait dire ce
+que la machine allait faire sans regarder derrière.
+
+Étages : préavis → atténuer → préavis → éteindre → verrou → suspendre.
+`shell_energie_delais_mode()` **borne l'ordre** : un mode qui ne dort pas
+ne dort pas, quelle que soit la valeur écrite dans le fichier. C'est ce qui
+rend un mode indénaturable depuis l'interface.
+
+**Aucune scrutation.** `ext_idle_notifier_v1` prévient ; entre deux
+événements le module ne coûte rien. Les inhibiteurs sont gratuits : la
+spécification impose au compositeur de ne pas rendre la notification
+inactive tant qu'un `zwp_idle_inhibitor_v1` existe. Vérifié dans les deux
+sens — aucun événement tant que Claude Desktop tenait son verrou d'éveil,
+les trois étages à l'heure dès qu'il l'a relâché.
+
+**Le compte à rebours**, `preavis.c` : un soleil-chronomètre en bas à
+droite, de la largeur exacte de la pilule de la barre d'état, fond
+transparent. Disque central immobile, soixante graduations à trois
+longueurs qui s'éteignent une à une. Il ne prend ni le clavier ni le clic —
+région d'entrée **vide** — il se voit et ne s'attrape pas.
+
+Trois versions ont été nécessaires, et les deux premières ont été rejetées
+**à l'usage, pas à la lecture** : un texte « Veille dans 8 s » appelait la
+lecture et reproduisait la gêne qu'il devait corriger ; un disque de 44 px
+se laissait ignorer trop bien ; douze graduations faisaient une étoile et
+non un chronomètre.
+
+### Trois défaillances muettes, encore, et toutes du même genre
+
+L'invariant n°4 ne parle pas que des `>/dev/null`.
+
+1. **Deux `return` silencieux** dans `shell_energie_init` : sans affichage
+   Wayland ou sans siège, le module renonçait sans un mot.
+2. **Aucun `wl_display_flush`** après `get_idle_notification`. L'init a lieu
+   avant que la boucle GTK ne tourne ; les requêtes restaient dans la file.
+   Sur un bureau au repos — la situation même qu'on veut détecter — rien ne
+   la vidait. *Le module de veille ne démarrait qu'une fois qu'il se passait
+   quelque chose.*
+3. **`g_dbus_proxy_call` avec `NULL` comme rappel**, au motif que « personne
+   ne regarde ». Le plus coûteux : le journal montrait « etage 1 atteint »
+   et l'écran ne bougeait pas.
+
+### Deux bogues de fond, dont un vieux de plusieurs semaines
+
+**L'écriture sysfs n'avait jamais fonctionné.** `g_file_set_contents()`
+écrit de façon atomique, par un temporaire créé à côté puis renommé — et
+**on ne crée aucun fichier dans sysfs**. L'erreur parlait d'un
+« brightness.79UMV3 » introuvable, ce qui envoyait chercher du côté des
+droits, à tort. `console.c` portait le même code : le repli sysfs du
+curseur de la Console n'avait jamais marché depuis son écriture. Personne
+ne pouvait le voir, logind réussissant toujours en session normale.
+Corrigé en `open`/`write`/`close`.
+
+**Le module recevait ses événements par salves puis plus rien.** Ses objets
+Wayland vivaient dans la file **par défaut** de la connexion de GTK, que
+GDK ne s'engage pas à vider : les `idled` s'y accumulaient et n'étaient
+dépilés que lorsqu'une opération GTK provoquait incidemment un aller-retour.
+Ce qui a tranché : un client d'essai isolé, lancé **au même instant sur le
+même compositeur**, recevait tout pendant que la barre ne recevait rien.
+Deux mesures simultanées valent mieux que dix raisonnements. Le module a
+désormais **sa propre connexion** et vide sa file depuis une source GLib.
+
+### Un piège de méthode qui a coûté une matinée
+
+```
+labwc, claude-os-fond    → session-N.scope   (seat0, tty7)
+claude-desktop, et tout ce qui en est lancé
+                         → user@1000.service/app.slice/app-com.anthropic.Claude
+```
+
+**Claude Desktop vit hors de la session du siège.** Or logind n'accepte
+`SetBrightness` que de la session active. Un composant relancé à la main
+depuis un terminal de Claude Desktop se le voit refuser, et le module
+*paraît* cassé alors qu'il ne l'est pas.
+
+**Un composant qui touche à logind ne se teste QUE démarré par l'autostart
+de labwc.** Vérifier la portée avant de conclure :
+
+```sh
+grep -oE 'session-[0-9]+\.scope|app-com[^/]*\.scope' /proc/$(pgrep -x claude-os-statu)/cgroup
+```
+
+*(Depuis la correction de l'écriture sysfs, la luminosité ne dépend plus de
+la portée — mais le piège vaut pour tout ce qui parle à logind.)*
+
+---
+
+## 9 septembre 2026 — le verrou d'écran, et une élévation vers root
+
+### La porte grande ouverte, trouvée par hasard
+
+En déployant le service PAM du verrou, un réflexe sur les droits :
+
+```
+/etc/pam.d/claude-os-verrou    stef:stef 664
+```
+
+`cp -a` conserve la propriété de la **source** — celle du dépôt, donc celle
+de l'utilisateur. **Tous** les fichiers déployés depuis que `rootfs/`
+existe étaient à `stef:stef`, dont :
+
+| Fichier | Tourne en |
+|---|---|
+| `claude-os-coffre@.service` | **root** |
+| `claude-os-filet.service` | **root** |
+| `greetd.service.d/…` (`ExecStartPre`) | **root** |
+| `filet-session` | lancé par root |
+| `claude-os-greeter` | lancé par `_greetd` |
+
+N'importe quel programme tournant sous le compte de l'utilisateur pouvait
+réécrire l'`ExecStart=` d'un service root, déclencher le service, et
+**obtenir root**. Sans exploit, avec un éditeur de texte.
+
+Et cela vidait le coffre de sa protection. `docs/09` dit « la socket, et
+elle seule » — mais l'unité qui **définit** cette socket était réinscriptible
+par le compte qu'elle tenait à l'écart. Le contrôle `SO_PEERCRED` redit
+dans `coffre.c` ne servait à rien davantage : le binaire vérifie son
+appelant, pas qui a écrit l'unité qui l'a lancé.
+
+`--deployer` reprend maintenant chaque chemin livré : `root:root`, 755 pour
+les répertoires et exécutables, 644 sinon.
+
+**Leçon générale :** un mécanisme de protection ne vaut que si ce qui le
+définit est hors de portée de ce qu'il protège.
+
+### Le coffre, ouvert à la session mais pas en grand
+
+Le verrou tourne sous le compte de l'utilisateur et doit joindre le coffre.
+Trois règles plutôt qu'une porte :
+
+- `appelant_admis()` laisse entrer un compte ordinaire — et ne fait que ça ;
+- `utilisateur_permis()` lui interdit de nommer quelqu'un d'autre que
+  lui-même ;
+- **moindre privilège sur les verbes** : `etat` et `ouvrir` seulement.
+  Sceller et effacer restent au greeter.
+
+Socket en groupe `users` et non un groupe neuf : le compte y appartient
+**déjà**, alors qu'un groupe créé pour l'occasion aurait exigé une
+réouverture de session — le piège du groupe `video` documenté dans
+`console.c`.
+
+*Ce que cela affaiblit :* un programme tournant déjà sous ce compte peut
+tenter un PIN. Le compteur le borne à cinq, après quoi le coffre est effacé
+et l'on retombe sur le mot de passe. Un tel programme pouvait de toute façon
+enregistrer la frappe.
+
+### Le verrou
+
+`shell/src/verrou.c`, 712 lignes, **sans GTK**. Le protocole
+`ext-session-lock-v1` demande une surface d'un type que GTK ne sait pas
+produire, et aucune bibliothèque équivalente à `gtk4-layer-shell` n'existe
+pour le verrouillage dans Debian trixie — vérifié. D'où `wayland-client`,
+cairo, pango, xkbcommon et PAM à nu.
+
+**Pourquoi ce protocole plutôt qu'une surface « par-dessus tout ».** Une
+surface layer-shell en couche OVERLAY aurait permis de réutiliser l'écran de
+connexion tel quel, clavier tactile compris. Mais elle disparaît avec le
+processus : un plantage, et l'écran se déverrouille seul. `ext-session-lock`
+fait l'inverse — si le verrou meurt, le compositeur **garde** l'écran
+bloqué. Plus sûr, et c'est aussi le danger.
+
+D'où **`--essai=N`**, qui verrouille pour de vrai puis rend la main tout
+seul. Le vrai chemin de code est exercé sans pari. À lancer avant de
+brancher le verrou, jamais après.
+
+**Ce qui prouve que la chaîne marche** : aucun des deux journaux d'essai ne
+contient « fin de l'essai ». Le minuteur n'a pas eu à servir — l'utilisateur
+a déverrouillé lui-même au code PIN, et le compteur du coffre est repassé de
+4 à 5, ce qui ne se produit que sur un succès.
+
+Deux défauts vus **à l'écran** : un trait oblique en travers du panneau
+(`pango_cairo_show_layout` laisse un point courant, `cairo_arc` s'y
+raccorde — `cairo_new_sub_path()` avant chaque arc), et les accents perdus
+dans le journal, le même piège `g_printerr`/locale que `docs/09` documente
+pour le coffre, repayé faute de l'avoir lu jusqu'au bout.
+
+### Éprouvé de bout en bout
+
+Délais raccourcis, chaque étage à la seconde armée, luminosité
+échantillonnée en parallèle :
+
+```
+20:02:44  étage 0  préavis atténuation   (armé à 10 s)
+20:02:49  étage 1  atténuation           (15 s)  → 30 %
+20:02:54  étage 2  préavis extinction    (20 s)
+20:02:59  étage 3  extinction            (25 s)  →  0 %
+20:03:04  étage 4  verrou d'écran lancé  (30 s)
+```
+
+---
+
+## Ce qui reste à faire — au 9 septembre 2026 au soir
+
+Par ordre d'importance.
+
+1. **Le clavier tactile du verrou.** Il n'y en a pas. En mode tablette,
+   capot replié, il faut le clavier physique pour déverrouiller — ce qui
+   est exactement la situation où l'on n'en a pas. `clavier.c` existe et
+   sert l'écran de connexion, mais il est en GTK4 : le verrou étant en
+   Wayland brut, il faudra soit redessiner le pavé en cairo avec
+   `wl_touch`/`wl_pointer`, soit revoir le choix de protocole. **C'est le
+   premier chantier.**
+
+2. **La reprise après suspension est cassée.** Onze suspensions
+   consécutives sans reprise le 9 septembre : le journal s'arrête sur
+   `PM: suspend entry (s2idle)` et la machine réapparaît avec un nouvel
+   identifiant de démarrage. Fermer le capot coûte une session. Tant que ce
+   n'est pas réglé, `energie.suspendre_permis` reste à `false` et l'étage
+   « suspendre » est écrit mais fermé. Piste **non vérifiée** : `rtw88` a un
+   historique de problèmes de reprise en s2idle.
+
+3. **La veille profonde** — l'hibernation — n'est pas réalisable en l'état :
+   swap réel de 3,0 Gio pour 3,7 Gio de RAM, et **`resume=` absent** de la
+   ligne de commande noyau. Hiberner aujourd'hui perdrait la session.
+   Décision à prendre : agrandir le swap (fichier de 5 Gio sur les 45 libres,
+   simple et sans risque), ou renoncer et appeler « veille profonde » une
+   suspension normale avec le Wi-Fi coupé.
+
+4. **Le panneau Réglages affiche les durées brutes**, pas celles réellement
+   appliquées après bornage par `shell_energie_delais_mode()`. Un fichier
+   incohérent — `attenuer 3 min, eteindre 1 min`, trouvé dans le vrai
+   `shell.conf` — est corrigé silencieusement par le module, mais le panneau
+   montre encore la valeur écrite. La Console, elle, dit vrai.
+
+5. **`console.c` n'est pas converti à `retroeclairage.c`.** Le pilotage du
+   rétroéclairage y est encore soudé au widget du curseur : deux
+   implémentations qui écrivent tour à tour dans le même fichier finiront
+   par se contredire.
+
+6. **Le verrou ne se déclenche pas à la fermeture du capot.** Il s'ancre sur
+   l'extinction de l'écran. Le capot reste géré par logind, donc identique
+   pour les trois modes — alors que la spécification demandée distingue
+   Travail (rester éveillé, avec un bip) des deux autres.
+
+7. **Reports** : rclone (Drive, OneDrive), icônes sur le bureau, luminosité
+   par inactivité déjà faite mais sans capteur de luminosité ambiante —
+   celui-ci est **absent de MADOO**, mesuré, la question est close.
+
