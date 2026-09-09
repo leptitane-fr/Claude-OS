@@ -74,6 +74,22 @@ shell_energie_delais_mode (const ShellConfig *cfg, const ShellModeEnergie *m,
         sus = cfg->energie_auto_suspendre;
     }
 
+    /* LES ETAGES SONT REMIS DANS L'ORDRE, ET C'EST INDISPENSABLE.
+     *
+     * J'avais ecrit que l'ordre attenuer -> eteindre -> suspendre n'etait
+     * pas exposé et ne pouvait donc pas etre casse. C'etait faux : les
+     * listes de durees du panneau sont independantes, et rien n'empechait
+     * « attenuer 3 min, eteindre 1 min ». Trouve dans le shell.conf reel le
+     * 9 septembre 2026 -- l'ecran se serait eteint avant d'avoir baisse.
+     *
+     * On ne refuse pas la valeur et on ne la corrige pas dans le fichier :
+     * on la borne ici, au seul endroit qui repond a la question. La Console
+     * et les Reglages interrogeant cette meme fonction, ils annoncent la
+     * duree REELLEMENT appliquee -- un panneau qui afficherait 1 min pendant
+     * que la machine en attend 3 serait pire que le desordre lui-meme. */
+    if (ete > 0 && ete < att) ete = att;
+    if (sus > 0 && sus < ete) sus = ete;
+
     if (preavis)   *preavis   = pre;
     if (attenuer)  *attenuer  = att;
     if (eteindre)  *eteindre  = ete;
