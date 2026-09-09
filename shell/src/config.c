@@ -89,6 +89,28 @@ config_path (void)
                              "claude-os", "shell.conf", NULL);
 }
 
+/* Deux aides pour la section « energie », qui compte a elle seule neuf
+ * cles. Une valeur absente ou mal ecrite laisse le defaut en place plutot
+ * que de rendre zero -- un delai de zero seconde eteindrait l'ecran
+ * immediatement, ce qui est la pire facon de traiter une faute de frappe. */
+static void
+lire_entier (GKeyFile *kf, const char *cle, int *cible)
+{
+    g_autoptr(GError) e = NULL;
+    int v = g_key_file_get_integer (kf, "energie", cle, &e);
+    if (e == NULL && v >= 0)
+        *cible = v;
+}
+
+static void
+lire_bool (GKeyFile *kf, const char *cle, gboolean *cible)
+{
+    g_autoptr(GError) e = NULL;
+    gboolean v = g_key_file_get_boolean (kf, "energie", cle, &e);
+    if (e == NULL)
+        *cible = v;
+}
+
 ShellConfig *
 shell_config_load (void)
 {
@@ -116,6 +138,31 @@ shell_config_load (void)
     cfg->reserve_space = FALSE;
     cfg->wallpaper      = g_strdup ("");
     cfg->wallpaper_fill = TRUE;
+
+    /* Defauts de la veille progressive.
+     *
+     * Sur SECTEUR, on attenue tard et on n'eteint qu'apres un quart d'heure :
+     * la machine est branchee, l'enjeu n'est pas l'autonomie mais l'usure de
+     * la dalle et le confort. Aucune suspension : un telechargement ou une
+     * compilation ne doit pas etre interrompu parce qu'on a quitte la piece.
+     *
+     * Sur BATTERIE, les delais se resserrent nettement -- c'est la que le
+     * watt compte. La suspension est configuree a dix minutes mais reste
+     * FERMEE par energie_suspendre_permis tant que la reprise n'est pas sure.
+     *
+     * 30 % pour l'attenuation : assez bas pour que le gain soit reel, assez
+     * haut pour qu'on lise encore l'ecran et qu'on comprenne que la machine
+     * s'assoupit au lieu de croire qu'elle s'eteint. */
+    cfg->energie_active    = TRUE;
+    cfg->energie_mode      = g_strdup ("auto");
+    cfg->energie_niveau    = 30;
+    cfg->energie_suspendre_permis = FALSE;
+    cfg->energie_secteur_attenuer   = 300;    /*  5 min */
+    cfg->energie_secteur_eteindre   = 900;    /* 15 min */
+    cfg->energie_secteur_suspendre  = 0;      /* jamais */
+    cfg->energie_batterie_attenuer  = 60;     /*  1 min */
+    cfg->energie_batterie_eteindre  = 180;    /*  3 min */
+    cfg->energie_batterie_suspendre = 600;    /* 10 min, sous condition */
 
     if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, NULL))
         return cfg;   /* pas de fichier : les defauts suffisent */
@@ -157,6 +204,24 @@ shell_config_load (void)
     if (e == NULL)
         cfg->reserve_space = reserve;
 
+    lire_bool   (kf, "active",            &cfg->energie_active);
+    lire_bool   (kf, "suspendre_permis",  &cfg->energie_suspendre_permis);
+    lire_entier (kf, "niveau",            &cfg->energie_niveau);
+    lire_entier (kf, "secteur_attenuer",  &cfg->energie_secteur_attenuer);
+    lire_entier (kf, "secteur_eteindre",  &cfg->energie_secteur_eteindre);
+    lire_entier (kf, "secteur_suspendre", &cfg->energie_secteur_suspendre);
+    lire_entier (kf, "batterie_attenuer", &cfg->energie_batterie_attenuer);
+    lire_entier (kf, "batterie_eteindre", &cfg->energie_batterie_eteindre);
+    lire_entier (kf, "batterie_suspendre",&cfg->energie_batterie_suspendre);
+
+    g_autofree char *mode = g_key_file_get_string (kf, "energie", "mode", NULL);
+    if (mode != NULL && (g_strcmp0 (mode, "auto")    == 0 ||
+                         g_strcmp0 (mode, "normal")  == 0 ||
+                         g_strcmp0 (mode, "econome") == 0)) {
+        g_free (cfg->energie_mode);
+        cfg->energie_mode = g_steal_pointer (&mode);
+    }
+
     g_autofree char *wp = g_key_file_get_string (kf, "wallpaper", "image", NULL);
     if (wp != NULL) {
         g_free (cfg->wallpaper);
@@ -181,6 +246,7 @@ shell_config_free (ShellConfig *cfg)
     g_free (cfg->icon_theme);
     g_free (cfg->theme);
     g_free (cfg->wallpaper);
+    g_free (cfg->energie_mode);
     g_free (cfg);
 }
 
@@ -210,6 +276,18 @@ shell_config_save (const ShellConfig *cfg, GError **error)
     g_key_file_set_string  (kf, "appearance", "theme", cfg->theme);
     g_key_file_set_string  (kf, "wallpaper", "image", cfg->wallpaper);
     g_key_file_set_boolean (kf, "wallpaper", "fill", cfg->wallpaper_fill);
+
+    g_key_file_set_boolean (kf, "energie", "active", cfg->energie_active);
+    g_key_file_set_string  (kf, "energie", "mode", cfg->energie_mode);
+    g_key_file_set_integer (kf, "energie", "niveau", cfg->energie_niveau);
+    g_key_file_set_boolean (kf, "energie", "suspendre_permis",
+                            cfg->energie_suspendre_permis);
+    g_key_file_set_integer (kf, "energie", "secteur_attenuer",   cfg->energie_secteur_attenuer);
+    g_key_file_set_integer (kf, "energie", "secteur_eteindre",   cfg->energie_secteur_eteindre);
+    g_key_file_set_integer (kf, "energie", "secteur_suspendre",  cfg->energie_secteur_suspendre);
+    g_key_file_set_integer (kf, "energie", "batterie_attenuer",  cfg->energie_batterie_attenuer);
+    g_key_file_set_integer (kf, "energie", "batterie_eteindre",  cfg->energie_batterie_eteindre);
+    g_key_file_set_integer (kf, "energie", "batterie_suspendre", cfg->energie_batterie_suspendre);
 
     return g_key_file_save_to_file (kf, path, error);
 }

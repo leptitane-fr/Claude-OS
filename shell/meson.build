@@ -36,6 +36,26 @@ ftl_code = custom_target('ftl-code',
   output  : 'wlr-foreign-toplevel-management-unstable-v1-protocol.c',
   command : [wlscanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 
+# ext-idle-notify-v1 : le compositeur previent quand le siege est inactif.
+# C'est le declencheur de la mise en veille progressive (voir energie.h).
+#
+# Le XML est verse dans le depot alors qu'il EXISTE sur le systeme, dans
+# wayland-protocols. C'est volontaire : le meme choix que pour
+# foreign-toplevel, pour la meme raison. Le shell se construit alors avec la
+# seule dependance wayland-scanner, et une mise a jour de wayland-protocols
+# ne peut pas changer sous nos pieds le code genere.
+idle_xml = 'protocols/ext-idle-notify-v1.xml'
+
+idle_header = custom_target('idle-header',
+  input   : idle_xml,
+  output  : 'ext-idle-notify-v1-client-protocol.h',
+  command : [wlscanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+idle_code = custom_target('idle-code',
+  input   : idle_xml,
+  output  : 'ext-idle-notify-v1-protocol.c',
+  command : [wlscanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
 # Sources communes aux deux composants. La bascule de visibilite doit se
 # comporter exactement pareil dans le dock et dans la barre, sinon les deux
 # se desynchronisent a l'ecran.
@@ -52,10 +72,21 @@ executable('claude-os-dock',
   dependencies : [gtk, layershell, giounix, wlclient, pangocairo],
   install : true)
 
+# La barre d'etat accueille aussi le module d'energie -- comme elle accueille
+# deja le serveur de notifications, et pour la meme raison. Un processus
+# separe couterait un runtime GTK4 complet : environ 40 Mo mesures le
+# 8 septembre 2026, sur une machine qui n'a que 4 Go soudes et qui swappe.
+# La barre est deja residente, deja cliente Wayland, et tient deja la
+# connexion logind dont le retroeclairage a besoin.
+#
+# Contrepartie assumee, la meme que pour les notifications : si la barre
+# tombe, la veille tombe avec elle. Elle degrade -- l'ecran reste allume --
+# elle ne casse rien.
 executable('claude-os-status',
   'src/status.c', 'src/panel.c', 'src/console.c', 'src/notifications.c',
-  'src/wifi.c', 'src/bluetooth.c', commun,
-  dependencies : [gtk, layershell, giounix, pangocairo],
+  'src/wifi.c', 'src/bluetooth.c', 'src/energie.c', 'src/retroeclairage.c',
+  idle_header, idle_code, commun,
+  dependencies : [gtk, layershell, giounix, wlclient, pangocairo],
   install : true)
 
 executable('claude-os-fond',

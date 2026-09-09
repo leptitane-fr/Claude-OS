@@ -17,6 +17,22 @@
  * A liberer avec g_free(). */
 char *shell_sysfs_read (const char *dir, const char *file);
 
+/* Sommes-nous sur le secteur ?
+ *
+ * Sur MADOO la question n'a pas une reponse unique : le noyau expose « AC »
+ * (type Mains) ET deux « CROS_USBPD_CHARGER » (type USB), parce que la
+ * machine se charge aussi bien par son connecteur que par l'un ou l'autre
+ * port USB-C. Regarder le seul « AC » ferait passer pour « sur batterie »
+ * une machine branchee en USB-C.
+ *
+ * La regle est donc : une alimentation quelconque, de type Mains ou USB,
+ * declaree « online », suffit. Les entrees de type Battery sont ignorees --
+ * y compris « hid-...-battery », celle du pave tactile.
+ *
+ * Renvoie TRUE si rien ne permet de conclure : mieux vaut se croire sur le
+ * secteur et ne rien eteindre que s'endormir a tort. */
+gboolean shell_sur_secteur (void);
+
 /* Repertoire de la premiere batterie trouvee, ou NULL s'il n'y en a pas.
  * Le nom varie : BAT0 sur beaucoup de portables, BAT1 sur ce Vivobook,
  * BATC ailleurs. A liberer avec g_free(). */

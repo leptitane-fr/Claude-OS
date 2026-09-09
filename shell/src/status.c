@@ -24,6 +24,7 @@
 #include "config.h"
 #include "visibility.h"
 #include "notifications.h"
+#include "energie.h"
 #include "panel.h"
 #include "sysfs.h"
 
@@ -250,6 +251,9 @@ on_config_reloaded (ShellConfig *cfg, gpointer window)
     (void) window;
     shell_styles_load (cfg->theme);
     shell_config_apply (cfg);
+    /* Avant de liberer : le panneau de reglages ecrit shell.conf, et les
+     * delais de veille doivent suivre sans qu'on relance quoi que ce soit. */
+    shell_energie_reconfigurer (cfg);
     shell_config_free (cfg);
 }
 
@@ -386,6 +390,10 @@ on_activate (GtkApplication *app, gpointer user_data)
     g_application_hold (G_APPLICATION (app));
     shell_visibility_init (on_visibilite, window);
     shell_config_watch (on_config_reloaded, window);
+
+    /* APRES gtk_window_present : le module accroche le registre Wayland de
+     * GTK, qui n'existe qu'une fois la premiere surface creee. */
+    shell_energie_init (opt->cfg);
 
     if (opt->ouvrir)
         g_idle_add (open_panel_once, button);

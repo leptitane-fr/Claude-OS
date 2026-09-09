@@ -20,6 +20,24 @@ typedef struct {
     /* Fond d'ecran. Chemin vide : le degrade dessine par le shell. */
     char     *wallpaper;     /* chemin d'une image, ou ""                    */
     gboolean  wallpaper_fill;/* couvrir en rognant plutot que tout montrer   */
+
+    /* Mise en veille progressive -- voir energie.h pour le raisonnement.
+     * Les delais sont en SECONDES ; zero ferme l'etage. */
+    gboolean  energie_active;
+    char     *energie_mode;   /* « auto » (suit la prise), « normal », « econome » */
+    int       energie_niveau; /* pourcent vise par l'etage « attenuer »      */
+
+    /* L'etage « suspendre » ne s'ouvre que si CE drapeau est vrai, quels que
+     * soient les delais. Il vaut FALSE par defaut : le 9 septembre 2026,
+     * onze suspensions consecutives n'ont pas repris sur cette machine. */
+    gboolean  energie_suspendre_permis;
+
+    int       energie_secteur_attenuer;
+    int       energie_secteur_eteindre;
+    int       energie_secteur_suspendre;
+    int       energie_batterie_attenuer;
+    int       energie_batterie_eteindre;
+    int       energie_batterie_suspendre;
 } ShellConfig;
 
 /* Lit ~/.config/claude-os/shell.conf. Absent, les valeurs par defaut
