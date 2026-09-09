@@ -35,6 +35,7 @@
 #include "fichiers.h"
 #include "fichiers-ops.h"
 #include "fichiers-lieux.h"
+#include "reseau.h"
 
 typedef enum { VUE_ICONES, VUE_LISTE, VUE_DETAILS } Vue;
 
@@ -71,6 +72,7 @@ static struct {
 } F;
 
 static void naviguer (GFile *dossier, gboolean historiser);
+static void naviguer_vraiment (GFile *dossier, gboolean historiser);
 static void maj_etat (void);
 
 /* -------------------------------------------------------------------------
@@ -199,6 +201,18 @@ maj_fil (void)
     g_autoptr(GPtrArray) chaine = g_ptr_array_new_with_free_func (g_object_unref);
     for (GFile *f = g_object_ref (F.dossier); f != NULL; ) {
         g_ptr_array_insert (chaine, 0, f);
+
+        /* LE FIL S'ARRETE A LA RACINE D'UN LECTEUR RESEAU.
+         *
+         * Sans cela il afficherait « Ordinateur › run › claude-os › reseau ›
+         * nas-videos » : quatre elements qui ne mènent nulle part d'utile et
+         * qui étalent un detail d'implementation. On remonte donc jusqu'au
+         * lecteur, et pas au-dela. */
+        g_autofree char *p = g_file_get_path (f);
+        g_autofree char *lecteur = reseau_nom_du_point (p);
+        if (lecteur != NULL)
+            break;
+
         f = g_file_get_parent (f);
     }
 
@@ -210,7 +224,10 @@ maj_fil (void)
          * nomme d'ailleurs par son role et non par son chemin. */
         const char *libelle = nom;
         g_autofree char *chemin = g_file_get_path (f);
-        if (g_strcmp0 (chemin, "/") == 0)
+        g_autofree char *nom_lecteur = reseau_nom_du_point (chemin);
+        if (nom_lecteur != NULL)
+            libelle = nom_lecteur;
+        else if (g_strcmp0 (chemin, "/") == 0)
             libelle = "Ordinateur";
         else if (g_strcmp0 (chemin, g_get_home_dir ()) == 0)
             libelle = "Dossier personnel";
@@ -261,20 +278,10 @@ recharger (void)
     fichiers_lire (F.dossier, F.magasin, on_lu, NULL);
 }
 
+/* La verification d'existence, une fois qu'elle a repondu. */
 static void
-naviguer (GFile *dossier, gboolean historiser)
+naviguer_vraiment (GFile *dossier, gboolean historiser)
 {
-    if (dossier == NULL)
-        return;
-
-    /* Une adresse illisible n'est pas une erreur a signaler tard : on la
-     * refuse avant de perdre le dossier courant. */
-    if (!g_file_query_exists (dossier, NULL)) {
-        g_autofree char *chemin = g_file_get_parse_name (dossier);
-        signaler ("Ce dossier n'existe pas", chemin);
-        return;
-    }
-
     if (historiser) {
         /* Naviguer depuis un point de l'historique efface ce qui suivait :
          * c'est ce que fait un navigateur, et l'alternative -- garder deux
@@ -294,6 +301,70 @@ naviguer (GFile *dossier, gboolean historiser)
     maj_boutons ();
     fichiers_lieux_suivre (F.lieux, F.dossier);
     recharger ();
+}
+
+/* -------------------------------------------------------------------------
+ * L'existence du dossier se verifie SANS BLOQUER
+ *
+ * La version precedente appelait g_file_query_exists, qui est synchrone.
+ * Sur un dossier local cela ne coute rien, et cela s'est donc vu passer.
+ * Sur un lecteur reseau, non : un serveur eteint, un Wi-Fi coupe, et
+ * l'appel ne rend la main qu'au bout du delai TCP -- pendant lequel la
+ * fenetre entiere est gelee, boutons compris. C'est exactement le moment ou
+ * l'utilisateur veut pouvoir revenir en arriere.
+ *
+ * Le controle est conserve -- il evite de perdre le dossier courant sur une
+ * adresse fautive -- mais il est pose en asynchrone, et une demande plus
+ * recente annule celle qui attendait encore.
+ * ------------------------------------------------------------------------- */
+static GCancellable *nav_en_cours = NULL;
+
+typedef struct {
+    GFile    *dossier;
+    gboolean  historiser;
+} DemandeNav;
+
+static void
+on_nav_verifiee (GObject *src, GAsyncResult *res, gpointer data)
+{
+    DemandeNav *d = data;
+    g_autoptr(GError) e = NULL;
+    g_autoptr(GFileInfo) info = g_file_query_info_finish (G_FILE (src), res, &e);
+
+    if (info == NULL) {
+        /* Annulee : une autre navigation a pris la place, et c'est elle qui
+         * parlera. Se plaindre ici afficherait une erreur pour un dossier
+         * que l'utilisateur a deja quitte. */
+        if (!g_error_matches (e, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+            g_autofree char *chemin = g_file_get_parse_name (d->dossier);
+            signaler ("Ce dossier n'est pas accessible", 
+                      e != NULL ? e->message : chemin);
+        }
+    } else {
+        naviguer_vraiment (d->dossier, d->historiser);
+    }
+
+    g_object_unref (d->dossier);
+    g_free (d);
+}
+
+static void
+naviguer (GFile *dossier, gboolean historiser)
+{
+    if (dossier == NULL)
+        return;
+
+    g_cancellable_cancel (nav_en_cours);
+    g_clear_object (&nav_en_cours);
+    nav_en_cours = g_cancellable_new ();
+
+    DemandeNav *d = g_new0 (DemandeNav, 1);
+    d->dossier    = g_object_ref (dossier);
+    d->historiser = historiser;
+
+    g_file_query_info_async (dossier, G_FILE_ATTRIBUTE_STANDARD_TYPE,
+                             G_FILE_QUERY_INFO_NONE, G_PRIORITY_DEFAULT,
+                             nav_en_cours, on_nav_verifiee, d);
 }
 
 static void

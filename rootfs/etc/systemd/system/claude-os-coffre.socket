@@ -1,0 +1,34 @@
+# Claude OS — la porte du coffre.
+#
+# C'EST CE FICHIER QUI PROTÈGE LE COFFRE, et rien d'autre.
+#
+# claude-os-coffre tourne en root et rend un mot de passe contre un code
+# PIN. Il n'est ni setuid, ni déclaré dans sudoers, et aucun compte ordinaire
+# n'a de chemin pour l'exécuter : la socket ci-dessous est la seule entrée,
+# et elle n'est ouverte qu'à « _greetd », le compte de l'écran de connexion.
+#
+# Le programme REDIT cette règle de son côté, par SO_PEERCRED. Les deux
+# verrous sont volontairement redondants : ce fichier peut être remplacé par
+# une mise à jour ou une erreur de déploiement, la vérification compilée,
+# non.
+#
+# MaxConnections=4 N'EST PAS UNE VALEUR DÉCORATIVE. Chaque connexion lance une
+# instance qui alloue 128 Mio pour Argon2id. Avec la valeur par défaut — 64 —
+# un « _greetd » compromis ferait réserver 8 Go sur une machine qui en a 4,
+# et la mettrait à genoux avant même l'ouverture de session. Le greeter ne
+# pose jamais qu'une question à la fois ; quatre est déjà large.
+
+[Unit]
+Description=Coffre des codes PIN de Claude OS (socket)
+Documentation=file:/home/stef/Claude-OS/docs/09-code-pin.md
+
+[Socket]
+ListenStream=/run/claude-os/coffre.sock
+SocketUser=_greetd
+SocketGroup=_greetd
+SocketMode=0600
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

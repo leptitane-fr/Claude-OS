@@ -1,4 +1,7 @@
 #include "fichiers-lieux.h"
+#include "reseau.h"
+
+#include <string.h>
 
 typedef struct {
     GtkWidget       *boite;        /* la GtkBox racine, celle qu'on rend    */
@@ -8,6 +11,14 @@ typedef struct {
     GVolumeMonitor  *moniteur;
     GPtrArray       *favoris;      /* char* : chemins, dans l'ordre du fichier */
     GFile           *courant;
+
+    /* Lecteurs reseau declares, relus a chaque reconstruction. */
+    GPtrArray       *lecteurs;     /* Lecteur*                              */
+    /* Identifiants des lecteurs dont la connexion est en cours. Une
+     * connexion peut durer le delai TCP complet quand le serveur est
+     * eteint : sans cette marque, la ligne resterait muette et l'on
+     * cliquerait trois fois de suite. */
+    GHashTable      *en_cours;     /* char* -> GINT_TO_POINTER (1)          */
 } Lieux;
 
 /* ------------------------------------------------------------------------- */
@@ -55,6 +66,7 @@ favoris_ecrire (Lieux *L)
 
 /* ------------------------------------------------------------------------- */
 static void reconstruire (Lieux *L);
+static void on_lecteur_active (Lieux *L, const char *id);
 
 static void
 on_ligne_activee (GtkListBox *box, GtkListBoxRow *row, gpointer data)
@@ -71,8 +83,16 @@ on_ligne_activee (GtkListBox *box, GtkListBoxRow *row, gpointer data)
     /* Un volume pas encore monte : on le monte, la navigation suit dans le
      * rappel. Cliquer sur une cle USB doit la monter, pas ne rien faire. */
     GVolume *vol = g_object_get_data (G_OBJECT (row), "volume");
-    if (vol != NULL)
+    if (vol != NULL) {
         g_volume_mount (vol, G_MOUNT_MOUNT_NONE, NULL, NULL, NULL, NULL);
+        return;
+    }
+
+    /* Un lecteur reseau declare mais pas connecte : meme geste, meme
+     * attente. Cliquer dessus le connecte, et la navigation suit. */
+    const char *id = g_object_get_data (G_OBJECT (row), "lecteur-id");
+    if (id != NULL)
+        on_lecteur_active (L, id);
 }
 
 static void
@@ -101,6 +121,396 @@ on_retirer_favori (GSimpleAction *a, GVariant *param, gpointer data)
 
     g_autoptr(GFile) f = g_file_new_for_path (g_variant_get_string (param, NULL));
     fichiers_lieux_retirer (L->boite, f);
+}
+
+/* -------------------------------------------------------------------------
+ * Lecteurs reseau
+ *
+ * Une ligne par lecteur declare, connecte ou non -- et c'est le point : un
+ * partage qui n'apparait QUE lorsqu'il est monte oblige a se souvenir qu'il
+ * existe pour penser a le monter. La ligne grisee est l'invitation.
+ *
+ * Le montage est un repertoire ordinaire, sous /run/claude-os/reseau. Une
+ * fois connecte, le lecteur se parcourt, se copie et se cherche comme
+ * n'importe quel dossier : aucune des vues, aucune des operations de
+ * fichiers n'a eu une ligne a changer pour lui.
+ * ------------------------------------------------------------------------- */
+
+static void
+lecteurs_relire (Lieux *L)
+{
+    g_clear_pointer (&L->lecteurs, g_ptr_array_unref);
+    L->lecteurs = reseau_charger ();
+}
+
+static Lecteur *
+lecteur_par_id (Lieux *L, const char *id)
+{
+    for (guint i = 0; L->lecteurs != NULL && i < L->lecteurs->len; i++) {
+        Lecteur *l = g_ptr_array_index (L->lecteurs, i);
+        if (g_strcmp0 (l->id, id) == 0)
+            return l;
+    }
+    return NULL;
+}
+
+static GtkWindow *
+fenetre_de (Lieux *L)
+{
+    GtkRoot *r = gtk_widget_get_root (L->boite);
+    return GTK_IS_WINDOW (r) ? GTK_WINDOW (r) : NULL;
+}
+
+static void connecter_lecteur   (Lieux *L, const Lecteur *l,
+                                 const char *mot_de_passe, gboolean retenir);
+static void demander_mot_de_passe (Lieux *L, const Lecteur *l, const char *pourquoi);
+
+/* Le message de mount, tel quel, est juste mais aride : « mount error(13) »
+ * ne dit rien a qui n'a pas lu la page de manuel. On traduit les deux cas
+ * qui comptent, et on garde le texte d'origine pour les autres -- inventer
+ * un message pour une erreur qu'on n'a pas prevue serait pire que la citer. */
+static gboolean
+erreur_d_identifiants (const GError *e)
+{
+    return e != NULL && e->message != NULL
+        && (strstr (e->message, "error(13)") != NULL
+            || strstr (e->message, "Permission denied") != NULL
+            || strstr (e->message, "permission non accordée") != NULL);
+}
+
+typedef struct {
+    Lieux *L;
+    char  *id;
+    gboolean naviguer;   /* aller dans le dossier une fois connecte */
+} Attente;
+
+static void
+attente_free (Attente *a)
+{
+    g_free (a->id);
+    g_free (a);
+}
+
+static void
+on_lecteur_fini (const Lecteur *l, GError *erreur, gpointer data)
+{
+    Attente *a = data;
+    Lieux   *L = a->L;
+
+    g_hash_table_remove (L->en_cours, a->id);
+
+    if (erreur != NULL) {
+        /* Mot de passe refuse : on redemande, plutot que d'afficher une
+         * erreur que l'utilisateur ne peut pas corriger depuis la ou il
+         * est. C'est aussi le chemin normal du tout premier acces a un
+         * partage protege. */
+        if (erreur_d_identifiants (erreur)) {
+            /* Reconstruire D'ABORD, chercher ENSUITE : dans l'autre ordre,
+             * `frais` designerait une entree que reconstruire() vient de
+             * liberer. Meme piege que dans connecter_lecteur. */
+            reconstruire (L);
+            const Lecteur *frais = lecteur_par_id (L, a->id);
+            if (frais != NULL) {
+                demander_mot_de_passe (L, frais,
+                    "Le serveur a refusé ces identifiants.");
+                attente_free (a);
+                return;
+            }
+        }
+
+        GtkAlertDialog *d = gtk_alert_dialog_new ("Connexion impossible à « %s »", l->nom);
+        gtk_alert_dialog_set_detail (d, erreur->message);
+        gtk_alert_dialog_show (d, fenetre_de (L));
+        g_object_unref (d);
+        reconstruire (L);
+        attente_free (a);
+        return;
+    }
+
+    reconstruire (L);
+
+    if (a->naviguer) {
+        g_autofree char *point = reseau_point_montage (l);
+        g_autoptr(GFile) f = g_file_new_for_path (point);
+        L->nav (f, L->data);
+    }
+    attente_free (a);
+}
+
+/* ------------------------------------------------------------------------- */
+typedef struct {
+    Lieux     *L;
+    Lecteur   *lecteur;
+    GtkWidget *fenetre;
+    GtkWidget *champ;
+    GtkWidget *retenir;
+} Demande;
+
+static void
+demande_free (gpointer data, GClosure *c)
+{
+    (void) c;
+    Demande *d = data;
+    lecteur_free (d->lecteur);
+    g_free (d);
+}
+
+static void
+on_mdp_valide (GtkWidget *w, gpointer data)
+{
+    (void) w;
+    Demande *d = data;
+
+    /* TOUT copier avant de fermer. Detruire la fenetre detruit le bouton,
+     * donc sa fermeture, donc la Demande elle-meme -- c'est demande_free
+     * qui est attache comme destructeur de closure. Lire d->lecteur ou
+     * d->champ apres gtk_window_destroy, c'est lire de la memoire rendue. */
+    Lieux *L = d->L;
+    g_autoptr(Lecteur) cible = lecteur_copie (d->lecteur);
+    g_autofree char *mdp = g_strdup (gtk_editable_get_text (GTK_EDITABLE (d->champ)));
+    gboolean retenir = gtk_check_button_get_active (GTK_CHECK_BUTTON (d->retenir));
+
+    gtk_window_destroy (GTK_WINDOW (d->fenetre));
+    connecter_lecteur (L, cible, mdp, retenir);
+}
+
+static void
+on_mdp_annule (GtkWidget *w, gpointer data)
+{
+    (void) w;
+    Demande *d = data;
+    gtk_window_destroy (GTK_WINDOW (d->fenetre));
+}
+
+static void
+demander_mot_de_passe (Lieux *L, const Lecteur *l, const char *pourquoi)
+{
+    Demande *d = g_new0 (Demande, 1);
+    d->L       = L;
+    d->lecteur = lecteur_copie (l);
+
+    d->fenetre = gtk_window_new ();
+    gtk_window_set_title (GTK_WINDOW (d->fenetre), "Connexion au lecteur réseau");
+    gtk_window_set_modal (GTK_WINDOW (d->fenetre), TRUE);
+    gtk_window_set_resizable (GTK_WINDOW (d->fenetre), FALSE);
+    gtk_window_set_transient_for (GTK_WINDOW (d->fenetre), fenetre_de (L));
+    gtk_widget_add_css_class (d->fenetre, "fichiers-saisie");
+
+    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_set_margin_top (boite, 18);
+    gtk_widget_set_margin_bottom (boite, 18);
+    gtk_widget_set_margin_start (boite, 18);
+    gtk_widget_set_margin_end (boite, 18);
+
+    g_autofree char *titre = g_strdup_printf ("Mot de passe pour « %s »", l->nom);
+    GtkWidget *t = gtk_label_new (titre);
+    gtk_widget_add_css_class (t, "fichiers-saisie-titre");
+    gtk_widget_set_halign (t, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (boite), t);
+
+    g_autofree char *ou = g_strdup_printf ("%s sur %s%s%s",
+                                           *l->partage ? l->partage : "dossier distant",
+                                           l->serveur,
+                                           *l->utilisateur ? ", compte " : "",
+                                           *l->utilisateur ? l->utilisateur : "");
+    GtkWidget *s = gtk_label_new (pourquoi != NULL ? pourquoi : ou);
+    gtk_widget_add_css_class (s, "reglages-detail");
+    gtk_widget_set_halign (s, GTK_ALIGN_START);
+    gtk_label_set_wrap (GTK_LABEL (s), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (s), 40);
+    gtk_box_append (GTK_BOX (boite), s);
+
+    /* GtkPasswordEntry, et non une GtkEntry a visibilite fermee : il gere
+     * l'avertissement de verrouillage majuscule et refuse que le contenu
+     * parte dans le presse-papier. */
+    d->champ = gtk_password_entry_new ();
+    gtk_password_entry_set_show_peek_icon (GTK_PASSWORD_ENTRY (d->champ), TRUE);
+    gtk_widget_set_size_request (d->champ, 300, -1);
+    gtk_box_append (GTK_BOX (boite), d->champ);
+
+    d->retenir = gtk_check_button_new_with_label ("Retenir dans le trousseau");
+    gtk_check_button_set_active (GTK_CHECK_BUTTON (d->retenir), TRUE);
+    gtk_box_append (GTK_BOX (boite), d->retenir);
+
+    GtkWidget *barre = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign (barre, GTK_ALIGN_END);
+    GtkWidget *annuler = gtk_button_new_with_label ("Annuler");
+    GtkWidget *ok      = gtk_button_new_with_label ("Se connecter");
+    gtk_widget_add_css_class (ok, "suggested-action");
+    gtk_box_append (GTK_BOX (barre), annuler);
+    gtk_box_append (GTK_BOX (barre), ok);
+    gtk_box_append (GTK_BOX (boite), barre);
+
+    g_signal_connect_data (ok, "clicked", G_CALLBACK (on_mdp_valide), d, demande_free, 0);
+    g_signal_connect (annuler, "clicked", G_CALLBACK (on_mdp_annule), d);
+    g_signal_connect (d->champ, "activate", G_CALLBACK (on_mdp_valide), d);
+
+    gtk_window_set_child (GTK_WINDOW (d->fenetre), boite);
+    gtk_window_present (GTK_WINDOW (d->fenetre));
+    gtk_widget_grab_focus (d->champ);
+}
+
+/* ------------------------------------------------------------------------- */
+static void
+connecter_lecteur (Lieux *L, const Lecteur *l, const char *mot_de_passe,
+                   gboolean retenir)
+{
+    if (g_hash_table_contains (L->en_cours, l->id))
+        return;                       /* deja en route : ne pas doubler */
+
+    /* COPIE D'ABORD, ET C'EST OBLIGATOIRE.
+     *
+     * `l` pointe DANS L->lecteurs. Or reconstruire() relit le fichier :
+     * il libere ce tableau et le remplace. Le `l` recu ici designe alors
+     * de la memoire rendue, et le premier g_strdup de lecteur_copie la
+     * lit. SIGSEGV a chaque clic sur un lecteur non connecte -- mesure
+     * deux fois le 9 septembre 2026, pile de coredumpctl a l'appui.
+     *
+     * La lecon generale : dans ce fichier, tout ce qui vient de
+     * L->lecteurs meurt au prochain reconstruire(). */
+    g_autoptr(Lecteur) cible = lecteur_copie (l);
+
+    Attente *a = g_new0 (Attente, 1);
+    a->L        = L;
+    a->id       = g_strdup (cible->id);
+    a->naviguer = TRUE;
+
+    g_hash_table_add (L->en_cours, g_strdup (cible->id));
+    reconstruire (L);                 /* la ligne prend son sablier */
+
+    reseau_connecter (cible, mot_de_passe, retenir, on_lecteur_fini, a);
+}
+
+static void
+on_lecteur_active (Lieux *L, const char *id)
+{
+    const Lecteur *l = lecteur_par_id (L, id);
+    if (l == NULL)
+        return;
+
+    if (reseau_est_connecte (l)) {
+        g_autofree char *point = reseau_point_montage (l);
+        g_autoptr(GFile) f = g_file_new_for_path (point);
+        L->nav (f, L->data);
+        return;
+    }
+
+    /* Sans nom d'utilisateur, le partage est declare ouvert : on tente en
+     * invite. Avec un nom, on laisse le trousseau repondre -- et c'est
+     * seulement s'il ne repond pas que la fenetre s'ouvrira. */
+    connecter_lecteur (L, l, NULL, FALSE);
+}
+
+static void
+on_lecteur_deconnecte (const Lecteur *l, GError *erreur, gpointer data)
+{
+    Attente *a = data;
+
+    g_hash_table_remove (a->L->en_cours, a->id);
+
+    if (erreur != NULL) {
+        GtkAlertDialog *d = gtk_alert_dialog_new ("Déconnexion impossible de « %s »", l->nom);
+        gtk_alert_dialog_set_detail (d, erreur->message);
+        gtk_alert_dialog_show (d, fenetre_de (a->L));
+        g_object_unref (d);
+    }
+    reconstruire (a->L);
+    attente_free (a);
+}
+
+static void
+on_deconnecter (GtkButton *b, gpointer data)
+{
+    Lieux *L = data;
+    const char *id = g_object_get_data (G_OBJECT (b), "lecteur-id");
+    const Lecteur *l = lecteur_par_id (L, id);
+
+    if (l == NULL || g_hash_table_contains (L->en_cours, id))
+        return;
+
+    Attente *a = g_new0 (Attente, 1);
+    a->L  = L;
+    a->id = g_strdup (id);
+
+    g_hash_table_add (L->en_cours, g_strdup (id));
+    reseau_deconnecter (l, on_lecteur_deconnecte, a);
+}
+
+/* Une ligne de lecteur reseau. */
+static GtkWidget *
+entree_lecteur (Lieux *L, const Lecteur *l)
+{
+    gboolean connecte = reseau_est_connecte (l);
+    gboolean en_route = g_hash_table_contains (L->en_cours, l->id);
+
+    GtkWidget *ligne = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+
+    /* Trois etats, trois images. Le sablier n'est pas un ornement : une
+     * connexion vers un serveur eteint dure le delai TCP complet, et sans
+     * lui la ligne semblerait inerte. */
+    GtkWidget *img;
+    if (en_route) {
+        img = gtk_spinner_new ();
+        gtk_spinner_set_spinning (GTK_SPINNER (img), TRUE);
+        gtk_widget_set_size_request (img, 16, 16);
+    } else {
+        /* Deux noms par etat, et non un seul : « folder-remote » n'est,
+         * dans Papirus, qu'une paire de fleches -- illisible a 16 px et
+         * sans parente visuelle avec les dossiers de la meme colonne.
+         * Le second nom sert aussi de repli pour les themes d'icones qui
+         * ne connaitraient pas le premier. */
+        g_autoptr(GIcon) ic = g_themed_icon_new (connecte ? "folder-network"
+                                                          : "network-server");
+        g_themed_icon_append_name (G_THEMED_ICON (ic),
+                                   connecte ? "folder-remote" : "network-workgroup");
+        img = gtk_image_new_from_gicon (ic);
+        gtk_image_set_pixel_size (GTK_IMAGE (img), 16);
+    }
+    gtk_widget_add_css_class (img, "lieux-icone");
+
+    GtkWidget *lbl = gtk_label_new (l->nom);
+    gtk_widget_add_css_class (lbl, "lieux-nom");
+    gtk_label_set_ellipsize (GTK_LABEL (lbl), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_halign (lbl, GTK_ALIGN_START);
+    gtk_widget_set_hexpand (lbl, TRUE);
+
+    gtk_box_append (GTK_BOX (ligne), img);
+    gtk_box_append (GTK_BOX (ligne), lbl);
+
+    if (connecte && !en_route) {
+        GtkWidget *dc = gtk_button_new_from_icon_name ("media-eject-symbolic");
+        gtk_widget_add_css_class (dc, "lieux-ejecter");
+        gtk_widget_set_valign (dc, GTK_ALIGN_CENTER);
+        gtk_widget_set_tooltip_text (dc, "Se déconnecter");
+        g_object_set_data_full (G_OBJECT (dc), "lecteur-id", g_strdup (l->id), g_free);
+        g_signal_connect (dc, "clicked", G_CALLBACK (on_deconnecter), L);
+        gtk_box_append (GTK_BOX (ligne), dc);
+    }
+
+    GtkWidget *row = gtk_list_box_row_new ();
+    gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), ligne);
+    gtk_widget_add_css_class (row, "lieux-ligne");
+    if (!connecte)
+        gtk_widget_add_css_class (row, "lieux-hors-ligne");
+
+    /* Connecte, la ligne porte son dossier : le surlignage du volet et la
+     * navigation marchent alors exactement comme pour un dossier local,
+     * sans un cas particulier de plus dans fichiers_lieux_suivre. */
+    if (connecte) {
+        g_autofree char *point = reseau_point_montage (l);
+        g_autoptr(GFile) f = g_file_new_for_path (point);
+        g_object_set_data_full (G_OBJECT (row), "fichier", g_object_ref (f), g_object_unref);
+    }
+    g_object_set_data_full (G_OBJECT (row), "lecteur-id", g_strdup (l->id), g_free);
+
+    g_autofree char *info = g_strdup_printf (
+        "%s\n%s%s%s\n%s",
+        reseau_protocole_nom (l->protocole),
+        l->serveur, *l->partage ? " / " : "", l->partage,
+        connecte ? "Connecté" : "Cliquer pour se connecter");
+    gtk_widget_set_tooltip_text (row, info);
+
+    return row;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -288,6 +698,20 @@ reconstruire (Lieux *L)
     g_list_free_full (montages, g_object_unref);
     g_list_free_full (volumes, g_object_unref);
 
+    /* --- lecteurs reseau --- */
+    /* Relus a chaque reconstruction : le panneau de reglages ecrit le
+     * fichier, et le volet s'aligne sans qu'aucun protocole n'ait ete
+     * invente entre les deux -- exactement ce que fait shell.conf pour le
+     * reste du bureau. */
+    lecteurs_relire (L);
+
+    if (L->lecteurs->len > 0) {
+        gtk_list_box_append (GTK_LIST_BOX (L->liste), entete ("Lecteurs réseau"));
+        for (guint i = 0; i < L->lecteurs->len; i++)
+            gtk_list_box_append (GTK_LIST_BOX (L->liste),
+                                 entree_lecteur (L, g_ptr_array_index (L->lecteurs, i)));
+    }
+
     /* --- le nuage --- */
     /* Google Drive et OneDrive viendront ici, lus depuis la configuration de
      * rclone : une section de plus, construite comme les autres. Rien n'est
@@ -384,6 +808,13 @@ lieux_free (gpointer data)
     g_clear_object (&L->moniteur);
     g_clear_object (&L->courant);
     g_ptr_array_unref (L->favoris);
+    g_clear_pointer (&L->lecteurs, g_ptr_array_unref);
+    g_clear_pointer (&L->en_cours, g_hash_table_unref);
+
+    /* Le moniteur des montages est un singleton qui survit au volet. Sans
+     * ce debranchement, un partage demonte apres la fermeture de la fenetre
+     * appellerait reconstruire() sur un Lieux libere. */
+    reseau_ne_plus_surveiller (L);
     g_free (L);
 }
 
@@ -394,6 +825,8 @@ fichiers_lieux_new (LieuxNavFunc nav, gpointer data)
     L->nav     = nav;
     L->data    = data;
     L->favoris = g_ptr_array_new_with_free_func (g_free);
+    L->en_cours = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    L->lecteurs = reseau_charger ();
     favoris_lire (L);
 
     L->liste = gtk_list_box_new ();
@@ -422,6 +855,13 @@ fichiers_lieux_new (LieuxNavFunc nav, gpointer data)
     for (guint i = 0; signaux[i] != NULL; i++)
         g_signal_connect (L->moniteur, signaux[i],
                           G_CALLBACK (on_volumes_changes), L);
+
+    /* GVolumeMonitor ne voit PAS les montages du noyau poses a la main : il
+     * ne rapporte que ce qu'udisks2 lui annonce, c'est-a-dire les disques.
+     * Un partage monte depuis un terminal, ou demonte parce que le Wi-Fi est
+     * tombe, passerait donc inapercu. D'ou ce second moniteur, qui lit la
+     * notification du noyau sur la table des montages. */
+    reseau_surveiller ((ReseauChangeFunc) reconstruire, L);
 
     GSimpleActionGroup *groupe = g_simple_action_group_new ();
     const GActionEntry actions[] = {

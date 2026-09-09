@@ -64,6 +64,19 @@ shell_theme_actif (const ShellConfig *cfg)
 }
 
 gboolean
+shell_config_set_theme (ShellConfig *cfg, const char *id)
+{
+    const ShellTheme *t = theme_par_id (id);
+    if (t == NULL)
+        return FALSE;
+
+    g_free (cfg->theme);
+    cfg->theme = g_strdup (t->id);
+    cfg->dark  = t->sombre;
+    return TRUE;
+}
+
+gboolean
 shell_police_installee (const char *famille)
 {
     if (famille == NULL || *famille == '\0')
@@ -156,9 +169,10 @@ shell_config_load (void)
     cfg->energie_active   = TRUE;
     cfg->energie_mode     = g_strdup ("automatique");
     cfg->energie_niveau   = 30;
+    cfg->energie_opacite  = 55;
+    cfg->energie_preavis  = 10;    /* 10 s, commun aux trois modes */
     cfg->energie_suspendre_permis = FALSE;
 
-    cfg->energie_travail_preavis  = 10;    /* 10 s de compte a rebours */
     cfg->energie_travail_attenuer = 600;   /* 10 min */
     cfg->energie_travail_eteindre = 1200;  /* 20 min */
 
@@ -193,11 +207,8 @@ shell_config_load (void)
     }
 
     g_autofree char *theme = g_key_file_get_string (kf, "appearance", "theme", NULL);
-    const ShellTheme *t = theme_par_id (theme);
-    if (t != NULL) {
-        g_free (cfg->theme);
-        cfg->theme = g_strdup (t->id);
-        cfg->dark  = t->sombre;
+    if (shell_config_set_theme (cfg, theme)) {
+        /* rien de plus : le setter a pose « theme » et « dark » ensemble */
     } else if (theme != NULL && *theme != '\0') {
         /* Un thème inconnu -- faute de frappe, ou fichier écrit par une
          * version ultérieure. On garde le défaut plutôt que de refuser de
@@ -213,8 +224,14 @@ shell_config_load (void)
     lire_bool   (kf, "active",           &cfg->energie_active);
     lire_bool   (kf, "suspendre_permis", &cfg->energie_suspendre_permis);
     lire_entier (kf, "niveau",           &cfg->energie_niveau);
+    lire_entier (kf, "opacite",          &cfg->energie_opacite);
+    /* « travail_preavis » d'abord : c'est l'ancien nom, du temps ou le
+     * compte a rebours n'existait que pour le mode Travail. Un fichier
+     * ecrit avant le 9 septembre 2026 garde donc son reglage. « preavis »
+     * ensuite, qui prime. */
+    lire_entier (kf, "travail_preavis",  &cfg->energie_preavis);
+    lire_entier (kf, "preavis",          &cfg->energie_preavis);
 
-    lire_entier (kf, "travail_preavis",  &cfg->energie_travail_preavis);
     lire_entier (kf, "travail_attenuer", &cfg->energie_travail_attenuer);
     lire_entier (kf, "travail_eteindre", &cfg->energie_travail_eteindre);
 
@@ -296,9 +313,10 @@ shell_config_save (const ShellConfig *cfg, GError **error)
     g_key_file_set_boolean (kf, "energie", "active", cfg->energie_active);
     g_key_file_set_string  (kf, "energie", "mode", cfg->energie_mode);
     g_key_file_set_integer (kf, "energie", "niveau", cfg->energie_niveau);
+    g_key_file_set_integer (kf, "energie", "opacite", cfg->energie_opacite);
+    g_key_file_set_integer (kf, "energie", "preavis", cfg->energie_preavis);
     g_key_file_set_boolean (kf, "energie", "suspendre_permis",
                             cfg->energie_suspendre_permis);
-    g_key_file_set_integer (kf, "energie", "travail_preavis",  cfg->energie_travail_preavis);
     g_key_file_set_integer (kf, "energie", "travail_attenuer", cfg->energie_travail_attenuer);
     g_key_file_set_integer (kf, "energie", "travail_eteindre", cfg->energie_travail_eteindre);
     g_key_file_set_integer (kf, "energie", "automatique_attenuer",  cfg->energie_auto_attenuer);

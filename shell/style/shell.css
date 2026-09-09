@@ -254,6 +254,23 @@ popover.qs-popover > contents {
 }
 .qs-alim:hover { background-color: @surface-sunk; }
 
+/* Le mode en vigueur porte la couleur d'accent.
+ *
+ * Il n'y avait AUCUNE règle pour l'état coché : les trois boutons de mode
+ * avaient exactement la même apparence, actif ou non, et rien ne disait
+ * lequel s'appliquait. Signalé à l'usage le 9 septembre 2026 — un groupe de
+ * bascules sans état visible n'est pas un réglage, c'est une devinette.
+ *
+ * Même traitement que les autres groupes du shell (.lanceur-vues,
+ * .fichiers-vues, .reglages-volet) : la cohérence d'un bureau tient à ce
+ * que le même geste s'y montre toujours de la même façon. */
+.qs-mode:checked {
+  background-color: @accent;
+  color: @on-accent;
+}
+
+.qs-mode:checked:hover { background-color: @accent-hover; }
+
 /* Armé : rouge franc. Une action irréversible doit se voir avant le second
    clic, pas après. */
 .qs-alim.arme         { background-color: @danger; }
@@ -405,12 +422,24 @@ window.reglages { background-color: @surface-alt; }
  * pilule et change avec elle, un rayon fixe cesserait d'arrondir. */
 .preavis { background: none; background-color: transparent; }
 
+/* AUCUNE OMBRE PORTEE. Elle donnait au cadran le relief d'un objet pose
+ * sur le bureau, alors qu'on veut l'inverse : quelque chose qui affleure,
+ * qu'on percoit sans le regarder. Une ombre attire l'oeil par definition.
+ *
+ * Les opacites ci-dessous ne sont que le point de depart : preavis.c les
+ * reecrit d'apres le reglage « opacite » de shell.conf. */
+/* NI OMBRE NI BORDURE. L'ombre donnait au cadran le relief d'un objet posé
+ * sur le bureau, alors qu'on veut l'inverse : quelque chose qui affleure.
+ * La bordure, elle, coûtait deux pixels de contenu — GTK la déduit de la
+ * zone de tracé — et le disque cessait de faire la largeur de la barre.
+ *
+ * Les opacités ci-dessous ne sont que le point de départ : preavis.c les
+ * réécrit d'après le réglage « opacite » de shell.conf. */
 .preavis-cadran {
   color: alpha(@accent, 0.55);
   background-color: alpha(@surface, 0.70);
-  border: 1px solid alpha(@border, 0.55);
+  border: none;
   border-radius: 999px;
-  box-shadow: 0 10px 32px alpha(@shadow, 0.7);
 }
 
 .reglages-volets {
@@ -976,6 +1005,14 @@ window.fichiers { background-color: @surface; }
 
 .lieux-ejecter:hover { background-color: @surface; color: @text; }
 
+/* Un lecteur reseau declare mais pas connecte. Il RESTE visible -- c'est
+ * ainsi qu'on se souvient qu'il existe -- mais en retrait, pour qu'on ne le
+ * confonde pas avec un dossier deja la. */
+.lieux-hors-ligne .lieux-nom,
+.lieux-hors-ligne .lieux-icone { opacity: 0.55; }
+.lieux-hors-ligne:hover .lieux-nom,
+.lieux-hors-ligne:hover .lieux-icone { opacity: 1; }
+
 /* --- contenu -------------------------------------------------------------- */
 
 .fichiers-grille,
@@ -1126,6 +1163,135 @@ window.fichiers-progres { background-color: @surface; }
 .connexion-message.faute { color: @danger; }
 
 .connexion-coin { padding: 0 28px 24px 0; }
+
+/* --- Le code PIN ---------------------------------------------------------
+ *
+ * Six pastilles plutôt qu'un champ. Un GtkPasswordEntry montrerait un
+ * curseur, accepterait n'importe quelle longueur, et se lirait mal à un
+ * mètre — or on saisit ce code debout, au doigt, sur un écran qu'on ne
+ * regarde pas de près.
+ * ------------------------------------------------------------------------- */
+.connexion-pastilles { margin: 6px 0 2px 0; }
+
+.connexion-pastille {
+  min-width: 14px;
+  min-height: 14px;
+  border-radius: 999px;
+  border: 1.5px solid @text-dim;
+  background-color: transparent;
+  transition: background-color 90ms ease-out, border-color 90ms ease-out;
+}
+
+/* Rempli à l'accent, et non au texte : c'est le seul retour visuel de la
+   saisie, il doit se voir sans être cherché. */
+.connexion-pastille.pleine {
+  background-color: @accent;
+  border-color: @accent;
+}
+
+/* --- Les sorties de secours ----------------------------------------------
+ *
+ * « Utiliser le mot de passe », « Plus tard », « Ne plus utiliser de code
+ * PIN ». Elles doivent être VISIBLES — c'est ce qui garantit qu'on ne
+ * s'enferme pas dehors — sans concurrencer l'action principale. D'où un
+ * bouton qui se lit comme un lien.
+ * ------------------------------------------------------------------------- */
+.connexion-lien {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  color: @text-dim;
+  font-size: 12px;
+  padding: 4px 8px;
+  min-height: 0;
+  transition: color 120ms ease-out;
+}
+
+.connexion-lien:hover { color: @accent; }
+
+.connexion-valider {
+  background: none;
+  background-color: @accent;
+  border: 1px solid @accent;
+  box-shadow: none;
+  border-radius: 999px;
+  color: @on-accent;
+  font-size: 14px;
+  padding: 8px 20px;
+  min-height: 38px;
+}
+
+.connexion-valider:hover { background-color: @accent-hover; }
+
+/* =========================================================================
+   Claviers à l'écran
+
+   L'écran est tactile et la machine est un convertible : capot retourné,
+   l'EC coupe le clavier physique. Ces touches sont alors le SEUL moyen
+   d'ouvrir une session, et leur taille n'est pas une question de goût.
+
+   min-height: 46px sur une touche ordinaire, 56 px sur le pavé numérique.
+   En deçà, un doigt vise deux touches à la fois — et sur un écran de
+   connexion, une faute de frappe invisible se paie en essais perdus.
+   ========================================================================= */
+.clavier, .clavier-pave { padding: 4px; }
+
+.clavier-touche {
+  background: none;
+  background-color: @surface-alt;
+  border: 1px solid @border;
+  box-shadow: none;
+  border-radius: 10px;
+  color: @text;
+  font-size: 16px;
+  font-weight: 400;
+  padding: 0;
+  min-height: 46px;
+  min-width: 0;
+  transition: background-color 90ms ease-out;
+}
+
+/* Pas de :hover sur un écran qu'on touche — il n'existe pas. C'est :active
+   qui donne le retour, et il doit être franc : sur un écran tactile, le
+   doigt cache la touche qu'il presse, et seule sa périphérie confirme
+   l'appui. */
+.clavier-touche:hover  { background-color: @surface-sunk; }
+.clavier-touche:active { background-color: @accent; color: @on-accent; }
+
+/* Maj, effacer, bascule de couche : la même matière, en plus discret. Elles
+   ne sont pas ce qu'on cherche en écrivant. */
+.clavier-touche.speciale {
+  background-color: @surface-sunk;
+  color: @text-dim;
+  font-size: 14px;
+}
+
+/* Maj enclenchée. Sans ce retour, on tape des minuscules en croyant le
+   contraire — et dans un champ de mot de passe, on ne le voit pas. */
+.clavier-touche.speciale.active {
+  background-color: @accent;
+  border-color: @accent;
+  color: @on-accent;
+}
+
+.clavier-touche.valider {
+  background-color: @accent;
+  border-color: @accent;
+  color: @on-accent;
+  font-size: 17px;
+}
+
+.clavier-touche.valider:hover { background-color: @accent-hover; }
+
+/* Le pavé numérique : moins de touches, donc plus grandes. C'est le clavier
+   qu'on utilise tous les jours, celui du réveil. */
+.clavier-pave .clavier-touche {
+  font-size: 22px;
+  font-weight: 300;
+  min-height: 56px;
+  border-radius: 14px;
+}
 
 .connexion-heure {
   font-size: 34px;

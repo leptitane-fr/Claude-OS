@@ -6,7 +6,13 @@ Ce fichier est chargé automatiquement à l'ouverture d'une session. Il dit
 
 ---
 
-## Où en est le projet — 8 septembre 2026
+## Où en est le projet — 9 septembre 2026
+
+**L'écran de connexion a été repris le 9 septembre 2026** : il suit enfin le
+thème de la session, accepte un code PIN à six chiffres, et porte deux
+claviers à l'écran pour le mode tablette. Compilé, déployé, coffre éprouvé
+par sa socket — **mais jamais encore ouvert au code PIN sur le vrai écran**.
+Voir la section dédiée plus bas et [`docs/09`](docs/09-code-pin.md).
 
 **Le bureau est en service et harmonisé.** Firmware UEFI flashé, Debian 13
 installée, `greetd` ouvre l'écran de connexion Claude OS, le mot de passe est
@@ -140,6 +146,133 @@ faire, et l'ouvrir inviterait à fabriquer des combinaisons sans
 signification. Listes de durées et non champs libres — « 90 » saisi dans
 une case ne dit pas s'il s'agit de secondes ou de minutes.
 
+### Les lecteurs réseau
+
+Écrits le 9 septembre 2026, et **vus fonctionner sur MADOO** contre le NAS
+`WDMYCLOUDMIRROR` du réseau local : partage monté, parcouru en lecture et en
+écriture, démonté.
+
+Déclarés dans **Réglages › Lecteurs réseau**, connectés d'un clic dans le
+volet latéral de **Fichiers**. Une fois connecté, le partage est un dossier
+ordinaire — le terminal, Chromium et ses boîtes « Enregistrer sous » le
+voient aussi. Détail complet dans [`docs/08`](docs/08-lecteurs-reseau.md).
+
+**Montages du noyau, et non gvfs.** Mesuré : `gvfs-backends` demande
+43 paquets — MTP, gphoto2, iOS, codecs AV1 — contre 19 pour les quatre
+protocoles par le noyau, et surtout un montage gvfs n'existe que pour les
+applications GIO.
+
+**L'interface ne compose JAMAIS de commande privilégiée.** Elle dit un verbe
+et un identifiant — `claude-os-lecteur monter nas-videos` — et tout le reste
+est relu en root depuis la configuration, puis validé : identifiant restreint
+à `[A-Za-z0-9._-]`, adresse refusée si elle contient autre chose qu'un hôte,
+options filtrées par liste blanche, fichier INI lu en `awk` et jamais évalué.
+**Le mot de passe ne passe jamais par la ligne de commande** — il serait dans
+`ps` et dans `actions.log` ; il transite par un fichier `0600` dans
+`/run/user/1000`, effacé aussitôt lu. Les mots de passe sont dans le
+trousseau ; `~/.config/claude-os/lecteurs` ne contient rien de secret.
+
+**TROIS USAGES APRÈS LIBÉRATION, tous trouvés en cliquant pour de vrai.**
+`reconstruire()` relit le fichier, donc **libère** `L->lecteurs` : tout
+pointeur qui en vient meurt là. `connecter_lecteur` s'en servait juste après
+— `SIGSEGV` à chaque clic sur un lecteur non connecté. Deux jumeaux dans
+`on_lecteur_fini` et `on_mdp_valide`. Aucun des trois ne se voit à la
+compilation ni à la lecture ; `coredumpctl` a dit où.
+
+**Et deux pièges de méthode :**
+
+- **`g_file_query_exists` est synchrone.** Il dormait dans `naviguer()`
+  depuis toujours, invisible sur un dossier local. Sur un serveur éteint, il
+  gèle la fenêtre entière pendant le délai TCP — au moment précis où l'on
+  veut cliquer « précédent ». Rendu asynchrone.
+- **`/etc/default/rpcbind` ne décide rien.** `nfs-common` tire `rpcbind`, qui
+  écoutait sur `0.0.0.0:111` — l'exposition retirée pour SSH la veille. Les
+  `OPTIONS` de ce fichier n'y peuvent rien : rpcbind est activé par socket,
+  et c'est systemd qui ouvre les ports. Il faut un `.socket.d/` dont la
+  première ligne `ListenStream=` **vide remet la liste à zéro**, sinon les
+  nouvelles adresses s'ajoutent aux publiques. Vérifié : `192.168.1.30:111`
+  refuse, `127.0.0.1:111` répond. Contrepartie : `nolock` par défaut sur NFS.
+
+**Seul SMB a été monté pour de vrai.** NFS, SFTP et WebDAV sont écrits et
+compilés, jamais éprouvés — le NAS ne publie aucun export NFS et son port 22
+est fermé. `docs/08` dit précisément ce qui reste non établi.
+
+### L'écran de connexion — thème, code PIN, clavier tactile
+
+Écrit le 9 septembre 2026. Détail complet dans
+[`docs/09`](docs/09-code-pin.md).
+
+**Vu à l'écran le 9 septembre 2026**, par `--essai` : le volet nom
+d'utilisateur s'affiche, **sombre comme le bureau** — une première —, le
+clavier azerty avec lui, et le journal montre le greeter joignant le coffre
+depuis `_greetd` (`claude-os-coffre@7-10558-102`, PID du greeter). **Le piège
+du focus est écarté, éprouvé au doigt** : les touches à l'écran écrivent, et
+le clavier physique écrit toujours après. ⇧ et &# marchent. **Mais
+aucune session n'a encore été ouverte avec ce greeter** : le chemin qui va
+d'un mot de passe accepté à l'enrôlement puis au démarrage reste à parcourir
+en entier.
+
+**Le thème ne suivait pas, et le code censé s'en charger ne POUVAIT pas
+marcher.** Trois défaillances muettes empilées, l'invariant n°4 en toutes
+lettres : `theme_de()` lisait `~/.config/claude-os/shell.conf` alors que
+`/home/stef` est en 0700 et que le greeter tourne sous `_greetd` ; le repli
+était `claude-sombre`, un thème que la machine n'utilise pas ; et `cfg->theme`
+était écrasé sans repasser par `theme_par_id()`, donc `cfg->dark` restait
+faux et les widgets natifs se dessinaient clairs sur fond sombre.
+
+Désormais : le coffre lit `shell.conf` en root et le sert au greeter —
+`shell.conf` reste la source unique de vérité, aucun fichier miroir à tenir —
+`shell_config_set_theme()` pose `theme` et `dark` ensemble, et **tout repli
+est écrit** dans `/var/log/claude-os-connexion.log`.
+
+**Le code PIN déverrouille le mot de passe, il ne le remplace pas.** C'est
+`pam_gnome_keyring.so`, dans `/etc/pam.d/greetd`, qui l'impose : PAM doit
+recevoir le VRAI mot de passe, sinon le trousseau reste fermé et les lecteurs
+réseau deviennent inaccessibles sans le moindre message. Un module PAM maison
+était donc exclu d'emblée.
+
+`claude-os-coffre` garde le mot de passe scellé par **Argon2id
+(128 Mio, t=3, p=1 — 0,63 s mesurées sur MADOO) puis AES-256-GCM**. Cinq
+essais faux et le coffre s'efface.
+
+**Ce qui le protège est la socket, et rien d'autre** : `SocketUser=_greetd`,
+`SocketMode=0600`, `Accept=yes`. Pas de setuid, pas de sudoers. Le programme
+redit la règle par `SO_PEERCRED`, pour qu'une unité systemd remplacée ne
+suffise pas. `MaxConnections=4` n'est pas décoratif : 129,5 Mio de pic mesurés
+par instance, et la valeur par défaut de systemd est 64.
+
+**Ce que cela coûte, et il faut le savoir :** un code à six chiffres n'a qu'un
+million de combinaisons et le disque n'est pas chiffré. Qui démonte l'eMMC
+peut attaquer le coffre hors ligne — 1,8 jour sur les quatre cœurs de la
+machine, quelques heures sur du matériel récent — là où `/etc/shadow` ne lui
+donnerait rien. **Le PIN abaisse la sécurité au repos et l'améliore à
+l'usage.** Arbitrage assumé, réversible d'un clic. `docs/09` fait le calcul.
+
+**Trois pièges payés :**
+
+- **`gcry_kdf_derive()` ne sait pas faire Argon2**, malgré son nom : « Invalid
+  value », sans plus. Il faut l'API à poignée, dont l'ordre des paramètres
+  n'est documenté nulle part — `{taglen, t, m, p}`, **établi contre le
+  vecteur de test de la RFC 9106 §5.3**, pas supposé.
+- **`g_printerr` transcode vers la locale**, et un service systemd n'en a pas :
+  tous les accents du journal ressortaient en « ? ». `fputs` sur `stderr`.
+- **Un `GtkButton` vole le focus au clic.** Sans
+  `set_can_focus(FALSE)` ET `set_focus_on_click(FALSE)` sur chaque touche, le
+  premier appui à l'écran coupe la frappe physique — silencieusement, et
+  seulement après un clic, donc jamais au premier essai.
+
+**Ne jamais retirer les sorties de secours.** Le mot de passe reste
+atteignable depuis tous les volets, le PIN se retire depuis l'écran, et un
+coffre muet fait retomber sur le mot de passe avec la raison affichée. Un
+enrôlement raté n'empêche jamais la session de s'ouvrir : il part au journal,
+le PIN est abandonné, et l'écran en repropose un à l'ouverture suivante.
+
+Aperçu sans rien toucher :
+`claude-os-connexion --apercu --volet=pin --theme=clair` (`nom`, `mdp`,
+`pin`, `choix`). **Ctrl-Q pour en sortir** — l'aperçu prend l'écran entier et
+le clavier en exclusif, comme le vrai écran ; ni Alt-Tab ni Alt-F4 n'en
+sortent. Ce raccourci n'existe qu'en aperçu.
+
 ### Le centre de notifications
 
 Écrit le 8 septembre 2026. La machine n'avait **aucun** démon : ni dunst, ni
@@ -206,7 +339,7 @@ barre de 34 px au-dessus des onglets.
 | Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le conflit de terminal virtuel de l'invariant n°5 — **à reconfirmer** maintenant que greetd est sur le tty7, et à ne pas déclarer résolu sans l'avoir revu. |
 | Luminosité automatique | **Impossible par capteur — mesuré le 8 septembre 2026.** Aucun capteur de luminosité ambiante sur MADOO : `/sys/bus/iio/devices/` n'expose que deux accéléromètres, un gyroscope et un angle d'écran. Question close. **L'asservissement à l'inactivité, lui, est FAIT et VU FONCTIONNER** le 9 septembre — voir la veille progressive ci-dessus. |
 | **Reprise après suspension** | **CASSÉE, et c'est le chantier le plus important qui reste.** Le 9 septembre 2026, onze suspensions consécutives déclenchées par la fermeture du capot n'ont jamais repris : le journal s'arrête net sur `PM: suspend entry (s2idle)` et la machine réapparaît avec un nouvel identifiant de démarrage. Fermer le capot coûte donc une session. Une seule reprise a réussi, le matin du 9. Piste **non vérifiée** : `rtw88` a un historique de problèmes de reprise en s2idle, et le journal montre NetworkManager libérant `wlp1s0` juste avant. Tant que ce point n'est pas réglé, `energie.suspendre_permis` reste à `false`. |
-| Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
+| Reports | rclone (Drive, OneDrive), icônes sur le bureau. Les **lecteurs réseau** ne sont plus un report : voir ci-dessus. |
 
 ---
 
@@ -420,6 +553,7 @@ Il garantit qu'on ne peut plus être enfermé dehors. Il ne couvre pas le cas
 | Pas d'écran de connexion, console texte, écran noir | `sudo bash tools/diag-connexion.sh` |
 | Session ouverte mais bureau anormal | `bash tools/diag-session.sh` |
 | L'écran de connexion meurt | `/var/log/claude-os-connexion.log` |
+| Code PIN non proposé, ou thème faux à la connexion | `journalctl -u 'claude-os-coffre@*' -b` |
 | La session meurt | `~/.local/state/claude-os/session.log` (et `.1`) |
 | Le bureau démarre mal | `~/.local/state/claude-os/shell.log` |
 | Le filet est intervenu | `/var/log/claude-os-filet.log` |

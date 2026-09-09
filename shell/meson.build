@@ -9,7 +9,11 @@ project('claude-os-shell', 'c',
     'b_lto=true',
   ])
 
+cc         = meson.get_compiler('c')
+# cos/sin/ceil du cadran de preavis : la libm n'est pas tiree par gtk4.
+m_dep      = cc.find_library('m', required : true)
 gtk        = dependency('gtk4')
+glib       = dependency('glib-2.0')   # le coffre, qui n'a pas d'interface
 layershell = dependency('gtk4-layer-shell-0')
 giounix    = dependency('gio-unix-2.0')   # GDesktopAppInfo
 wlclient   = dependency('wayland-client')
@@ -18,6 +22,22 @@ pangocairo = dependency('pangocairo')   # liste des familles installees
 # pour un protocole dont une erreur d'analyse empeche de se connecter n'est
 # pas un pari raisonnable ; json-glib pese 150 Ko et ne depend que de GLib.
 jsonglib   = dependency('json-glib-1.0')
+
+# Les mots de passe des lecteurs reseau vont au trousseau, pas dans un
+# fichier. libsecret parle au demon gnome-keyring, deja present et deja
+# lance sur cette machine : la bibliotheque partagee est installee, seul
+# l'en-tete de construction s'ajoute.
+secret     = dependency('libsecret-1')
+
+# Le coffre scelle le mot de passe de l'utilisateur avec son code PIN :
+# Argon2id pour la derivation, AES-256-GCM pour le scellement. libgcrypt est
+# deja sur la machine -- c'est la bibliotheque de GnuPG, tiree par apt
+# lui-meme -- et elle porte les deux depuis la 1.11. Aucune dependance
+# nouvelle a installer, seul l'en-tete de construction s'ajoute.
+#
+# ATTENTION : gcry_kdf_derive() ne sait PAS faire Argon2, malgre son nom.
+# Voir la tete de src/coffre.c.
+gcrypt     = dependency('libgcrypt')
 
 # wlr-foreign-toplevel-management-v1 : le protocole qui dit quelles fenetres
 # sont ouvertes. Il n'est empaquete nulle part dans Debian trixie -- aucun
@@ -70,7 +90,7 @@ add_project_arguments(
 
 executable('claude-os-dock',
   'src/dock.c', 'src/toplevels.c', ftl_header, ftl_code, commun,
-  dependencies : [gtk, layershell, giounix, wlclient, pangocairo],
+  dependencies : [gtk, layershell, giounix, wlclient, pangocairo, m_dep],
   install : true)
 
 # La barre d'etat accueille aussi le module d'energie -- comme elle accueille
@@ -88,7 +108,7 @@ executable('claude-os-status',
   'src/wifi.c', 'src/bluetooth.c', 'src/energie.c', 'src/retroeclairage.c',
   'src/preavis.c',
   idle_header, idle_code, commun,
-  dependencies : [gtk, layershell, giounix, wlclient, pangocairo],
+  dependencies : [gtk, layershell, giounix, wlclient, pangocairo, m_dep],
   install : true)
 
 executable('claude-os-fond',
@@ -102,19 +122,38 @@ executable('claude-os-lanceur',
   install : true)
 
 executable('claude-os-connexion',
-  'src/connexion.c', commun,
+  'src/connexion.c', 'src/clavier.c', commun,
   dependencies : [gtk, layershell, giounix, pangocairo, jsonglib],
+  install : true)
+
+# Le correspondant privilegie de l'ecran de connexion : il garde le mot de
+# passe scelle par le code PIN, et sert le theme du bureau -- que « _greetd »
+# ne peut lire ni l'un ni l'autre, /home etant en 0700.
+#
+# SANS GTK, et ce n'est pas un detail : il tourne en root, active par socket.
+# Un runtime graphique dans un programme privilegie serait une surface
+# d'attaque enorme pour un programme qui n'affiche rien.
+executable('claude-os-coffre',
+  'src/coffre.c',
+  dependencies : [glib, jsonglib, gcrypt],
   install : true)
 
 executable('claude-os-fichiers',
   'src/fichiers.c', 'src/fichiers-item.c', 'src/fichiers-ops.c',
-  'src/fichiers-lieux.c', commun,
-  dependencies : [gtk, layershell, giounix, pangocairo],
+  'src/fichiers-lieux.c', 'src/reseau.c', commun,
+  dependencies : [gtk, layershell, giounix, pangocairo, secret],
   install : true)
 
 executable('claude-os-reglages',
-  'src/settings.c', commun,
-  dependencies : [gtk, layershell, giounix, pangocairo],
+  'src/settings.c', 'src/reseau.c', commun,
+  dependencies : [gtk, layershell, giounix, pangocairo, secret],
+  install : true)
+
+# Connexion des lecteurs reseau a l'ouverture de session. Sans GTK : voir la
+# tete du fichier.
+executable('claude-os-lecteurs-auto',
+  'src/lecteurs-auto.c', 'src/reseau.c',
+  dependencies : [giounix, secret],
   install : true)
 
 install_data(['data/claude-os-reglages.desktop',

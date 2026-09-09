@@ -38,12 +38,26 @@ typedef struct {
     char     *energie_mode;   /* « travail », « automatique », « nomade »   */
     int       energie_niveau; /* pourcent vise par l'etage « attenuer »     */
 
+    /* Opacite du cadran de preavis, en pourcent. Se regle parce que le bon
+     * equilibre depend du fond d'ecran et de la vue de chacun : trop
+     * discret il ne previent pas, trop marque il occupe le coin de
+     * l'ecran. Un curseur coute moins cher qu'un debat. */
+    int       energie_opacite;
+
+    /* Compte a rebours avant chaque baisse d'ecran, en secondes.
+     *
+     * COMMUN AUX TROIS MODES. Il n'appartenait d'abord qu'a « Travail »,
+     * ou l'on suppose l'utilisateur present et concentre. Mais la gene
+     * qu'il corrige -- l'ecran qui baisse au milieu d'un paragraphe -- ne
+     * depend pas du mode : elle depend de ce qu'on est en train de faire.
+     * Zero le supprime. */
+    int       energie_preavis;
+
     /* L'etage « suspendre » ne s'ouvre que si CE drapeau est vrai, quels que
      * soient les delais. Il vaut FALSE par defaut : le 9 septembre 2026,
      * onze suspensions consecutives n'ont pas repris sur cette machine. */
     gboolean  energie_suspendre_permis;
 
-    int       energie_travail_preavis;    /* compte a rebours, secondes     */
     int       energie_travail_attenuer;
     int       energie_travail_eteindre;
 
@@ -76,6 +90,18 @@ const ShellTheme *shell_themes (void);
 
 /* Le theme actif, jamais NULL : un identifiant inconnu renvoie le premier. */
 const ShellTheme *shell_theme_actif (const ShellConfig *cfg);
+
+/* Pose le theme, ET « dark » avec lui. Rend FALSE si l'identifiant est
+ * inconnu, la configuration restant alors inchangee.
+ *
+ * POURQUOI CE SETTER EXISTE plutot que d'ecrire cfg->theme directement :
+ * « dark » se DEDUIT du theme, et les deux champs doivent bouger ensemble.
+ * L'ecran de connexion posait cfg->theme seul -- la feuille de style suivait,
+ * mais gtk-application-prefer-dark-theme restait a FALSE, et les widgets
+ * natifs (le champ de mot de passe le premier) se dessinaient clairs sur un
+ * fond sombre. Un champ ecrit a la main est un invariant qu'on oublie ;
+ * une fonction, non. */
+gboolean shell_config_set_theme (ShellConfig *cfg, const char *id);
 
 /* Cette famille de police est-elle reellement installee ?
  *

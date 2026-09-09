@@ -71,6 +71,8 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`docs/05-energie.md`](docs/05-energie.md) | Économie d'énergie : ce qui compte vraiment, les réglages TLP et noyau, et ce qui est délibérément écarté. |
 | [`docs/06-journal-incident-wayland.md`](docs/06-journal-incident-wayland.md) | **Résolu.** Post-mortem des pannes de session : la purge qui désinstallait le compositeur, `/tmp/.X11-unix` possédé par `_greetd`, le terminal virtuel disputé, et le correctif qui n'était pas sur la machine. Ce qui a fait perdre du temps, et ce qui n'est pas établi. |
 | [`docs/07-journal-des-seances.md`](docs/07-journal-des-seances.md) | **Le fil du projet.** Ce qui a été fait séance par séance, ce qui a été mesuré, ce qui reste à faire — avec la marche à suivre proposée pour l'audio. |
+| [`docs/08-lecteurs-reseau.md`](docs/08-lecteurs-reseau.md) | **Les lecteurs réseau.** Pourquoi des montages du noyau et non gvfs (43 paquets contre 19, et un montage gvfs n'existe que pour GIO), comment l'interface évite de composer une commande privilégiée, ce qui a été mesuré sur le NAS, et ce qui n'est pas établi. |
+| [`docs/09-code-pin.md`](docs/09-code-pin.md) | **Le code PIN de l'écran de connexion.** Pourquoi le PIN déverrouille le mot de passe au lieu de le remplacer (c'est `pam_gnome_keyring` qui l'impose), le coffre Argon2id + AES-256-GCM et ce qui le protège, les paramètres mesurés sur MADOO, le clavier tactile — et, sans détour, **ce que ce confort retire à la sécurité au repos** sur un disque non chiffré. |
 
 ### Installation
 
@@ -159,8 +161,17 @@ applications suivent la bascule clair/sombre sans être relancées — et la
    pavé tactile. Peut-être réglé par le passage de greetd au tty7 —
    **à reconfirmer**, et à ne pas déclarer résolu sans l'avoir revu.
 2. **Les reports** : rclone pour Drive et OneDrive, les icônes sur le bureau.
+   Les **lecteurs réseau** sont sortis de cette liste le 9 septembre 2026 —
+   voir [`docs/08`](docs/08-lecteurs-reseau.md) — mais **seul SMB a été monté
+   pour de vrai** : NFS, SFTP et WebDAV restent écrits et non éprouvés.
 3. **La luminosité automatique**, qui suppose un capteur de luminosité
    ambiante dont la présence sur MADOO n'a pas été constatée.
+4. **L'écran de connexion repris le 9 septembre 2026** — thème de la session,
+   code PIN à six chiffres, claviers tactiles. Compilé, déployé, coffre
+   éprouvé par sa socket sous `_greetd` ; **aucune session n'a encore été
+   ouverte au code PIN sur le vrai écran**, et le trousseau n'a pas été
+   vérifié après une telle ouverture. Voir
+   [`docs/09`](docs/09-code-pin.md), section « Ce qui n'est PAS établi ».
 
 **Clos le 8 septembre 2026 :** l'audio — le DSP chargeait mal sa topologie,
 c'était le risque n°1 de `docs/01` — la rangée supérieure du clavier, et les

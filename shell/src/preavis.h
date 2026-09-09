@@ -54,6 +54,17 @@
  * une taille de repli. */
 void shell_preavis_reference (GtkWidget *pilule);
 
+/* Opacite du cadran, en pourcent (0-100).
+ *
+ * REGLABLE PLUTOT QU'ARBITRE. Le bon equilibre depend du fond d'ecran et
+ * de la vue de chacun ; trois valeurs codees en dur -- disque, fond,
+ * piste -- auraient demande un aller-retour a chaque ajustement. Un seul
+ * nombre les commande toutes, dans un rapport fixe.
+ *
+ * Applique par une feuille de style engendree : les TEINTES restent celles
+ * du theme, seule leur opacite est reecrite. */
+void shell_preavis_opacite (int pourcent);
+
 /* Affiche le decompte et le fait courir depuis `secondes`. Rappelable :
  * un second appel repart de la valeur donnee. */
 void shell_preavis_montrer (int secondes);

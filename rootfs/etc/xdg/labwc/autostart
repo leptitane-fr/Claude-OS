@@ -45,3 +45,10 @@ printf '=== %s : claude-os-theme ===\n' "$(date '+%H:%M:%S')" >> "$JOURNAL/shell
 lancer claude-os-fond
 lancer claude-os-dock
 lancer claude-os-status
+
+# Les lecteurs réseau marqués « à l'ouverture de session ».
+#
+# EN DERNIER, ET EN ARRIÈRE-PLAN. Un partage dont le serveur est éteint coûte
+# le délai TCP complet ; le placer plus haut ferait attendre le dock derrière
+# un NAS débranché. Ici, il ne retarde rien : le bureau est déjà à l'écran.
+lancer claude-os-lecteurs-auto

@@ -416,13 +416,235 @@ corrigé. **À reconfirmer**, et à ne pas déclarer résolu sans l'avoir revu.
 
 ---
 
+## 9 septembre 2026 — les lecteurs réseau
+
+Le bureau n'avait aucun moyen d'atteindre un partage. Ni `gvfs-backends`, ni
+`cifs-utils`, ni `nfs-common` : la machine ne savait pas monter un serveur.
+
+**La décision.** Montages du noyau plutôt que gvfs, sur mesure :
+`gvfs-backends` demande 43 paquets — MTP, gphoto2, iOS, codecs AV1 et HEIF —
+contre 19 pour les quatre protocoles par le noyau. Mais l'argument qui a
+tranché n'est pas le nombre : un montage gvfs vit dans `/run/user/1000/gvfs`
+et n'existe que pour les programmes qui parlent GIO. Un montage du noyau est
+un répertoire, et tout le système sait lire un répertoire.
+
+**Le NAS a servi de banc d'essai réel.** Trouvé par balayage du sous-réseau
+puis par l'OUI `00:90:a9` de sa carte — Western Digital — à l'adresse
+`192.168.1.29`, nom NetBIOS `WDMYCLOUDMIRROR`. Huit partages, trois ouverts
+en invité. `//192.168.1.29/Vidéos` a été monté, parcouru en lecture et en
+écriture, puis démonté.
+
+**Ce que le NAS a appris.** Il plafonne à **SMB 2.1** : `vers=3.0` répond
+`-95`, « Dialect not supported », et le noyau ne redescend jamais tout seul.
+C'est précisément à cela que sert le champ « Options » du panneau. Son NFS
+n'annonce que v2 et v3, et ne publie **aucun export** — d'où l'impossibilité
+d'éprouver le chemin NFS.
+
+**Trois usages après libération, trouvés en cliquant.** `reconstruire()`
+libère `L->lecteurs` ; `connecter_lecteur` s'en servait juste après. SIGSEGV
+à chaque clic sur un lecteur non connecté. Deux jumeaux ailleurs. Aucun ne se
+voyait à la compilation. Il a fallu un clic réel et `coredumpctl`.
+
+**Deux pièges de méthode**, détaillés dans
+[`docs/08`](08-lecteurs-reseau.md) : `g_file_query_exists` est synchrone et
+gelait la fenêtre sur un serveur éteint ; et `/etc/default/rpcbind` ne décide
+rien, parce que rpcbind est activé par socket et que c'est systemd qui ouvre
+les ports.
+
+---
+
+## 9 septembre 2026 au soir — l'écran de connexion
+
+Demandé : que l'écran de connexion suive le thème de la session, qu'il
+accepte un code PIN lié au mot de passe, et qu'il soit utilisable au doigt.
+Détail complet dans [`09`](09-code-pin.md).
+
+### Le thème ne suivait pas, et le code censé s'en charger ne POUVAIT pas marcher
+
+`connexion.c` avait déjà une fonction `theme_de()`. Elle n'a jamais rien
+donné, et personne ne l'avait vu — **trois défaillances muettes empilées**,
+l'invariant n°4 en toutes lettres :
+
+1. elle lisait `~/.config/claude-os/shell.conf`, mais `/home/stef` est en
+   `drwx------` et le greeter tourne sous `_greetd`.
+   `g_key_file_load_from_file` échouait à **chaque** ouverture, sans un mot ;
+2. son repli était `claude-sombre`, un thème que la machine n'utilise pas —
+   le sien est `sombre` ;
+3. elle écrivait `cfg->theme` **sans repasser par `theme_par_id()`**, donc
+   `cfg->dark` restait à `FALSE` quoi qu'il arrive : la feuille de style
+   suivait, les widgets natifs de GTK non.
+
+Aucune des trois ne se voit à la lecture du code. Chacune se lit dans un
+`ls -ld /home/stef`, dans un `grep theme= shell.conf`, ou dans la signature
+de la fonction qu'on n'a pas appelée.
+
+Corrigé de trois façons, et la troisième est la plus importante : **tout
+repli est désormais écrit** dans `/var/log/claude-os-connexion.log`. Un repli
+muet est ce qui a caché la panne.
+
+### C'est `pam_gnome_keyring` qui a décidé de toute l'architecture
+
+`/etc/pam.d/greetd` contient :
+
+```
+-auth        optional        pam_gnome_keyring.so
+```
+
+**PAM doit donc recevoir le VRAI mot de passe.** C'est lui qui ouvre le
+trousseau, où sont les mots de passe des lecteurs réseau de la section
+précédente. Un module PAM maison qui aurait validé le code PIN aurait
+authentifié l'utilisateur en laissant le trousseau fermé : session ouverte,
+partages inaccessibles, aucun message. Trois séances de diagnostic en
+perspective.
+
+Le code PIN n'est donc pas un mot de passe de rechange, c'est une **clé de
+coffre**. `claude-os-coffre` garde le mot de passe scellé, le rend contre les
+six chiffres, et l'écran le relaie à greetd comme s'il avait été tapé. Rien ne
+change en aval.
+
+Le coffre sert aussi le **thème** : il est déjà le seul composant capable de
+lire le répertoire personnel, et lui faire publier le thème évite un second
+mécanisme tout en gardant `shell.conf` comme source unique — aucun fichier
+miroir à tenir synchronisé.
+
+### Ce qui protège le coffre
+
+La socket, et rien d'autre : `SocketUser=_greetd`, `SocketMode=0600`,
+`Accept=yes`. Pas de setuid, pas de `sudoers`. Le programme **redit** la règle
+par `SO_PEERCRED`, pour qu'une unité systemd remplacée par une mise à jour ne
+suffise pas à l'ouvrir.
+
+`MaxConnections=4` n'est pas une valeur décorative : **129,4 Mio de pic
+mesurés par instance** dans le journal. La valeur par défaut de systemd est
+64 — soit 8 Go réservés sur une machine qui en a 4.
+
+### Argon2id, mesuré et non recopié
+
+Meilleur de trois passes sur le N6000, `p=1` :
+
+| t | m | durée |
+|---|---|---|
+| 2 | 32 Mio | 0,105 s |
+| 3 | 32 Mio | 0,155 s |
+| 3 | 64 Mio | 0,312 s |
+| **3** | **128 Mio** | **0,631 s** ← retenu |
+
+Aller-retour complet par la vraie socket, démarrage du processus compris :
+**0,68 à 0,79 s**, confirmé ensuite par le journal en usage réel
+(`Consumed 714ms CPU time`).
+
+`p=1` et non 4 : `gcry_kdf_compute(h, NULL)` déroule les voies **en série**.
+Un `p` plus grand multiplierait l'attente sans rien coûter à l'attaquant, qui
+paralléliserait.
+
+### Trois pièges payés
+
+- **`gcry_kdf_derive()` ne sait pas faire Argon2**, malgré son nom. Elle rend
+  « Invalid value », sans plus. Argon2 n'existe que dans l'API à poignée, dont
+  l'ordre des quatre paramètres n'est documenté nulle part dans `gcrypt.h`.
+  Cet ordre — `{taglen, t, m, p}` — a été **établi contre le vecteur de test
+  Argon2id de la RFC 9106 §5.3** : les quatre ordres plausibles ont été
+  essayés, un seul le reproduit octet pour octet. Une demi-heure, et zéro
+  supposition.
+- **`g_printerr` transcode vers l'encodage de la locale**, et un service
+  systemd n'en a pas : `LANG` est vide, la locale est « C », et tous les
+  accents des messages ressortaient en `?` dans `journalctl`. `fputs` sur
+  `stderr`. Un journal qu'on relit mal est un journal qu'on ne relit pas.
+- **Un `GtkButton` prend le focus quand on le presse.** Sans
+  `set_can_focus(FALSE)` **et** `set_focus_on_click(FALSE)` sur chaque touche
+  des claviers à l'écran, le premier appui au doigt vole le focus au champ et
+  **coupe la frappe physique** — silencieusement, et seulement après un clic,
+  donc jamais au premier essai. L'utilisateur avait demandé les deux modes de
+  saisie ; l'un serait tombé sans qu'on sache pourquoi.
+
+### Ce qui a été vu, et dans quel ordre
+
+`--essai` deux fois, puis une vraie ouverture de session.
+
+Au banc d'essai, écran regardé : le volet nom d'utilisateur s'ouvre **sombre
+comme le bureau** — une première —, le clavier azerty avec lui. Au doigt : les
+touches écrivent, **et le clavier physique écrit toujours après**. ⇧ et &#
+répondent. Le piège du focus est écarté, éprouvé et non déduit.
+
+Puis la chronologie du coffre, lue dans le journal :
+
+```
+16:15:49  @9  (greeter 12214)   état : premier écran, aucun code PIN
+16:16:15  @10 (greeter 12214)   « code PIN enregistré pour "stef" »
+16:16:15  @11 (greeter 12214)   la relecture de contrôle, aussitôt après
+16:17:04  @12 (greeter 12922)   état : second écran, un code PIN existe
+16:17:10  @13 (greeter 12922)   ouverture — 721 ms, aucune erreur
+```
+
+Deux greeters différents, deux PID. Le second a ouvert la session **au code
+PIN**. Et dans cette session :
+
+```
+org.freedesktop.Secret.Collection Locked  →  false
+~/.local/share/keyrings/Default_Keyring.keyring  →  écrit à 16:17
+```
+
+**Le trousseau est déverrouillé**, et son fichier a été réécrit pendant la
+session ouverte au code. C'est le point qui avait dicté toute l'architecture.
+
+Une réserve d'honnêteté : cette mesure ne distingue pas « déverrouillé par
+`pam_gnome_keyring` » de « trousseau sans mot de passe ». L'argument qui vaut
+vraiment est structurel — PAM reçoit une chaîne **identique octet pour
+octet**, qu'elle vienne du clavier ou du coffre, et ne peut pas faire la
+différence. Le risque n'a jamais été que PAM se comporte autrement ; il était
+de **contourner PAM**, ce qu'un module PIN aurait fait et ce que nous ne
+faisons pas.
+
+### Ce que ce confort retire
+
+À dire sans détour, et c'est écrit en toutes lettres dans
+[`09`](09-code-pin.md) : six chiffres, c'est **un million de combinaisons**, et
+`mmcblk1p2` est un ext4 nu — pas de `crypttab`. Qui démonte l'eMMC attaque le
+coffre hors ligne : **1,8 jour sur les quatre cœurs de la machine**, quelques
+heures sur du matériel récent. Sans code PIN, le même attaquant ne trouvait
+que le hachage yescrypt de `/etc/shadow`, dont il ne tire rien sans
+dictionnaire.
+
+**Le code PIN abaisse la sécurité au repos et l'améliore à l'usage** — on tape
+six chiffres au lieu d'exposer un mot de passe complet en public, et on le
+tape moins souvent. Arbitrage assumé, réversible d'un clic depuis l'écran
+lui-même. Le seul vrai remède est le chiffrement du disque.
+
+### Cinq garde-fous, dans le code et non dans la procédure
+
+Ce chantier touche la seule porte de la machine.
+
+1. Le mot de passe reste atteignable depuis **tous** les volets.
+2. Le code PIN est facultatif, et se retire depuis l'écran.
+3. Coffre absent ou muet → volet mot de passe, avec la raison affichée.
+4. **Un enrôlement raté n'empêche jamais la session de s'ouvrir** : il part au
+   journal, le code est abandonné, et l'écran en repropose un à l'ouverture
+   suivante. La panne se rattrape d'elle-même.
+5. **Ce qui vient d'être scellé est relu aussitôt** — c'est la connexion `@11`
+   ci-dessus. Un scellement faux ne se verrait sinon qu'au réveil suivant,
+   sous la forme d'un « mot de passe incorrect » sur un code juste.
+
+Le filet de sécurité a été armé avant la première vraie ouverture
+(`/etc/claude-os/filet-arme`, `2026-09-09 16:14:39`).
+
 ## Ce qui n'est pas établi
 
 Par principe, ce document distingue ce qui a été mesuré de ce qui est
 plausible. N'ont **jamais** été vérifiés sur MADOO :
 
 - la cause de l'écran noir au démarrage ;
-- la présence d'un capteur de luminosité ambiante.
+- la présence d'un capteur de luminosité ambiante ;
+- **les lecteurs réseau NFS, SFTP et WebDAV** : écrits et compilés le
+  9 septembre 2026, jamais montés pour de vrai. Le NAS ne publie aucun
+  export NFS et son port 22 est fermé. Seul SMB a été vu fonctionner ;
+- **le mode tablette**, qui justifie pourtant le clavier azerty à l'écran :
+  jamais essayé, capot retourné, clavier physique coupé par l'EC ;
+- **ce qui déverrouille exactement le trousseau** à l'ouverture au code PIN.
+  Il est déverrouillé — mesuré — mais `pam_gnome_keyring` et « trousseau sans
+  mot de passe » n'ont pas été distingués ;
+- **le coût d'une attaque du coffre par carte graphique.** Argon2id à 128 Mio
+  est limité par la bande passante mémoire, ce qui gêne un GPU ; écrire un
+  chiffre serait l'inventer.
 
 Une cause plausible n'est pas une cause.
 
@@ -432,3 +654,8 @@ Chromium et Claude Desktop, et l'appel `SetBrightness` au vrai logind. Ce
 dernier méritait la prudence : le banc d'essai n'avait ni bus système, ni
 siège, ni écran rétro-éclairé, et seule la forme de l'appel y était prouvée.
 La machine a tranché.
+
+**Rayés de cette liste le 9 septembre 2026 au soir** : le suivi du thème par
+l'écran de connexion — vu sombre à l'écran, alors qu'il n'avait jamais pu
+l'être — et le piège du focus des claviers tactiles, éprouvé au doigt et non
+déduit d'un banc d'essai qui ne sait pas cliquer.

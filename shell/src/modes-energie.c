@@ -55,12 +55,15 @@ shell_energie_delais_mode (const ShellConfig *cfg, const ShellModeEnergie *m,
                            int *preavis, int *attenuer, int *eteindre,
                            int *suspendre)
 {
-    int pre = 0, att, ete, sus;
+    int att, ete, sus;
     if (m == NULL)
         m = shell_energie_mode_actif (cfg);
 
+    /* Le preavis vaut pour les TROIS modes : la gene qu'il corrige depend
+     * de ce qu'on est en train de faire, pas du profil choisi. */
+    int pre = cfg->energie_preavis;
+
     if (g_strcmp0 (m->id, "travail") == 0) {
-        pre = cfg->energie_travail_preavis;
         att = cfg->energie_travail_attenuer;
         ete = cfg->energie_travail_eteindre;
         sus = 0;

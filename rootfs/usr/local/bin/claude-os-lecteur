@@ -1,0 +1,244 @@
+#!/bin/sh
+# =========================================================================
+# claude-os-lecteur — monte et démonte les lecteurs réseau déclarés
+#
+# POURQUOI CE PROGRAMME EXISTE
+#
+# Monter un partage demande root, et l'interface graphique n'a pas à
+# composer une ligne de commande privilégiée. Si « Fichiers » construisait
+# lui-même « mount -t cifs … », la moindre chaîne mal filtrée venant du
+# fichier de configuration deviendrait une option de montage arbitraire,
+# exécutée en root. L'interface ne dit donc que DEUX choses : le verbe, et
+# l'identifiant du lecteur. Tout le reste est relu ici, depuis la
+# configuration de l'utilisateur, et VALIDÉ avant d'atteindre mount.
+#
+# Le journal du guichet y gagne aussi : il enregistre
+# « claude-os-lecteur monter nas-videos » — lisible dans six mois — plutôt
+# qu'une ligne de quatre-vingts caractères d'options.
+#
+# LE MOT DE PASSE NE PASSE JAMAIS PAR LA LIGNE DE COMMANDE
+#
+# Il serait alors visible dans « ps » par n'importe quel compte de la
+# machine, et recopié tel quel dans /var/log/claude-os/actions.log. Il
+# arrive donc par un fichier d'identifiants que l'interface écrit dans
+# /run/user/<uid> — un tmpfs, en 0600 — et qu'elle efface aussitôt le
+# montage terminé. C'est la forme que mount.cifs attend nativement.
+#
+# Usage :  claude-os-lecteur monter   <id>  [fichier-identifiants]
+#          claude-os-lecteur demonter <id>
+#          claude-os-lecteur etat     <id>
+# =========================================================================
+set -eu
+
+BASE=/run/claude-os/reseau
+
+mourir () { printf 'claude-os-lecteur : %s\n' "$1" >&2; exit 1; }
+
+[ "$(id -u)" -eq 0 ] || mourir "doit être lancé par claude-os-root"
+
+VERBE="${1:-}"
+ID="${2:-}"
+IDENT="${3:-}"
+
+[ -n "$VERBE" ] || mourir "verbe manquant (monter, demonter, etat)"
+[ -n "$ID" ]    || mourir "identifiant de lecteur manquant"
+
+# L'identifiant devient un nom de répertoire sous $BASE. Le restreindre ici
+# est ce qui garantit qu'aucun « ../ » ne peut faire sortir le point de
+# montage de son arborescence.
+case "$ID" in
+	*[!A-Za-z0-9._-]*|''|.|..|-*) mourir "identifiant invalide : « $ID »" ;;
+esac
+
+# Le fichier de configuration est celui de l'utilisateur qui a appelé le
+# guichet, pas celui de root.
+DEMANDEUR="${SUDO_USER:-root}"
+MAISON="$(getent passwd "$DEMANDEUR" | cut -d: -f6)"
+[ -n "$MAISON" ] || mourir "compte inconnu : $DEMANDEUR"
+UID_D="$(getent passwd "$DEMANDEUR" | cut -d: -f3)"
+GID_D="$(getent passwd "$DEMANDEUR" | cut -d: -f4)"
+CONF="$MAISON/.config/claude-os/lecteurs"
+
+POINT="$BASE/$ID"
+
+# ---------------------------------------------------------------- lecture
+# Lit une clé dans la section [<id>] du fichier INI. Volontairement en awk
+# et non en source shell : le fichier ne doit jamais être ÉVALUÉ, seulement
+# lu. Une valeur qui contiendrait « ; rm -rf / » reste une chaîne.
+lire () {
+	[ -f "$CONF" ] || return 0
+	awk -v section="$ID" -v cle="$1" '
+		/^[ \t]*\[/ {
+			ligne = $0
+			sub(/^[ \t]*\[/, "", ligne); sub(/\][ \t]*$/, "", ligne)
+			dedans = (ligne == section); next
+		}
+		dedans && $0 ~ "^[ \t]*" cle "[ \t]*=" {
+			sub("^[ \t]*" cle "[ \t]*=[ \t]*", "")
+			sub(/[ \t]+$/, "")
+			print; exit
+		}
+	' "$CONF"
+}
+
+etat () {
+	if findmnt -rno TARGET "$POINT" >/dev/null 2>&1; then
+		echo connecte
+	else
+		echo deconnecte
+	fi
+}
+
+# ------------------------------------------------------------------ etat
+if [ "$VERBE" = etat ]; then
+	etat; exit 0
+fi
+
+# -------------------------------------------------------------- demonter
+if [ "$VERBE" = demonter ]; then
+	[ "$(etat)" = connecte ] || { echo "déjà déconnecté"; exit 0; }
+
+	# Deux temps, et c'est délibéré. Un serveur qui a disparu — le Wi-Fi
+	# coupé, le NAS éteint — fait bloquer umount jusqu'au bout du délai TCP,
+	# et l'utilisateur voit son gestionnaire de fichiers figé. On tente donc
+	# le démontage propre, puis on détache l'arborescence sans attendre le
+	# serveur. « -l » ne perd rien qui ne soit déjà perdu : les écritures en
+	# attente vers une machine injoignable ne partiront de toute façon pas.
+	if ! umount "$POINT" 2>/dev/null; then
+		umount -l "$POINT" || mourir "démontage impossible de $POINT"
+	fi
+	rmdir "$POINT" 2>/dev/null || true
+	exit 0
+fi
+
+[ "$VERBE" = monter ] || mourir "verbe inconnu : « $VERBE »"
+
+# ---------------------------------------------------------------- monter
+[ "$(etat)" = deconnecte ] || { echo "déjà connecté"; exit 0; }
+[ -f "$CONF" ] || mourir "aucune configuration : $CONF"
+
+PROTOCOLE="$(lire protocole)"
+SERVEUR="$(lire serveur)"
+PARTAGE="$(lire partage)"
+OPTIONS="$(lire options)"
+
+[ -n "$PROTOCOLE" ] || mourir "lecteur « $ID » absent de $CONF"
+[ -n "$SERVEUR" ]   || mourir "serveur non renseigné pour « $ID »"
+
+# Le serveur devient un argument de mount : il ne doit contenir qu'un nom
+# d'hôte ou une adresse. Tout le reste est refusé plutôt qu'échappé —
+# refuser est vérifiable, échapper se discute.
+case "$SERVEUR" in
+	*[!A-Za-z0-9.:_-]*|-*) mourir "adresse de serveur invalide : « $SERVEUR »" ;;
+esac
+case "$PARTAGE" in
+	*..*|*'$('*|*'`'*) mourir "chemin de partage invalide : « $PARTAGE »" ;;
+esac
+
+# Les options supplémentaires sont filtrées par LISTE BLANCHE de clés. Sans
+# ce filtre, « options » serait un canal direct vers mount, en root : de quoi
+# monter n'importe quoi n'importe où depuis un simple fichier texte.
+OPT_SUR=''
+if [ -n "$OPTIONS" ]; then
+	OLDIFS=$IFS; IFS=','
+	for o in $OPTIONS; do
+		[ -n "$o" ] || continue
+		case "${o%%=*}" in
+			vers|sec|iocharset|rsize|wsize|cache|actimeo|nobrl|noserverino|\
+			ro|rw|soft|hard|timeo|retrans|nolock|noatime|dir_mode|file_mode|\
+			mfsymlinks|seal|port|domain|proto|resvport|multiuser|forceuid|forcegid)
+				OPT_SUR="${OPT_SUR:+$OPT_SUR,}$o" ;;
+			*)
+				printf 'claude-os-lecteur : option ignorée (hors liste blanche) : %s\n' "$o" >&2 ;;
+		esac
+	done
+	IFS=$OLDIFS
+fi
+
+mkdir -p "$POINT"
+
+# Le point de montage appartient à l'utilisateur : sans cela sshfs, qui
+# tourne sous son compte, refuserait de s'y greffer.
+chown "$UID_D:$GID_D" "$POINT" 2>/dev/null || true
+
+ajouter () { OPT_SUR="${OPT_SUR:+$OPT_SUR,}$1"; }
+
+# Un montage qui échoue ne doit rien laisser derrière lui. Sans cela, chaque
+# tentative ratée — un mot de passe faux, un serveur éteint — dépose un
+# répertoire vide de plus sous /run/claude-os/reseau. Ils sont inoffensifs et
+# disparaissent au redémarrage, mais ils rendent l'arborescence trompeuse :
+# on y lit des lecteurs qui ne sont pas montés.
+#
+# « exec mount » plus bas remplacerait ce shell, et aucun piège ne se
+# déclencherait ; les montages passent donc par cette fonction.
+monter_ou_nettoyer () {
+	if "$@"; then
+		exit 0
+	fi
+	code=$?
+	rmdir "$POINT" 2>/dev/null || true
+	exit "$code"
+}
+
+case "$PROTOCOLE" in
+	smb)
+		[ -n "$PARTAGE" ] || mourir "partage non renseigné pour « $ID »"
+		ajouter "uid=$UID_D,gid=$GID_D"
+		# « soft » : sur un portable en Wi-Fi, un serveur qui s'en va doit
+		# rendre une erreur, pas laisser les processus en attente
+		# ininterruptible — l'état « D » dont on ne sort qu'en redémarrant.
+		case ",$OPT_SUR," in *,soft,*|*,hard,*) : ;; *) ajouter soft ;; esac
+		case ",$OPT_SUR," in *,iocharset=*) : ;; *) ajouter iocharset=utf8 ;; esac
+
+		if [ -n "$IDENT" ]; then
+			case "$IDENT" in
+				/run/user/*/claude-os/*) : ;;
+				*) mourir "fichier d'identifiants hors de /run/user : $IDENT" ;;
+			esac
+			[ -f "$IDENT" ] || mourir "fichier d'identifiants introuvable"
+			ajouter "credentials=$IDENT"
+		else
+			ajouter guest
+		fi
+
+		monter_ou_nettoyer mount -t cifs "//$SERVEUR/$PARTAGE" "$POINT" -o "$OPT_SUR"
+		;;
+
+	nfs)
+		[ -n "$PARTAGE" ] || mourir "export non renseigné pour « $ID »"
+		case ",$OPT_SUR," in *,soft,*|*,hard,*) : ;; *) ajouter soft ;; esac
+		# « nolock » par défaut, et ce n'est pas un détail : le verrouillage
+		# NFSv3 réclame rpc.statd, donc un rpcbind qui ÉCOUTE sur le réseau.
+		# Ce projet a retiré SSH du démarrage pour ne pas laisser un port
+		# ouvert en permanence ; ouvrir le 111 pour des verrous dont un
+		# portable n'a pas l'usage serait se contredire.
+		case ",$OPT_SUR," in *,nolock,*|*,lock,*) : ;; *) ajouter nolock ;; esac
+		monter_ou_nettoyer mount -t nfs "$SERVEUR:/${PARTAGE#/}" "$POINT" -o "$OPT_SUR"
+		;;
+
+	sftp)
+		[ -n "$PARTAGE" ] || PARTAGE=.
+		UTILISATEUR="$(lire utilisateur)"
+		[ -n "$UTILISATEUR" ] || mourir "sftp demande un nom d'utilisateur"
+		case "$UTILISATEUR" in *[!A-Za-z0-9._-]*) mourir "nom d'utilisateur invalide" ;; esac
+		# sshfs tourne sous le compte de l'utilisateur — il a besoin de SES
+		# clés SSH et de SON agent, que root n'a pas. D'où le setpriv :
+		# le montage est le seul geste qui demandait des privilèges, et
+		# celui-ci n'en demande pas.
+		monter_ou_nettoyer setpriv --reuid="$UID_D" --regid="$GID_D" --init-groups \
+			sshfs "$UTILISATEUR@$SERVEUR:$PARTAGE" "$POINT" \
+			-o "reconnect,ServerAliveInterval=15,ServerAliveCountMax=3${OPT_SUR:+,$OPT_SUR}"
+		;;
+
+	dav)
+		[ -n "$PARTAGE" ] || PARTAGE=/
+		SCHEMA="$(lire schema)"; [ -n "$SCHEMA" ] || SCHEMA=https
+		case "$SCHEMA" in http|https) : ;; *) mourir "schéma invalide : $SCHEMA" ;; esac
+		ajouter "uid=$UID_D,gid=$GID_D"
+		monter_ou_nettoyer mount -t davfs "$SCHEMA://$SERVEUR/${PARTAGE#/}" "$POINT" -o "$OPT_SUR"
+		;;
+
+	*)
+		mourir "protocole inconnu : « $PROTOCOLE »"
+		;;
+esac

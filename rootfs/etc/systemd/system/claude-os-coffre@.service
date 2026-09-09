@@ -1,0 +1,73 @@
+# Claude OS — une instance du coffre, pour une connexion.
+#
+# Modèle « @ » parce que la socket est en Accept=yes : systemd lance un
+# processus par connexion, avec la socket en entrée et en sortie standard.
+# Le programme lit une requête, répond, et meurt. Rien ne reste résident —
+# un service privilégié qui ne tourne pas est un service qu'on n'attaque
+# pas.
+#
+# POURQUOI root, ET CE QU'IL LUI FAUT VRAIMENT
+#
+# Deux choses, et deux seulement, sont hors de portée de « _greetd » :
+#
+#   - /var/lib/claude-os/coffre, en 0700 root:root — c'est là qu'est le
+#     mot de passe scellé, et il n'a rien à faire ailleurs ;
+#   - /home/<user>/.config/claude-os/shell.conf, sous un /home en 0700 —
+#     c'est là qu'est le nom du thème.
+#
+# D'où CAP_DAC_READ_SEARCH : sans elle, root lui-même ne traverse pas un
+# répertoire personnel en 0700. Tout le reste des capacités est retiré.
+#
+# ProtectHome=read-only et NON « yes » : « yes » rendrait /home vide, et le
+# thème serait introuvable — l'écran de connexion retomberait sur son repli
+# sans que rien ne le dise. C'est exactement la panne qu'on est en train de
+# corriger ; ce n'est pas le moment de la réintroduire par une ligne de
+# durcissement.
+
+[Unit]
+Description=Coffre des codes PIN de Claude OS (connexion %i)
+Documentation=file:/home/stef/Claude-OS/docs/09-code-pin.md
+
+[Service]
+ExecStart=/usr/bin/claude-os-coffre
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+
+# Une instance bloquée ne doit pas tenir un des quatre créneaux. Argon2id
+# demande 0,7 s ; trente secondes laissent toute la marge voulue.
+RuntimeMaxSec=30
+
+User=root
+UMask=0077
+
+# Les capacités : juste de quoi lire chez l'utilisateur, et de quoi
+# verrouiller en RAM les quelques kilo-octets où passe le mot de passe en
+# clair — cette machine a du swap.
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_IPC_LOCK
+AmbientCapabilities=
+NoNewPrivileges=yes
+
+ProtectSystem=strict
+ReadWritePaths=/var/lib/claude-os
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM

@@ -1,0 +1,18 @@
+# rpcbind — CONFINÉ À LA BOUCLE LOCALE.
+#
+# Installé comme dépendance de nfs-common, pour les lecteurs réseau NFS. Par
+# défaut il écoute sur 0.0.0.0:111 et [::]:111, en permanence.
+#
+# C'est exactement l'exposition que ce projet a retirée pour SSH le
+# 8 septembre 2026 : un port ouvert à demeure pour un usage occasionnel. La
+# contradiction serait difficile à défendre.
+#
+# CE QUE CELA COÛTE : rien, tant que les montages NFS gardent « nolock » —
+# ce que claude-os-lecteur impose par défaut. Le verrouillage NFSv3 est la
+# seule fonction qui demanderait au serveur de rappeler le client sur son
+# rpcbind ; un portable en Wi-Fi n'en a pas l'usage, et le prix serait de
+# rouvrir le port.
+#
+# Pour retrouver le verrouillage NFSv3 : retirer « -h », remettre
+# « lock » dans les options du lecteur, et accepter le port ouvert.
+OPTIONS="-w -h 127.0.0.1 -h ::1"

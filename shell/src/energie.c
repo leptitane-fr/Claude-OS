@@ -12,7 +12,19 @@
 
 #include "ext-idle-notify-v1-client-protocol.h"
 
-typedef enum { PREAVIS = 0, ATTENUER, ETEINDRE, SUSPENDRE, ETAGES } Etage;
+/* DEUX PREAVIS, PAS UN.
+ *
+ * Le cadran annonce chaque baisse d'ecran : celle qui attenue, et celle qui
+ * eteint. La seconde est la plus brutale -- on passe d'un ecran lisible a
+ * un ecran noir -- et c'etait justement celle qui n'etait pas annoncee. */
+typedef enum {
+    PREAVIS_ATT = 0,   /* avant l'attenuation                              */
+    ATTENUER,
+    PREAVIS_ETE,       /* avant l'extinction                               */
+    ETEINDRE,
+    SUSPENDRE,
+    ETAGES
+} Etage;
 
 static struct {
     /* NOTRE PROPRE CONNEXION AU COMPOSITEUR, ET C'EST DELIBERE.
@@ -143,7 +155,8 @@ on_idled (void *data, struct ext_idle_notification_v1 *n)
     g_message ("energie : etage %d atteint", (int) e);
 
     switch (e) {
-    case PREAVIS:
+    case PREAVIS_ATT:
+    case PREAVIS_ETE:
         /* On ne touche a rien : on previent. Le geste de l'utilisateur, s'il
          * vient, annulera la suite par « resumed ». */
         shell_preavis_montrer (E.preavis_s);
@@ -166,6 +179,7 @@ on_idled (void *data, struct ext_idle_notification_v1 *n)
         break;
 
     case ETEINDRE:
+        shell_preavis_cacher ();
         if (son_en_lecture ())
             break;
         if (E.avant < 0)
@@ -241,9 +255,10 @@ reconstruire (void)
      * cela peut ne jamais arriver. */
     wl_display_flush (E.display);
 
-    g_message ("energie : mode %s, %d etage(s) arme(s) — preavis %ds, "
-               "attenuer %ds, eteindre %ds, suspendre %ds%s",
+    g_message ("energie : mode %s, %d etage(s) arme(s) — preavis %ds "
+               "(a %ds et %ds), attenuer %ds, eteindre %ds, suspendre %ds%s",
                E.mode != NULL ? E.mode->id : "?", armes, E.preavis_s,
+               E.delais[PREAVIS_ATT], E.delais[PREAVIS_ETE],
                E.delais[ATTENUER], E.delais[ETEINDRE], E.delais[SUSPENDRE],
                E.suspendre_permis ? "" : " (suspension verrouillee)");
 }
@@ -255,6 +270,7 @@ appliquer_config (const ShellConfig *cfg)
     E.niveau           = cfg->energie_niveau;
     E.suspendre_permis = cfg->energie_suspendre_permis;
     E.mode             = shell_energie_mode_actif (cfg);
+    shell_preavis_opacite (cfg->energie_opacite);
 
     int pre, att, ete, sus;
     shell_energie_delais (cfg, &pre, &att, &ete, &sus);
@@ -262,12 +278,21 @@ appliquer_config (const ShellConfig *cfg)
     /* Le preavis est un etage a part entiere, arme AVANT l'attenuation.
      * S'il ne tient pas dans le delai -- preavis plus long que le delai
      * lui-meme -- on l'abandonne plutot que de l'afficher a l'envers. */
-    E.preavis_s       = (att > pre) ? pre : 0;
-    E.delais[PREAVIS] = (E.preavis_s > 0) ? att - E.preavis_s : 0;
+    E.preavis_s = (att > pre) ? pre : 0;
 
-    E.delais[ATTENUER]  = att;
-    E.delais[ETEINDRE]  = ete;
-    E.delais[SUSPENDRE] = sus;
+    E.delais[PREAVIS_ATT] = (E.preavis_s > 0) ? att - E.preavis_s : 0;
+    E.delais[ATTENUER]    = att;
+
+    /* Le second preavis n'est arme que s'il TIENT entre les deux etages :
+     * un compte a rebours qui commencerait avant l'attenuation annoncerait
+     * l'extinction pendant que l'ecran baisse encore, et les deux se
+     * marcheraient dessus. Delais serres : on renonce au second, pas au
+     * premier. */
+    E.delais[PREAVIS_ETE] = (E.preavis_s > 0 && ete > 0
+                             && ete - E.preavis_s > att)
+                            ? ete - E.preavis_s : 0;
+    E.delais[ETEINDRE]    = ete;
+    E.delais[SUSPENDRE]   = sus;
 }
 
 /* -------------------------------------------------------------------------

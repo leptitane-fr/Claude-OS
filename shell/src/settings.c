@@ -22,6 +22,7 @@
 
 #include "config.h"
 #include "energie.h"   /* la table des modes, definie une seule fois */
+#include "reseau.h"
 
 /* -------------------------------------------------------------------------
  * Enregistrement
@@ -406,6 +407,671 @@ commutateur (gboolean actif, Modif apply)
  * Chaque fabrique renvoie le CONTENU du volet, pas son defilement : c'est
  * on_activate qui enveloppe, pour que toutes les sections defilent pareil.
  * ------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------
+ * Lecteurs reseau
+ *
+ * Le volet qui les DECLARE. Les connecter au quotidien se fait dans le volet
+ * lateral de « Fichiers », a un clic du dossier qu'on cherche ; venir ici
+ * pour ouvrir un partage serait un detour. Ce panneau sert a decrire un
+ * serveur une fois, et a ne plus jamais y penser.
+ *
+ * Le fichier ecrit est ~/.config/claude-os/lecteurs, et « Fichiers » le
+ * relit a chaque reconstruction de son volet. Aucun protocole entre les
+ * deux programmes : la configuration est la seule source de verite, comme
+ * pour shell.conf.
+ * ------------------------------------------------------------------------- */
+
+static GtkWidget *reseau_liste_boite = NULL;   /* la boite a repeupler */
+static GtkWidget *reseau_fenetre     = NULL;   /* pour les dialogues   */
+
+static void reseau_rafraichir (void);
+
+/* Etat affiche a cote du nom. */
+static const char *
+etat_texte (const Lecteur *l)
+{
+    return reseau_est_connecte (l) ? "Connecté" : "Déconnecté";
+}
+
+/* ---------------------------------------------------------------- editeur */
+typedef struct {
+    GtkWidget *fenetre;
+    GtkWidget *nom, *serveur, *partage, *utilisateur, *domaine, *options;
+    GtkWidget *mot_de_passe;
+    GtkWidget *protocole, *schema;
+    GtkWidget *automatique;
+    GtkWidget *partages;        /* liste deroulante des partages trouves */
+    GtkWidget *parcourir;
+    char      *id;              /* NULL : c'est une creation             */
+} Editeur;
+
+static void
+editeur_free (gpointer data, GClosure *c)
+{
+    (void) c;
+    Editeur *e = data;
+    g_free (e->id);
+    g_free (e);
+}
+
+static const char *
+texte (GtkWidget *w)
+{
+    return gtk_editable_get_text (GTK_EDITABLE (w));
+}
+
+/* Le schema WebDAV et le nom d'utilisateur n'ont pas de sens pour tous les
+ * protocoles. Les griser plutot que de les cacher garde la fenetre stable :
+ * une boite dont les champs sautent a chaque changement de liste est
+ * desagreable a remplir. */
+static void
+on_protocole_change (GObject *dd, GParamSpec *ps, gpointer data)
+{
+    (void) ps;
+    Editeur *e = data;
+    ReseauProtocole p = (ReseauProtocole) gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
+
+    gtk_widget_set_sensitive (e->schema,       p == RESEAU_DAV);
+    gtk_widget_set_sensitive (e->domaine,      p == RESEAU_SMB);
+    gtk_widget_set_sensitive (e->mot_de_passe, p != RESEAU_SFTP);
+    gtk_widget_set_sensitive (e->parcourir,    p == RESEAU_SMB);
+
+    const char *invite = "";
+    switch (p) {
+        case RESEAU_SMB:  invite = "Nom du partage (ex. Public)";        break;
+        case RESEAU_NFS:  invite = "Export (ex. /mnt/HD/HD_a2/Public)";  break;
+        case RESEAU_SFTP: invite = "Chemin distant (ex. /home/moi)";     break;
+        case RESEAU_DAV:  invite = "Chemin (ex. /remote.php/webdav)";    break;
+    }
+    gtk_entry_set_placeholder_text (GTK_ENTRY (e->partage), invite);
+}
+
+/* --- decouverte des partages ------------------------------------------- */
+static void
+on_partages_listes (GObject *src, GAsyncResult *res, gpointer data)
+{
+    Editeur *e = data;
+    g_autoptr(GError) err = NULL;
+    g_autofree char *sortie = NULL;
+
+    gtk_widget_set_sensitive (e->parcourir, TRUE);
+    gtk_button_set_label (GTK_BUTTON (e->parcourir), "Parcourir…");
+
+    if (!g_subprocess_communicate_utf8_finish (G_SUBPROCESS (src), res,
+                                               &sortie, NULL, &err)) {
+        GtkAlertDialog *d = gtk_alert_dialog_new ("Impossible d'interroger le serveur");
+        gtk_alert_dialog_set_detail (d, err->message);
+        gtk_alert_dialog_show (d, GTK_WINDOW (e->fenetre));
+        g_object_unref (d);
+        return;
+    }
+
+    /* smbclient a ete lance avec « -g » : une ligne par partage, au format
+     * « Type|Nom|Commentaire ». C'est la sortie destinee aux programmes, et
+     * la seule utilisable ici -- le tableau en colonnes du mode normal se
+     * lit a l'oeil mais separe mal un nom de partage contenant une espace.
+     *
+     * Mesure du 9 septembre 2026 sur le NAS WDMyCloudMirror :
+     *     Disk|Vidéos|
+     *     IPC|IPC$|IPC Service (WDMyCloudMirror)
+     * On ne garde donc que « Disk », ce qui ecarte IPC$ et les imprimantes. */
+    GtkStringList *trouves = gtk_string_list_new (NULL);
+    guint n = 0;
+    g_auto(GStrv) lignes = g_strsplit (sortie != NULL ? sortie : "", "\n", -1);
+
+    for (guint i = 0; lignes[i] != NULL; i++) {
+        g_auto(GStrv) champs = g_strsplit (g_strstrip (lignes[i]), "|", 3);
+        if (champs[0] == NULL || champs[1] == NULL)
+            continue;
+        if (g_strcmp0 (champs[0], "Disk") != 0 || *champs[1] == '\0')
+            continue;
+        gtk_string_list_append (trouves, champs[1]);
+        n++;
+    }
+
+    if (n == 0) {
+        g_object_unref (trouves);
+        GtkAlertDialog *d = gtk_alert_dialog_new ("Aucun partage visible");
+        gtk_alert_dialog_set_detail (d,
+            "Le serveur n'a annoncé aucun partage accessible sans mot de passe. "
+            "Saisissez le nom du partage à la main.");
+        gtk_alert_dialog_show (d, GTK_WINDOW (e->fenetre));
+        g_object_unref (d);
+        return;
+    }
+
+    gtk_drop_down_set_model (GTK_DROP_DOWN (e->partages), G_LIST_MODEL (trouves));
+    g_object_unref (trouves);
+    gtk_widget_set_visible (e->partages, TRUE);
+}
+
+static void
+on_partage_choisi (GObject *dd, GParamSpec *ps, gpointer data)
+{
+    (void) ps;
+    Editeur *e = data;
+    GListModel *m = gtk_drop_down_get_model (GTK_DROP_DOWN (dd));
+    guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
+
+    if (m == NULL || i == GTK_INVALID_LIST_POSITION)
+        return;
+    g_autoptr(GtkStringObject) o = g_list_model_get_item (m, i);
+    if (o != NULL)
+        gtk_editable_set_text (GTK_EDITABLE (e->partage), gtk_string_object_get_string (o));
+}
+
+static void
+on_parcourir (GtkButton *b, gpointer data)
+{
+    Editeur *e = data;
+    const char *serveur = texte (e->serveur);
+
+    if (*serveur == '\0') {
+        GtkAlertDialog *d = gtk_alert_dialog_new ("Renseignez d'abord le serveur");
+        gtk_alert_dialog_show (d, GTK_WINDOW (e->fenetre));
+        g_object_unref (d);
+        return;
+    }
+
+    g_autofree char *cible = g_strdup_printf ("//%s", serveur);
+    /* En invite, et sans plus : lister les partages d'un serveur ne demande
+     * pas de compte sur la plupart des NAS, et demander un mot de passe pour
+     * une simple liste decouragerait d'utiliser le bouton. */
+    const char *argv[] = { "smbclient", "-L", cible, "-N", "-g", NULL };
+
+    g_autoptr(GError) err = NULL;
+    g_autoptr(GSubprocess) proc = g_subprocess_newv (
+        argv, G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_PIPE, &err);
+
+    if (proc == NULL) {
+        GtkAlertDialog *d = gtk_alert_dialog_new ("smbclient est introuvable");
+        gtk_alert_dialog_set_detail (d, err->message);
+        gtk_alert_dialog_show (d, GTK_WINDOW (e->fenetre));
+        g_object_unref (d);
+        return;
+    }
+
+    gtk_widget_set_sensitive (GTK_WIDGET (b), FALSE);
+    gtk_button_set_label (b, "Recherche…");
+    g_subprocess_communicate_utf8_async (proc, NULL, NULL, on_partages_listes, e);
+}
+
+/* --- enregistrement ----------------------------------------------------- */
+static void
+on_editeur_valide (GtkWidget *w, gpointer data)
+{
+    (void) w;
+    Editeur *ed = data;
+
+    if (*texte (ed->nom) == '\0' || *texte (ed->serveur) == '\0') {
+        GtkAlertDialog *d = gtk_alert_dialog_new ("Un nom et un serveur sont nécessaires");
+        gtk_alert_dialog_show (d, GTK_WINDOW (ed->fenetre));
+        g_object_unref (d);
+        return;
+    }
+
+    g_autoptr(GPtrArray) lecteurs = reseau_charger ();
+
+    Lecteur *l = NULL;
+    if (ed->id != NULL) {
+        for (guint i = 0; i < lecteurs->len; i++)
+            if (g_strcmp0 (((Lecteur *) g_ptr_array_index (lecteurs, i))->id, ed->id) == 0)
+                l = g_ptr_array_index (lecteurs, i);
+    }
+    if (l == NULL) {
+        l = g_new0 (Lecteur, 1);
+        l->id = reseau_id_depuis_nom (texte (ed->nom), lecteurs);
+        l->nom = l->serveur = l->partage = NULL;
+        l->utilisateur = l->domaine = l->schema = l->options = NULL;
+        g_ptr_array_add (lecteurs, l);
+    }
+
+    g_free (l->nom);         l->nom         = g_strdup (texte (ed->nom));
+    g_free (l->serveur);     l->serveur     = g_strdup (texte (ed->serveur));
+    g_free (l->partage);     l->partage     = g_strdup (texte (ed->partage));
+    g_free (l->utilisateur); l->utilisateur = g_strdup (texte (ed->utilisateur));
+    g_free (l->domaine);     l->domaine     = g_strdup (texte (ed->domaine));
+    g_free (l->options);     l->options     = g_strdup (texte (ed->options));
+    g_free (l->schema);
+    l->schema = g_strdup (gtk_drop_down_get_selected (GTK_DROP_DOWN (ed->schema)) == 0
+                          ? "https" : "http");
+    l->protocole   = (ReseauProtocole) gtk_drop_down_get_selected (GTK_DROP_DOWN (ed->protocole));
+    l->automatique = gtk_check_button_get_active (GTK_CHECK_BUTTON (ed->automatique));
+
+    g_autoptr(GError) err = NULL;
+    if (!reseau_enregistrer (lecteurs, &err)) {
+        GtkAlertDialog *d = gtk_alert_dialog_new ("Enregistrement impossible");
+        gtk_alert_dialog_set_detail (d, err->message);
+        gtk_alert_dialog_show (d, GTK_WINDOW (ed->fenetre));
+        g_object_unref (d);
+        return;
+    }
+
+    /* Le mot de passe part au trousseau, jamais dans le fichier. Le laisser
+     * vide ne l'efface pas : on ne devine pas qu'un champ vide veut dire
+     * « oublie-le » -- pour cela il y a le bouton Oublier. */
+    const char *mdp = gtk_editable_get_text (GTK_EDITABLE (ed->mot_de_passe));
+    if (*mdp != '\0')
+        reseau_connecter (l, mdp, TRUE, NULL, NULL);
+
+    gtk_window_destroy (GTK_WINDOW (ed->fenetre));
+    reseau_rafraichir ();
+}
+
+static void
+on_editeur_annule (GtkWidget *w, gpointer data)
+{
+    (void) w;
+    gtk_window_destroy (GTK_WINDOW (((Editeur *) data)->fenetre));
+}
+
+static GtkWidget *
+champ (GtkWidget *grille, int rang, const char *libelle, const char *valeur,
+       const char *invite)
+{
+    GtkWidget *l = gtk_label_new (libelle);
+    gtk_widget_add_css_class (l, "reglages-libelle");
+    gtk_widget_set_halign (l, GTK_ALIGN_START);
+    gtk_grid_attach (GTK_GRID (grille), l, 0, rang, 1, 1);
+
+    GtkWidget *e = gtk_entry_new ();
+    if (valeur != NULL)
+        gtk_editable_set_text (GTK_EDITABLE (e), valeur);
+    if (invite != NULL)
+        gtk_entry_set_placeholder_text (GTK_ENTRY (e), invite);
+    gtk_widget_set_hexpand (e, TRUE);
+    gtk_grid_attach (GTK_GRID (grille), e, 1, rang, 1, 1);
+    return e;
+}
+
+/* `modele` NULL : creation. Sinon modification. */
+static void
+ouvrir_editeur (const Lecteur *modele)
+{
+    Editeur *ed = g_new0 (Editeur, 1);
+    ed->id = (modele != NULL) ? g_strdup (modele->id) : NULL;
+
+    ed->fenetre = gtk_window_new ();
+    gtk_window_set_title (GTK_WINDOW (ed->fenetre),
+                          modele != NULL ? "Modifier le lecteur réseau"
+                                         : "Nouveau lecteur réseau");
+    gtk_window_set_modal (GTK_WINDOW (ed->fenetre), TRUE);
+    gtk_window_set_resizable (GTK_WINDOW (ed->fenetre), FALSE);
+    if (reseau_fenetre != NULL)
+        gtk_window_set_transient_for (GTK_WINDOW (ed->fenetre), GTK_WINDOW (reseau_fenetre));
+
+    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_margin_top (boite, 18);
+    gtk_widget_set_margin_bottom (boite, 18);
+    gtk_widget_set_margin_start (boite, 18);
+    gtk_widget_set_margin_end (boite, 18);
+
+    GtkWidget *grille = gtk_grid_new ();
+    gtk_grid_set_row_spacing (GTK_GRID (grille), 8);
+    gtk_grid_set_column_spacing (GTK_GRID (grille), 12);
+    int r = 0;
+
+    ed->nom = champ (grille, r++, "Nom", modele ? modele->nom : NULL,
+                     "Comme il apparaîtra dans Fichiers");
+
+    /* Protocole */
+    GtkStringList *protos = gtk_string_list_new (NULL);
+    for (int i = 0; i < 4; i++)
+        gtk_string_list_append (protos, reseau_protocole_nom ((ReseauProtocole) i));
+    ed->protocole = gtk_drop_down_new (G_LIST_MODEL (protos), NULL);
+    gtk_drop_down_set_selected (GTK_DROP_DOWN (ed->protocole),
+                                modele ? (guint) modele->protocole : RESEAU_SMB);
+    GtkWidget *lp = gtk_label_new ("Protocole");
+    gtk_widget_add_css_class (lp, "reglages-libelle");
+    gtk_widget_set_halign (lp, GTK_ALIGN_START);
+    gtk_grid_attach (GTK_GRID (grille), lp, 0, r, 1, 1);
+    gtk_grid_attach (GTK_GRID (grille), ed->protocole, 1, r++, 1, 1);
+
+    ed->serveur = champ (grille, r++, "Serveur", modele ? modele->serveur : NULL,
+                         "Adresse ou nom (ex. 192.168.1.29)");
+
+    /* Partage, avec le bouton qui interroge le serveur. Taper un nom de
+     * partage de memoire, avec ses accents et sa casse exacte, est la
+     * premiere source d'echec d'un montage SMB. */
+    GtkWidget *lpart = gtk_label_new ("Partage");
+    gtk_widget_add_css_class (lpart, "reglages-libelle");
+    gtk_widget_set_halign (lpart, GTK_ALIGN_START);
+    gtk_grid_attach (GTK_GRID (grille), lpart, 0, r, 1, 1);
+
+    GtkWidget *bpart = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+    ed->partage = gtk_entry_new ();
+    if (modele != NULL)
+        gtk_editable_set_text (GTK_EDITABLE (ed->partage), modele->partage);
+    gtk_widget_set_hexpand (ed->partage, TRUE);
+    ed->parcourir = gtk_button_new_with_label ("Parcourir…");
+    gtk_box_append (GTK_BOX (bpart), ed->partage);
+    gtk_box_append (GTK_BOX (bpart), ed->parcourir);
+    gtk_grid_attach (GTK_GRID (grille), bpart, 1, r++, 1, 1);
+
+    ed->partages = gtk_drop_down_new (NULL, NULL);
+    gtk_widget_set_visible (ed->partages, FALSE);
+    gtk_grid_attach (GTK_GRID (grille), ed->partages, 1, r++, 1, 1);
+
+    ed->utilisateur = champ (grille, r++, "Utilisateur",
+                             modele ? modele->utilisateur : NULL,
+                             "Vide : connexion en invité");
+
+    GtkWidget *lmdp = gtk_label_new ("Mot de passe");
+    gtk_widget_add_css_class (lmdp, "reglages-libelle");
+    gtk_widget_set_halign (lmdp, GTK_ALIGN_START);
+    gtk_grid_attach (GTK_GRID (grille), lmdp, 0, r, 1, 1);
+    ed->mot_de_passe = gtk_password_entry_new ();
+    gtk_password_entry_set_show_peek_icon (GTK_PASSWORD_ENTRY (ed->mot_de_passe), TRUE);
+    gtk_widget_set_hexpand (ed->mot_de_passe, TRUE);
+    gtk_grid_attach (GTK_GRID (grille), ed->mot_de_passe, 1, r++, 1, 1);
+
+    ed->domaine = champ (grille, r++, "Domaine", modele ? modele->domaine : NULL,
+                         "Facultatif (SMB en entreprise)");
+
+    GtkStringList *schemas = gtk_string_list_new (NULL);
+    gtk_string_list_append (schemas, "https");
+    gtk_string_list_append (schemas, "http");
+    ed->schema = gtk_drop_down_new (G_LIST_MODEL (schemas), NULL);
+    gtk_drop_down_set_selected (GTK_DROP_DOWN (ed->schema),
+                                (modele != NULL && g_strcmp0 (modele->schema, "http") == 0) ? 1 : 0);
+    GtkWidget *ls = gtk_label_new ("Schéma WebDAV");
+    gtk_widget_add_css_class (ls, "reglages-libelle");
+    gtk_widget_set_halign (ls, GTK_ALIGN_START);
+    gtk_grid_attach (GTK_GRID (grille), ls, 0, r, 1, 1);
+    gtk_grid_attach (GTK_GRID (grille), ed->schema, 1, r++, 1, 1);
+
+    ed->options = champ (grille, r++, "Options", modele ? modele->options : NULL,
+                         "Facultatif (ex. vers=2.1,ro)");
+
+    gtk_box_append (GTK_BOX (boite), grille);
+
+    ed->automatique = gtk_check_button_new_with_label (
+        "Se connecter à l'ouverture de session");
+    gtk_check_button_set_active (GTK_CHECK_BUTTON (ed->automatique),
+                                 modele != NULL && modele->automatique);
+    gtk_box_append (GTK_BOX (boite), ed->automatique);
+
+    GtkWidget *aide = gtk_label_new (
+        "Le mot de passe est rangé dans le trousseau du bureau, jamais dans "
+        "un fichier. Laissé vide, celui déjà retenu est conservé.");
+    gtk_widget_add_css_class (aide, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (aide), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (aide), 52);
+    gtk_widget_set_halign (aide, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (boite), aide);
+
+    GtkWidget *barre = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_set_halign (barre, GTK_ALIGN_END);
+    GtkWidget *annuler = gtk_button_new_with_label ("Annuler");
+    GtkWidget *ok = gtk_button_new_with_label (modele != NULL ? "Enregistrer" : "Ajouter");
+    gtk_widget_add_css_class (ok, "suggested-action");
+    gtk_box_append (GTK_BOX (barre), annuler);
+    gtk_box_append (GTK_BOX (barre), ok);
+    gtk_box_append (GTK_BOX (boite), barre);
+
+    g_signal_connect (ed->protocole, "notify::selected",
+                      G_CALLBACK (on_protocole_change), ed);
+    g_signal_connect (ed->parcourir, "clicked", G_CALLBACK (on_parcourir), ed);
+    g_signal_connect (ed->partages, "notify::selected",
+                      G_CALLBACK (on_partage_choisi), ed);
+    g_signal_connect (annuler, "clicked", G_CALLBACK (on_editeur_annule), ed);
+    g_signal_connect_data (ok, "clicked", G_CALLBACK (on_editeur_valide),
+                           ed, editeur_free, 0);
+
+    /* Pose l'etat des champs conditionnels avant le premier affichage. */
+    on_protocole_change (G_OBJECT (ed->protocole), NULL, ed);
+
+    gtk_window_set_child (GTK_WINDOW (ed->fenetre), boite);
+    gtk_window_present (GTK_WINDOW (ed->fenetre));
+}
+
+/* --- actions sur une ligne --------------------------------------------- */
+static void
+on_fini_rafraichir (const Lecteur *l, GError *erreur, gpointer data)
+{
+    (void) data;
+    if (erreur != NULL) {
+        GtkAlertDialog *d = gtk_alert_dialog_new ("« %s » : opération impossible", l->nom);
+        gtk_alert_dialog_set_detail (d, erreur->message);
+        gtk_alert_dialog_show (d, reseau_fenetre ? GTK_WINDOW (reseau_fenetre) : NULL);
+        g_object_unref (d);
+    }
+    reseau_rafraichir ();
+}
+
+static void
+on_basculer (GtkButton *b, gpointer data)
+{
+    (void) b;
+    const Lecteur *l = data;
+    if (reseau_est_connecte (l))
+        reseau_deconnecter (l, on_fini_rafraichir, NULL);
+    else
+        reseau_connecter (l, NULL, FALSE, on_fini_rafraichir, NULL);
+}
+
+static void
+on_modifier (GtkButton *b, gpointer data)
+{
+    (void) b;
+    ouvrir_editeur ((const Lecteur *) data);
+}
+
+static void
+on_supprime_confirme (GObject *src, GAsyncResult *res, gpointer data)
+{
+    Lecteur *l = data;
+    int choix = gtk_alert_dialog_choose_finish (GTK_ALERT_DIALOG (src), res, NULL);
+
+    if (choix != 1) {          /* 0 = Annuler, 1 = Supprimer */
+        lecteur_free (l);
+        return;
+    }
+
+    /* Deconnecter d'abord : un montage dont plus rien ne porte la
+     * declaration ne se retrouve plus dans l'interface, et il faudrait un
+     * terminal pour s'en defaire. */
+    if (reseau_est_connecte (l))
+        reseau_deconnecter (l, NULL, NULL);
+
+    /* Le secret part avec le lecteur. Un mot de passe orphelin dans le
+     * trousseau ne se retrouve jamais, et personne ne pense a l'y chercher. */
+    reseau_secret_effacer (l);
+
+    g_autoptr(GPtrArray) lecteurs = reseau_charger ();
+    for (guint i = 0; i < lecteurs->len; i++) {
+        if (g_strcmp0 (((Lecteur *) g_ptr_array_index (lecteurs, i))->id, l->id) == 0) {
+            g_ptr_array_remove_index (lecteurs, i);
+            break;
+        }
+    }
+
+    g_autoptr(GError) err = NULL;
+    if (!reseau_enregistrer (lecteurs, &err))
+        g_warning ("suppression non enregistrée : %s", err->message);
+
+    lecteur_free (l);
+    reseau_rafraichir ();
+}
+
+static void
+on_supprimer (GtkButton *b, gpointer data)
+{
+    (void) b;
+    const Lecteur *l = data;
+
+    GtkAlertDialog *d = gtk_alert_dialog_new ("Supprimer « %s » ?", l->nom);
+    gtk_alert_dialog_set_detail (d,
+        "La déclaration et le mot de passe retenu seront effacés. "
+        "Rien n'est supprimé sur le serveur.");
+    const char *boutons[] = { "Annuler", "Supprimer", NULL };
+    gtk_alert_dialog_set_buttons (d, boutons);
+    gtk_alert_dialog_set_cancel_button (d, 0);
+    gtk_alert_dialog_set_default_button (d, 0);
+    gtk_alert_dialog_choose (d, reseau_fenetre ? GTK_WINDOW (reseau_fenetre) : NULL,
+                             NULL, on_supprime_confirme, lecteur_copie (l));
+    g_object_unref (d);
+}
+
+static void
+on_ajouter (GtkButton *b, gpointer data)
+{
+    (void) b; (void) data;
+    ouvrir_editeur (NULL);
+}
+
+/* --- la liste ----------------------------------------------------------- */
+static void
+reseau_rafraichir (void)
+{
+    if (reseau_liste_boite == NULL)
+        return;
+
+    GtkWidget *enfant;
+    while ((enfant = gtk_widget_get_first_child (reseau_liste_boite)) != NULL)
+        gtk_box_remove (GTK_BOX (reseau_liste_boite), enfant);
+
+    GPtrArray *lecteurs = reseau_charger ();
+
+    if (lecteurs->len == 0) {
+        GtkWidget *vide = gtk_label_new (
+            "Aucun lecteur déclaré. « Ajouter un lecteur » pour commencer.");
+        gtk_widget_add_css_class (vide, "reglages-detail");
+        gtk_widget_set_halign (vide, GTK_ALIGN_START);
+        gtk_box_append (GTK_BOX (reseau_liste_boite), vide);
+        g_ptr_array_unref (lecteurs);
+        return;
+    }
+
+    for (guint i = 0; i < lecteurs->len; i++) {
+        Lecteur *l = g_ptr_array_index (lecteurs, i);
+        gboolean connecte = reseau_est_connecte (l);
+
+        GtkWidget *rangee = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+        gtk_widget_add_css_class (rangee, "reglages-ligne");
+
+        GtkWidget *textes = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_set_hexpand (textes, TRUE);
+
+        GtkWidget *nom = gtk_label_new (l->nom);
+        gtk_widget_add_css_class (nom, "reglages-libelle");
+        gtk_widget_set_halign (nom, GTK_ALIGN_START);
+        gtk_box_append (GTK_BOX (textes), nom);
+
+        g_autofree char *detail = g_strdup_printf (
+            "%s · %s%s%s · %s%s",
+            reseau_protocole_nom (l->protocole),
+            l->serveur, *l->partage ? "/" : "", l->partage,
+            etat_texte (l),
+            l->automatique ? " · à l'ouverture de session" : "");
+        GtkWidget *d = gtk_label_new (detail);
+        gtk_widget_add_css_class (d, "reglages-detail");
+        gtk_widget_set_halign (d, GTK_ALIGN_START);
+        gtk_label_set_wrap (GTK_LABEL (d), TRUE);
+        gtk_label_set_max_width_chars (GTK_LABEL (d), 46);
+        gtk_box_append (GTK_BOX (textes), d);
+        gtk_box_append (GTK_BOX (rangee), textes);
+
+        GtkWidget *actions = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+        gtk_widget_set_valign (actions, GTK_ALIGN_CENTER);
+
+        GtkWidget *bascule = gtk_button_new_with_label (connecte ? "Déconnecter"
+                                                                 : "Connecter");
+        GtkWidget *modif = gtk_button_new_from_icon_name ("document-edit-symbolic");
+        gtk_widget_set_tooltip_text (modif, "Modifier");
+        GtkWidget *supp = gtk_button_new_from_icon_name ("user-trash-symbolic");
+        gtk_widget_set_tooltip_text (supp, "Supprimer");
+
+        /* Chaque bouton porte SA copie du lecteur : la liste sera liberee au
+         * retour de cette fonction, et un pointeur dans le tableau
+         * deviendrait pendouillant des le premier rafraichissement. */
+        g_object_set_data_full (G_OBJECT (bascule), "lecteur", lecteur_copie (l),
+                                (GDestroyNotify) lecteur_free);
+        g_object_set_data_full (G_OBJECT (modif), "lecteur", lecteur_copie (l),
+                                (GDestroyNotify) lecteur_free);
+        g_object_set_data_full (G_OBJECT (supp), "lecteur", lecteur_copie (l),
+                                (GDestroyNotify) lecteur_free);
+
+        g_signal_connect (bascule, "clicked", G_CALLBACK (on_basculer),
+                          g_object_get_data (G_OBJECT (bascule), "lecteur"));
+        g_signal_connect (modif, "clicked", G_CALLBACK (on_modifier),
+                          g_object_get_data (G_OBJECT (modif), "lecteur"));
+        g_signal_connect (supp, "clicked", G_CALLBACK (on_supprimer),
+                          g_object_get_data (G_OBJECT (supp), "lecteur"));
+
+        gtk_box_append (GTK_BOX (actions), bascule);
+        gtk_box_append (GTK_BOX (actions), modif);
+        gtk_box_append (GTK_BOX (actions), supp);
+        gtk_box_append (GTK_BOX (rangee), actions);
+
+        gtk_box_append (GTK_BOX (reseau_liste_boite), rangee);
+    }
+    g_ptr_array_unref (lecteurs);
+}
+
+static void
+on_volet_reseau_detruit (GtkWidget *w, gpointer data)
+{
+    (void) w; (void) data;
+    reseau_ne_plus_surveiller (NULL);
+    reseau_liste_boite = NULL;
+    reseau_fenetre     = NULL;
+}
+
+static GtkWidget *
+construire_reseau (ShellConfig *cfg, GtkWidget *window)
+{
+    (void) cfg;
+    reseau_fenetre = window;
+
+    GtkWidget *pile = gtk_box_new (GTK_ORIENTATION_VERTICAL, 14);
+    gtk_widget_add_css_class (pile, "reglages-pile");
+
+    GtkWidget *c = carte ("Lecteurs réseau");
+
+    reseau_liste_boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+    gtk_box_append (GTK_BOX (c), reseau_liste_boite);
+
+    GtkWidget *ajouter = gtk_button_new_with_label ("Ajouter un lecteur…");
+    gtk_widget_set_halign (ajouter, GTK_ALIGN_START);
+    gtk_widget_set_margin_top (ajouter, 6);
+    g_signal_connect (ajouter, "clicked", G_CALLBACK (on_ajouter), NULL);
+    gtk_box_append (GTK_BOX (c), ajouter);
+    gtk_box_append (GTK_BOX (pile), c);
+
+    GtkWidget *info = carte ("Comment cela fonctionne");
+    GtkWidget *t = gtk_label_new (
+        "Un lecteur connecté devient un dossier ordinaire, sous "
+        "/run/claude-os/reseau. Il apparaît dans le volet latéral de Fichiers, "
+        "et toutes les applications le voient — le terminal, Chromium et ses "
+        "boîtes « Enregistrer sous » comprises.\n\n"
+        "Les mots de passe sont rangés dans le trousseau du bureau. Le fichier "
+        "~/.config/claude-os/lecteurs ne contient rien de secret.\n\n"
+        "Les montages vivent dans /run : un redémarrage les efface, et aucun "
+        "point de montage mort ne s'accumule.");
+    gtk_widget_add_css_class (t, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (t), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (t), 56);
+    gtk_widget_set_halign (t, GTK_ALIGN_START);
+    gtk_box_append (GTK_BOX (info), t);
+    gtk_box_append (GTK_BOX (pile), info);
+
+    reseau_rafraichir ();
+
+    /* Le panneau suit l'etat reel : un lecteur connecte depuis « Fichiers »
+     * pendant que cette fenetre est ouverte doit s'y voir. */
+    reseau_surveiller ((ReseauChangeFunc) reseau_rafraichir, NULL);
+
+    /* Et il se debranche en partant. Le moniteur des montages est un
+     * singleton qui survit au volet : sans cela, un partage demonte apres la
+     * fermeture de la fenetre appellerait reseau_rafraichir() sur une boite
+     * detruite. Le meme piege que dans fichiers-lieux.c, et la meme
+     * reponse. */
+    g_signal_connect (pile, "destroy", G_CALLBACK (on_volet_reseau_detruit), NULL);
+
+    return pile;
+}
+
 typedef GtkWidget *(*ConstructeurVolet) (ShellConfig *cfg, GtkWidget *window);
 
 typedef struct {
@@ -421,6 +1087,7 @@ static GtkWidget *construire_energie   (ShellConfig *cfg, GtkWidget *window);
 static const Volet VOLETS[] = {
     { "interface", "Interface", "preferences-desktop-symbolic", construire_interface },
     { "energie",   "Énergie",   "battery-good-symbolic",        construire_energie   },
+    { "reseau",    "Lecteurs réseau", "network-server-symbolic",  construire_reseau    },
     { NULL, NULL, NULL, NULL },
 };
 
@@ -544,8 +1211,9 @@ construire_interface (ShellConfig *cfg, GtkWidget *window)
  * ------------------------------------------------------------------------- */
 static void set_e_active   (ShellConfig *c, gpointer d) { c->energie_active = GPOINTER_TO_INT (d); }
 static void set_e_niveau   (ShellConfig *c, gpointer d) { c->energie_niveau = GPOINTER_TO_INT (d); }
+static void set_e_opacite  (ShellConfig *c, gpointer d) { c->energie_opacite = GPOINTER_TO_INT (d); }
 
-static void set_trav_pre   (ShellConfig *c, gpointer d) { c->energie_travail_preavis  = GPOINTER_TO_INT (d); }
+static void set_preavis    (ShellConfig *c, gpointer d) { c->energie_preavis = GPOINTER_TO_INT (d); }
 static void set_trav_att   (ShellConfig *c, gpointer d) { c->energie_travail_attenuer = GPOINTER_TO_INT (d); }
 static void set_trav_ete   (ShellConfig *c, gpointer d) { c->energie_travail_eteindre = GPOINTER_TO_INT (d); }
 
@@ -561,7 +1229,8 @@ static void set_nom_sus    (ShellConfig *c, gpointer d) { c->energie_nomade_susp
  * transformer un pointeur de fonction en gpointer -- ce que le C ne
  * garantit pas. */
 static const Modif M_NIVEAU   = set_e_niveau;
-static const Modif M_TRAV_PRE = set_trav_pre;
+static const Modif M_OPACITE  = set_e_opacite;
+static const Modif M_PREAVIS  = set_preavis;
 static const Modif M_TRAV_ATT = set_trav_att;
 static const Modif M_TRAV_ETE = set_trav_ete;
 static const Modif M_AUTO_ATT = set_auto_att;
@@ -582,6 +1251,11 @@ static const char *DUREES_NOM[] = { "Jamais", "30 s", "45 s", "1 min", "2 min",
 static const int   PREAVIS[]     = { 0, 5, 10, 20, 30 };
 static const char *PREAVIS_NOM[] = { "Aucun", "5 s", "10 s", "20 s", "30 s" };
 #define PREAVIS_N ((int) G_N_ELEMENTS (PREAVIS))
+
+static const int   OPACITES[]     = { 25, 40, 55, 70, 85, 100 };
+static const char *OPACITES_NOM[] = { "25 %", "40 %", "55 %", "70 %",
+                                      "85 %", "Opaque" };
+#define OPACITES_N ((int) G_N_ELEMENTS (OPACITES))
 
 static const int   NIVEAUX[]     = { 10, 20, 30, 40, 50 };
 static const char *NIVEAUX_NOM[] = { "10 %", "20 %", "30 %", "40 %", "50 %" };
@@ -666,6 +1340,23 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
            "Assez bas pour que le gain soit réel, assez haut pour qu'on "
            "comprenne que la machine s'assoupit plutôt qu'elle ne s'éteint.",
            dd_niv);
+
+    /* Le bon équilibre dépend du fond d'écran et de la vue de chacun :
+     * trop discret le cadran ne prévient pas, trop marqué il occupe le
+     * coin de l'écran. Un curseur coûte moins cher qu'un arbitrage. */
+    /* Le compte a rebours a quitte la carte « Travail » : il vaut pour les
+     * trois modes. La gene qu'il corrige -- l'ecran qui baisse au milieu
+     * d'un paragraphe -- depend de ce qu'on fait, pas du profil choisi. */
+    ligne (ecran, "Compte à rebours",
+           "Un cadran s'affiche en bas à droite avant chaque baisse d'écran, "
+           "atténuation et extinction. Il ne prend ni le clavier ni le clic : "
+           "un geste suffit à l'annuler.",
+           LISTE_PREAVIS (cfg->energie_preavis, &M_PREAVIS));
+
+    ligne (ecran, "Opacité du compte à rebours",
+           "Le cadran prend la largeur de la barre d'état.",
+           liste (OPACITES, OPACITES_NOM, OPACITES_N,
+                  cfg->energie_opacite, &M_OPACITE));
     gtk_box_append (GTK_BOX (pile), ecran);
 
     /* --- Un volet par mode, dans l'ordre de la table --- */
@@ -678,10 +1369,6 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
     gtk_label_set_max_width_chars (GTK_LABEL (d_trav), 46);
     gtk_widget_set_halign (d_trav, GTK_ALIGN_START);
     gtk_box_append (GTK_BOX (trav), d_trav);
-    ligne (trav, "Compte à rebours",
-           "Affiché avant l'atténuation, en bas à droite. Il ne prend ni le "
-           "clavier ni le clic : un geste suffit à l'annuler.",
-           LISTE_PREAVIS (cfg->energie_travail_preavis, &M_TRAV_PRE));
     ligne (trav, "Atténuer après", NULL,
            LISTE_DUREE (cfg->energie_travail_attenuer, &M_TRAV_ATT));
     ligne (trav, "Éteindre l'écran après", NULL,

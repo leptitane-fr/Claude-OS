@@ -2,6 +2,7 @@
 
 #include <gtk/gtk.h>
 #include <gtk4-layer-shell.h>
+#include <math.h>            /* cos, sin, ceil */
 
 /* Hauteur laissee libre en bas pour le dock et la barre d'etat. Meme
  * raisonnement que BANDE_DOCK dans launcher.c : le dock mesure 88 px, on
@@ -20,15 +21,35 @@
  * Cent images par mise en veille, et rien entre deux. */
 #define PAS_MS      100
 
+/* DOUZE GRADUATIONS, comme un cadran d'horloge.
+ *
+ * Assez pour que la disparition soit progressive, assez peu pour qu'on la
+ * remarque : avec un preavis de dix secondes, un trait s'eteint toutes les
+ * huit dixiemes de seconde. Soixante graduations auraient fait un
+ * scintillement, quatre un clignotement. */
+#define RAYONS      12
+
+/* Proportions du soleil, en fraction du rayon total. Le disque central ne
+ * bouge JAMAIS : c'est lui qui dit « lumiere », et une lumiere qui se
+ * retracte donnerait le message inverse de celle qui s'eteint d'un coup. */
+#define DISQUE      0.42
+#define RAYON_DEB   0.58
+#define RAYON_FIN   0.92
+#define TRAIT       0.085
+
 static struct {
     GtkWidget *fenetre;
     GtkWidget *cadran;
     GtkWidget *reference;   /* la pilule de la barre : donne la largeur     */
+    GtkCssProvider *style;  /* opacite engendree -- voir opacite_appliquer  */
+    int        opacite;     /* pourcent ; 0 = pas encore regle              */
     guint      minuterie;
     gint64     debut;      /* horloge monotone, en microsecondes            */
     double     total;      /* duree demandee, en secondes                   */
     double     fraction;   /* 1,0 au depart, 0,0 a l'echeance               */
 } P;
+
+static void opacite_appliquer (void);
 
 static void
 dessiner (GtkDrawingArea *aire, cairo_t *cr, int largeur, int hauteur,
@@ -36,33 +57,49 @@ dessiner (GtkDrawingArea *aire, cairo_t *cr, int largeur, int hauteur,
 {
     (void) data;
     double cx = largeur / 2.0, cy = hauteur / 2.0;
-    double r  = MIN (largeur, hauteur) / 2.0 - 3.0;
 
-    /* La couleur vient de la feuille de style, propriete « color » de
-     * .preavis-cadran. Le theme clair et le theme sombre la posent chacun,
-     * et le cadran suit sans qu'une seule teinte soit ecrite ici. */
+    /* AUCUNE MARGE INTERIEURE, ET C'EST LE POINT.
+     *
+     * Le cadran partage son bord droit avec la pilule de la barre d'etat et
+     * doit faire exactement sa largeur. Or GTK donne ici la zone de CONTENU,
+     * bordure CSS deja deduite : une encoche de 3 px dans le trace rendait
+     * un disque de 164 px pour une allocation de 172, ceint d'un anneau
+     * clair -- visiblement plus etroit que la barre. */
+    double R = MIN (largeur, hauteur) / 2.0;
+
+    /* La couleur ET son alpha viennent de la feuille de style, propriete
+     * « color » de .preavis-cadran, que preavis_opacite() reecrit. */
     GdkRGBA c;
     gtk_widget_get_color (GTK_WIDGET (aire), &c);
 
-    /* La piste : ce que le disque etait au depart. Sans elle, un disque aux
-     * trois quarts vide ne dirait pas s'il se vide ou s'il se remplit. */
-    /* 0,3 de l'opacite du disque, et non une valeur absolue : le disque
-     * etant lui-meme translucide, une piste fixe deviendrait plus marquee
-     * que ce qu'elle accompagne. */
-    cairo_set_source_rgba (cr, c.red, c.green, c.blue, c.alpha * 0.30);
-    cairo_arc (cr, cx, cy, r, 0, 2 * G_PI);
-    cairo_fill (cr);
-
-    if (P.fraction <= 0.0)
-        return;
-
-    /* Le fromage. Depart en haut et sens horaire : c'est le sens d'une
-     * aiguille, donc celui qu'on lit sans y penser. */
+    /* Le soleil : un disque plein, immobile. */
     cairo_set_source_rgba (cr, c.red, c.green, c.blue, c.alpha);
-    cairo_move_to (cr, cx, cy);
-    cairo_arc (cr, cx, cy, r, -G_PI_2, -G_PI_2 + 2 * G_PI * P.fraction);
-    cairo_close_path (cr);
+    cairo_arc (cr, cx, cy, R * DISQUE, 0, 2 * G_PI);
     cairo_fill (cr);
+
+    /* Les graduations : rayons de soleil et graduations de chronometre a la
+     * fois. Elles s'eteignent une a une, dans le sens horaire depuis midi --
+     * celui d'une aiguille, donc celui qu'on lit sans y penser.
+     *
+     * Une graduation eteinte n'est pas effacee : il en reste une trace tres
+     * faible. Sans elle, un cadran a deux traits ne dirait pas s'il en a
+     * perdu dix ou s'il n'en a jamais eu que deux. Meme raison que la piste
+     * du disque precedent. */
+    int restants = (int) ceil (P.fraction * RAYONS);
+    cairo_set_line_width (cr, R * TRAIT);
+    cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND);
+
+    for (int i = 0; i < RAYONS; i++) {
+        double a = -G_PI_2 + (2 * G_PI * i) / RAYONS;
+        double ca = cos (a), sa = sin (a);
+        gboolean vif = (i < restants);
+
+        cairo_set_source_rgba (cr, c.red, c.green, c.blue,
+                               vif ? c.alpha : c.alpha * 0.16);
+        cairo_move_to (cr, cx + ca * R * RAYON_DEB, cy + sa * R * RAYON_DEB);
+        cairo_line_to (cr, cx + ca * R * RAYON_FIN, cy + sa * R * RAYON_FIN);
+        cairo_stroke (cr);
+    }
 }
 
 static gboolean
@@ -138,12 +175,58 @@ construire (void)
 
     gtk_window_set_child (GTK_WINDOW (P.fenetre), P.cadran);
     g_signal_connect (P.fenetre, "realize", G_CALLBACK (on_realise), NULL);
+    opacite_appliquer ();
 }
 
 void
 shell_preavis_reference (GtkWidget *pilule)
 {
     P.reference = pilule;
+}
+
+/* L'OPACITE EST ENGENDREE, LES TEINTES NE LE SONT PAS.
+ *
+ * On reecrit « alpha(...) » autour des couleurs du theme plutot que des
+ * valeurs RVB : le cadran suit donc les themes clair et sombre comme
+ * avant, et seul son degre de presence change.
+ *
+ * Le fond est un cran plus opaque que le disque -- rapport fixe, non
+ * reglable. Un fond plus transparent que ce qu'il porte laisserait lire le
+ * bureau a travers le disque, ce qui brouille la seule chose qu'on demande
+ * a ce cadran : etre lisible d'un coup d'oeil. */
+static void
+opacite_appliquer (void)
+{
+    if (P.opacite <= 0)
+        return;
+
+    double a = CLAMP (P.opacite, 5, 100) / 100.0;
+    double fond = MIN (a * 1.3, 1.0);
+
+    g_autofree char *css = g_strdup_printf (
+        ".preavis-cadran {"
+        "  color: alpha(@accent, %.3f);"
+        "  background-color: alpha(@surface, %.3f);"
+        "}", a, fond);
+
+    if (P.style == NULL) {
+        P.style = gtk_css_provider_new ();
+        gtk_style_context_add_provider_for_display (
+            gdk_display_get_default (), GTK_STYLE_PROVIDER (P.style),
+            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
+    }
+    gtk_css_provider_load_from_string (P.style, css);
+}
+
+void
+shell_preavis_opacite (int pourcent)
+{
+    if (pourcent == P.opacite)
+        return;
+    P.opacite = pourcent;
+    opacite_appliquer ();
+    if (P.cadran != NULL)
+        gtk_widget_queue_draw (P.cadran);
 }
 
 /* La largeur est relue A CHAQUE AFFICHAGE, pas retenue : la pilule change
@@ -170,6 +253,11 @@ shell_preavis_montrer (int secondes)
     construire ();
     int d = cote ();
     gtk_widget_set_size_request (P.cadran, d, d);
+    /* Le cadran partage son bord droit avec la pilule de la barre : un
+     * ecart de quelques pixels se voit immediatement. Tracer le diametre
+     * demande evite d'avoir a le deduire d'une capture d'ecran. */
+    g_message ("preavis : cadran de %d px (reference %d px)", d,
+               P.reference != NULL ? gtk_widget_get_width (P.reference) : -1);
     P.total    = secondes;
     P.debut    = g_get_monotonic_time ();
     P.fraction = 1.0;
