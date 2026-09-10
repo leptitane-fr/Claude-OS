@@ -63,6 +63,24 @@ struct _VideoMoteur {
     gboolean          saut_demande;
     double            saut_cible;
 
+    /* CHANGER DE PISTE SE FAIT DANS LE FIL DE DECODAGE, PAS DEPUIS
+     * L'INTERFACE.
+     *
+     * La premiere version rouvrait le decodeur depuis le fil principal,
+     * apres une pause. Mais une pause n'arrete pas le fil de decodage : il
+     * continue jusqu'a remplir sa file, puis s'endort. Pendant ce temps il
+     * lit m->dec_a et m->piste_s -- que l'on etait en train de remplacer.
+     * Une course qui ne se voit pas a la lecture, ne se reproduit pas a
+     * volonte, et ne se manifeste que par un plantage au changement de
+     * langue.
+     *
+     * Le fil est le seul a toucher aux decodeurs. L'interface pose une
+     * demande, exactement comme pour un saut. */
+    gboolean          piste_a_demandee;
+    int               piste_a_cible;
+    gboolean          piste_s_demandee;
+    int               piste_s_cible;
+
     /* LE RATTRAPAGE : ou l'on veut vraiment arriver.
      *
      * Un demux ne sait sauter que sur une image-cle. Avec un groupe d'images
@@ -202,7 +220,13 @@ static gchar *texte_de_ass(const char *ass)
 /* ---------------------------------------------------------------- horloge */
 
 /* L'heure de reference. L'audio quand il y en a ; sinon une horloge
- * monotone que la pause arrete. Jamais un compteur d'images : il derive. */
+ * monotone que la pause arrete. Jamais un compteur d'images : il derive.
+ *
+ * A APPELER LE VERROU TENU. horloge_secours et depart_secours sont ecrits
+ * par le fil de decodage lors d'un saut ; les lire sans le verrou depuis le
+ * fil principal est une course, meme si elle passe inapercue sur cette
+ * machine. Le verrou de l'audio est pris a l'interieur de celui-ci, jamais
+ * l'inverse : c'est ce qui garde l'ordre des verrous constant. */
 static double horloge(VideoMoteur *m)
 {
     double t;
@@ -236,7 +260,42 @@ static void horloge_poser(VideoMoteur *m, double t)
     if (m->depart_secours != 0) m->depart_secours = g_get_monotonic_time();
 }
 
+/* Declarees ici : le fil de decodage les appelle, et elles sont definies
+ * plus bas avec le reste de l'ouverture. */
+static gboolean ouvrir_sous_titres(VideoMoteur *m, int piste);
+static gboolean ouvrir_piste(VideoMoteur *m, int piste, gboolean video,
+                             GError **erreur);
+
 /* ------------------------------------------------------------- le decodage */
+
+/* LE REECHANTILLONNEUR SUIT LE DECODEUR, ET NON L'INVERSE.
+ *
+ * Il convertit de ce que rend la piste courante vers ce que la sortie
+ * attend -- taux et nombre de canaux fixes a l'ouverture. Changer de piste
+ * sans le reconfigurer donnerait du bruit si la nouvelle piste n'a ni le
+ * meme taux ni le meme format, ce qui est courant entre une VF et une VO. */
+static gboolean configurer_reech(VideoMoteur *m)
+{
+    if (!m->dec_a) return FALSE;
+
+    swr_free(&m->reech);
+
+    AVChannelLayout sortie;
+    av_channel_layout_default(&sortie, m->canaux_audio);
+    int r = swr_alloc_set_opts2(&m->reech, &sortie, AV_SAMPLE_FMT_FLT,
+                                m->taux_audio, &m->dec_a->ch_layout,
+                                m->dec_a->sample_fmt, m->dec_a->sample_rate,
+                                0, NULL);
+    av_channel_layout_uninit(&sortie);
+
+    if (r < 0 || swr_init(m->reech) < 0) {
+        g_message("video-moteur : rééchantillonneur indisponible pour cette "
+                  "piste -- lecture sans son");
+        swr_free(&m->reech);
+        return FALSE;
+    }
+    return TRUE;
+}
 
 static void vider_file(VideoMoteur *m)
 {
@@ -332,17 +391,57 @@ static gpointer fil_decodage(gpointer data)
          * fichier atteinte. C'est ici que se realise le « zero reveil » --
          * pas de delai, pas de scrutation, une condition. */
         while (!m->quitte && !m->saut_demande &&
+               !m->piste_a_demandee && !m->piste_s_demandee &&
                (g_queue_get_length(m->images) >= FILE_IMAGES || m->demux_fini))
             g_cond_wait(&m->cond, &m->verrou);
 
         if (m->quitte) { g_mutex_unlock(&m->verrou); break; }
 
-        gboolean saut = m->saut_demande;
+        gboolean saut  = m->saut_demande;
         double   cible = m->saut_cible;
-        m->saut_demande = FALSE;
+        gboolean chg_a = m->piste_a_demandee;
+        int      cible_a = m->piste_a_cible;
+        gboolean chg_s = m->piste_s_demandee;
+        int      cible_s = m->piste_s_cible;
+        m->saut_demande = m->piste_a_demandee = m->piste_s_demandee = FALSE;
         g_mutex_unlock(&m->verrou);
 
+        if (chg_s) {
+            g_mutex_lock(&m->verrou);
+            avcodec_free_context(&m->dec_s);
+            m->piste_s = -1;
+            g_queue_clear_full(m->st_file, sous_titre_libre);
+            g_clear_pointer(&m->st_courant, g_free);
+            m->st_change = TRUE;
+            g_mutex_unlock(&m->verrou);
+            if (cible_s >= 0) ouvrir_sous_titres(m, cible_s);
+        }
+
+        if (chg_a && cible_a >= 0 && cible_a != m->piste_a) {
+            AVCodecContext *ancien = m->dec_a;
+            int ancienne = m->piste_a;
+            GError *e = NULL;
+            m->dec_a = NULL;
+            m->piste_a = cible_a;
+            if (!ouvrir_piste(m, cible_a, FALSE, &e) || !configurer_reech(m)) {
+                /* On remet ce qui marchait : une piste illisible ne doit pas
+                 * laisser le lecteur muet et sans explication. */
+                g_message("video-moteur : piste audio %d inutilisable (%s) -- "
+                          "on garde la précédente", cible_a,
+                          e ? e->message : "rééchantillonneur");
+                g_clear_error(&e);
+                avcodec_free_context(&m->dec_a);
+                m->dec_a   = ancien;
+                m->piste_a = ancienne;
+                configurer_reech(m);
+            } else {
+                avcodec_free_context(&ancien);
+                if (m->audio) video_audio_vider(m->audio);
+            }
+        }
+
         if (saut) { executer_saut(m, cible); continue; }
+        if (chg_a || chg_s) continue;
 
         int r = av_read_frame(m->fmt, paquet);
         if (r == AVERROR_EOF) {
@@ -656,16 +755,7 @@ VideoMoteur *video_moteur_ouvrir(const char *chemin,
         m->canaux_audio = m->dec_a->ch_layout.nb_channels;
         if (m->canaux_audio > 2) m->canaux_audio = 2;   /* la machine est stereo */
 
-        AVChannelLayout sortie;
-        av_channel_layout_default(&sortie, m->canaux_audio);
-        r = swr_alloc_set_opts2(&m->reech, &sortie, AV_SAMPLE_FMT_FLT,
-                                m->taux_audio, &m->dec_a->ch_layout,
-                                m->dec_a->sample_fmt, m->dec_a->sample_rate,
-                                0, NULL);
-        av_channel_layout_uninit(&sortie);
-        if (r < 0 || swr_init(m->reech) < 0) {
-            g_message("video-moteur : rééchantillonneur indisponible -- "
-                      "lecture sans son");
+        if (!configurer_reech(m)) {
             m->piste_a = -1;
             avcodec_free_context(&m->dec_a);
         } else {
@@ -791,28 +881,48 @@ void video_moteur_sourdine(VideoMoteur *m, gboolean muet)
 gboolean  video_moteur_a_video(VideoMoteur *m) { return m && m->dec_v; }
 int       video_moteur_largeur(VideoMoteur *m) { return m ? m->largeur : 0; }
 int       video_moteur_hauteur(VideoMoteur *m) { return m ? m->hauteur : 0; }
-gint64    video_moteur_images_sautees(VideoMoteur *m) { return m ? m->sautees : 0; }
-gint64    video_moteur_images_vues(VideoMoteur *m)    { return m ? m->vues : 0; }
-double    video_moteur_ecart_max(VideoMoteur *m) { return m ? m->ecart_max : 0.0; }
-double    video_moteur_ecart_moyen(VideoMoteur *m)
-{
-    return (m && m->vues) ? m->ecart_somme / m->vues : 0.0;
-}
+/* Les compteurs sont ecrits sous verrou par video_moteur_image_due ; on les
+ * lit de meme, pour que le bilan ne puisse pas tomber sur une valeur a
+ * moitie ecrite. */
+#define COMPTEUR(nom, expr, type)                 \
+    type nom(VideoMoteur *m) {                    \
+        if (!m) return 0;                         \
+        g_mutex_lock(&m->verrou);                 \
+        type v = (expr);                          \
+        g_mutex_unlock(&m->verrou);               \
+        return v;                                 \
+    }
+COMPTEUR(video_moteur_images_sautees, m->sautees, gint64)
+COMPTEUR(video_moteur_images_vues,    m->vues,    gint64)
+COMPTEUR(video_moteur_ecart_max,      m->ecart_max, double)
+COMPTEUR(video_moteur_ecart_moyen,    m->vues ? m->ecart_somme / m->vues : 0.0, double)
+#undef COMPTEUR
 gboolean  video_moteur_materiel(VideoMoteur *m) { return m && m->en_materiel; }
 const char *video_moteur_codec(VideoMoteur *m)
 {
     return m && m->nom_codec ? m->nom_codec : "";
 }
 
-double video_moteur_position(VideoMoteur *m)
+/* Le verrou tenu. Existe pour que les appelants qui l'ont deja -- il y en a
+ * deux -- ne le reprennent pas : GMutex n'est pas reentrant, et le faire
+ * bloquerait le lecteur pour toujours. */
+static double position_verrouillee(VideoMoteur *m)
 {
-    if (!m) return 0.0;
     /* En pause, l'horloge de secours ne bouge plus et l'audio ne rend rien :
      * c'est la derniere image montree qui dit la position. Sans cela, la
      * glissiere reculerait d'une demi-seconde a chaque pause. */
     if (m->etat != VIDEO_LIT) return m->pts_dernier;
     double t = horloge(m);
     return m->duree > 0 ? CLAMP(t, 0.0, m->duree) : MAX(t, 0.0);
+}
+
+double video_moteur_position(VideoMoteur *m)
+{
+    if (!m) return 0.0;
+    g_mutex_lock(&m->verrou);
+    double p = position_verrouillee(m);
+    g_mutex_unlock(&m->verrou);
+    return p;
 }
 
 void video_moteur_sauter(VideoMoteur *m, double secondes)
@@ -838,15 +948,26 @@ void video_moteur_avancer(VideoMoteur *m, double delta)
 
 /* ---------------------------------------------------------- sous-titres */
 
-const char *video_moteur_sous_titre(VideoMoteur *m, gboolean *change)
+/* RENDRE UNE COPIE, ET NON LE POINTEUR INTERNE.
+ *
+ * La premiere version rendait m->st_courant. Le fil de decodage le libere
+ * sur un saut : entre le retour de cette fonction et l'affichage de
+ * l'etiquette, la chaine pouvait donc disparaitre sous l'interface. Un
+ * usage apres liberation qui ne se produit qu'en sautant pile au changement
+ * de replique, c'est-a-dire jamais pendant les essais et un jour chez
+ * l'utilisateur.
+ *
+ * La copie ne coute rien : elle n'a lieu que lorsque le texte CHANGE, soit
+ * une fois par replique et non a chaque image. */
+gboolean video_moteur_sous_titre(VideoMoteur *m, gchar **texte)
 {
-    if (change) *change = FALSE;
-    if (!m) return NULL;
+    if (texte) *texte = NULL;
+    if (!m) return FALSE;
 
-    double t = video_moteur_position(m);
     const char *voulu = NULL;
 
     g_mutex_lock(&m->verrou);
+    double t = position_verrouillee(m);
 
     /* On jette ce qui est perime AVANT de chercher : la file est courte, et
      * elle ne doit pas enfler sur un film de deux heures. */
@@ -868,11 +989,11 @@ const char *video_moteur_sous_titre(VideoMoteur *m, gboolean *change)
         m->st_change  = TRUE;
     }
 
-    if (change) *change = m->st_change;
+    gboolean change = m->st_change;
     m->st_change = FALSE;
-    const char *rendu = m->st_courant;
+    if (change && texte) *texte = g_strdup(m->st_courant);
     g_mutex_unlock(&m->verrou);
-    return rendu;
+    return change;
 }
 
 /* -------------------------------------------------------------- pistes */
@@ -897,16 +1018,25 @@ GPtrArray *video_moteur_pistes(VideoMoteur *m, VideoTypePiste type)
     if (!m) return liste;
 
     if (type == VIDEO_PISTE_SOUS_TITRE) {
+        g_mutex_lock(&m->verrou);
+        gboolean aucun_actif = (m->piste_s < 0);
+        g_mutex_unlock(&m->verrou);
+
         VideoPiste *aucun = g_new0(VideoPiste, 1);
         aucun->index  = -1;
         aucun->nom    = g_strdup("Aucun");
-        aucun->active = (m->piste_s < 0);
+        aucun->active = aucun_actif;
         g_ptr_array_add(liste, aucun);
     }
 
     enum AVMediaType voulu = (type == VIDEO_PISTE_AUDIO)
                            ? AVMEDIA_TYPE_AUDIO : AVMEDIA_TYPE_SUBTITLE;
     int rang = 1;
+
+    /* piste_a et piste_s sont remplacees par le fil de decodage : la liste
+     * doit etre batie d'un seul tenant, sinon elle peut cocher deux pistes
+     * ou aucune. */
+    g_mutex_lock(&m->verrou);
     for (unsigned i = 0; i < m->fmt->nb_streams; i++) {
         AVStream *f = m->fmt->streams[i];
         if (f->codecpar->codec_type != voulu) continue;
@@ -918,62 +1048,32 @@ GPtrArray *video_moteur_pistes(VideoMoteur *m, VideoTypePiste type)
                                                 : ((int)i == m->piste_s);
         g_ptr_array_add(liste, p);
     }
+    g_mutex_unlock(&m->verrou);
     return liste;
 }
 
-/* CHANGER DE PISTE, C'EST ROUVRIR PUIS SE RECALER.
+/* CHANGER DE PISTE, C'EST DEMANDER PUIS SE RECALER.
  *
- * On arrete le fil, on remplace le decodeur, on relance, et on saute a la
- * position courante. Le saut n'est pas un detail : sans lui, le nouveau
- * decodeur repart la ou le demux se trouve, c'est-a-dire quelques secondes
- * plus loin que ce qu'on regarde. */
+ * Le saut qui suit n'est pas un detail : sans lui, le nouveau decodeur
+ * repart la ou le demux se trouve, c'est-a-dire quelques secondes plus loin
+ * que ce qu'on regarde. */
 void video_moteur_choisir_piste(VideoMoteur *m, VideoTypePiste type, int index)
 {
     if (!m) return;
     double ou = video_moteur_position(m);
-    gboolean lisait = (m->etat == VIDEO_LIT);
 
-    if (lisait) video_moteur_pause(m);
-
-    /* Le fil dort forcement : il attend une file pleine ou une demande.
-     * On le reveille apres, une fois le decodeur en place. */
     g_mutex_lock(&m->verrou);
-
-    if (type == VIDEO_PISTE_SOUS_TITRE) {
-        avcodec_free_context(&m->dec_s);
-        m->piste_s = -1;
-        g_queue_clear_full(m->st_file, sous_titre_libre);
-        g_clear_pointer(&m->st_courant, g_free);
-        m->st_change = TRUE;
-        g_mutex_unlock(&m->verrou);
-        if (index >= 0) ouvrir_sous_titres(m, index);
+    if (type == VIDEO_PISTE_AUDIO) {
+        m->piste_a_demandee = TRUE;
+        m->piste_a_cible    = index;
     } else {
-        g_mutex_unlock(&m->verrou);
-        if (index == m->piste_a || index < 0) {
-            if (lisait) video_moteur_lire(m);
-            return;
-        }
-        GError *e = NULL;
-        AVCodecContext *ancien = m->dec_a;
-        int ancienne = m->piste_a;
-        m->dec_a = NULL;
-        m->piste_a = index;
-        if (!ouvrir_piste(m, index, FALSE, &e)) {
-            /* On remet ce qui marchait : une piste illisible ne doit pas
-             * laisser le lecteur muet et sans explication. */
-            g_message("video-moteur : piste audio %d inutilisable (%s) -- "
-                      "on garde la precedente", index, e ? e->message : "?");
-            g_clear_error(&e);
-            m->dec_a = ancien;
-            m->piste_a = ancienne;
-        } else {
-            avcodec_free_context(&ancien);
-            if (m->audio) video_audio_vider(m->audio);
-        }
+        m->piste_s_demandee = TRUE;
+        m->piste_s_cible    = index;
     }
-
-    video_moteur_sauter(m, ou);
-    if (lisait) video_moteur_lire(m);
+    m->saut_demande = TRUE;
+    m->saut_cible   = ou;
+    g_cond_broadcast(&m->cond);
+    g_mutex_unlock(&m->verrou);
 }
 
 /* ------------------------------------------------- l'image due maintenant */
@@ -982,10 +1082,10 @@ AVFrame *video_moteur_image_due(VideoMoteur *m)
 {
     if (!m || !m->dec_v) return NULL;
 
-    double maintenant = horloge(m);
     AVFrame *choisie = NULL;
 
     g_mutex_lock(&m->verrou);
+    double maintenant = horloge(m);
 
     while (TRUE) {
         AVFrame *tete = g_queue_peek_head(m->images);

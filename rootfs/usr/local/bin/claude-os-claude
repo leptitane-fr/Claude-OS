@@ -13,6 +13,22 @@
 # Le drapeau n'est PAS codé en dur : il n'est ajouté que si une session Wayland
 # est effectivement là. Le même lanceur reste donc valable sous la session X11,
 # où le forcer empêcherait au contraire l'application de démarrer.
+#
+# LE TROUSSEAU
+# Chromium choisit son magasin de secrets d'après XDG_CURRENT_DESKTOP. Ici
+# c'est « labwc », qu'il ne reconnaît pas : il retombe sur « basic_text », le
+# stockage en clair. Electron en conclut que le chiffrement est indisponible,
+# et l'application refuse d'écrire son jeton de session — le journal le dit à
+# chaque démarrage, « isEncryptionAvailable=false ... backend=basic_text ».
+#
+# Le trousseau est pourtant là : gnome-keyring tourne avec son composant
+# secrets, org.freedesktop.secrets est sur le bus de session, et
+# pam_gnome_keyring le déverrouille à l'ouverture de session par greetd.
+# Personne ne le lui avait désigné. Mesuré le 10 septembre 2026 : avec ce
+# drapeau, l'avertissement disparaît du journal.
+#
+# Un appelant qui désigne déjà un magasin garde le sien — claude-os-clone le
+# fait pour ses profils.
 #-------------------------------------------------------------------------------
 set -u
 
@@ -23,7 +39,12 @@ BIN=/usr/bin/claude-desktop
 	exit 127
 }
 
+TROUSSEAU=--password-store=gnome-libsecret
+case " $* " in
+	*" --password-store="*) TROUSSEAU='' ;;
+esac
+
 if [ -n "${WAYLAND_DISPLAY:-}" ]; then
-	exec "$BIN" --ozone-platform=wayland "$@"
+	exec "$BIN" ${TROUSSEAU:+"$TROUSSEAU"} --ozone-platform=wayland "$@"
 fi
-exec "$BIN" "$@"
+exec "$BIN" ${TROUSSEAU:+"$TROUSSEAU"} "$@"

@@ -8,3 +8,4 @@ Terminal=false
 Categories=Utility;Network;
 StartupNotify=true
 StartupWMClass=Claude
+MimeType=x-scheme-handler/claude;

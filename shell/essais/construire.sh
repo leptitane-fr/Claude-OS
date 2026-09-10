@@ -22,6 +22,22 @@ mkdir -p "$BUILD"
 # construction bridée fausserait la mesure qu'ils servent à faire.
 COMMUN=(-std=gnu11 -O2 -g -Wall -Wextra -Wno-unused-parameter)
 
+# LES DEUX DETECTEURS, ET ILS NE CHERCHENT PAS LA MEME CHOSE.
+#
+#   CLAUDE_OS_SANITIZE=adresse   usages apres liberation, debordements
+#   CLAUDE_OS_SANITIZE=fils      courses entre les trois fils du lecteur
+#
+# Le second est le plus utile ici : le lecteur fait tourner un fil de
+# decodage, le fil temps reel de PipeWire et le fil principal de GTK sur les
+# memes structures. Une course ne se voit ni a la lecture, ni a la
+# compilation, et ne se reproduit pas a volonte.
+case "${CLAUDE_OS_SANITIZE:-}" in
+	adresse) COMMUN+=(-fsanitize=address -fno-omit-frame-pointer) ;;
+	fils)    COMMUN+=(-fsanitize=thread  -fno-omit-frame-pointer) ;;
+	"")      ;;
+	*) echo "CLAUDE_OS_SANITIZE : « adresse » ou « fils »" >&2; exit 2 ;;
+esac
+
 construire() {
 	local nom="$1"; shift
 	local src="$ICI/$nom.c"

@@ -119,10 +119,14 @@ void         video_moteur_choisir_piste(VideoMoteur *m, VideoTypePiste type,
 
 /* ------------------------------------------------------- les sous-titres */
 
-/* Le texte a afficher MAINTENANT, ou NULL. La chaine appartient au moteur.
- * « change » dit s'il differe du precedent -- l'interface ne redessine
- * qu'alors, ce qui evite de reecrire quatre-vingts fois par seconde une
- * ligne qui reste a l'ecran deux secondes. */
-const char  *video_moteur_sous_titre(VideoMoteur *m, gboolean *change);
+/* Rend TRUE si le sous-titre a CHANGE depuis le dernier appel, et pose alors
+ * dans « texte » une chaine neuve (a liberer) ou NULL s'il n'y a plus rien a
+ * afficher. L'interface ne redessine qu'alors : une replique reste deux
+ * secondes a l'ecran, soit cent soixante battements pendant lesquels il n'y
+ * a rien a faire.
+ *
+ * La chaine est une COPIE, et c'est deliberé : le fil de decodage libere le
+ * texte courant sur un saut. */
+gboolean     video_moteur_sous_titre(VideoMoteur *m, gchar **texte);
 
 #endif

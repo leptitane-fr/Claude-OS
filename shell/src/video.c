@@ -97,6 +97,83 @@ typedef struct {
 
 static void bilan(App *a, const char *quand);
 static void act_sourdine(GtkButton *b, gpointer u);
+static void reveler(App *a, gboolean visible, gboolean momentane);
+
+/* ---------------------------------------------------- reprendre ou l'on en
+
+   REPRENDRE, MAIS PAS N'IMPORTE QUAND. Trois garde-fous, et chacun evite un
+   agacement precis :
+
+     -- rien sous deux minutes de film : on ne « reprend » pas un clip ;
+     -- rien sous trente secondes de lecture : ouvrir, fermer aussitot et
+        retrouver le film a huit secondes est plus genant qu'utile ;
+     -- rien dans la derniere minute : un film fini doit se rouvrir au
+        debut, pas sur son generique.
+
+   Le fichier est un simple GKeyFile dans l'etat de session, pas dans la
+   configuration : c'est une trace d'usage, pas un reglage. Il est borne a
+   cent entrees, faute de quoi il grossirait indefiniment sur une machine
+   qui sert de lecteur. */
+
+#define REPRISE_FILM_MIN   120.0
+#define REPRISE_DEBUT_MIN   30.0
+#define REPRISE_FIN_MARGE   60.0
+#define REPRISE_MAX_ENTREES  100
+
+static gchar *chemin_reprises(void)
+{
+    return g_build_filename(g_get_user_state_dir(), "claude-os",
+                            "video-reprises", NULL);
+}
+
+static void reprise_ecrire(const char *fichier, double position, double duree)
+{
+    if (duree < REPRISE_FILM_MIN) return;
+
+    g_autofree gchar *chemin = chemin_reprises();
+    g_autoptr(GKeyFile) kf = g_key_file_new();
+    g_key_file_load_from_file(kf, chemin, G_KEY_FILE_NONE, NULL);
+
+    g_autofree gchar *cle = g_uri_escape_string(fichier, NULL, TRUE);
+
+    if (position < REPRISE_DEBUT_MIN || position > duree - REPRISE_FIN_MARGE) {
+        g_key_file_remove_key(kf, "reprises", cle, NULL);
+    } else {
+        g_key_file_set_double(kf, "reprises", cle, position);
+    }
+
+    /* Bornage : au-dela de cent entrees on repart d'un fichier propre
+     * plutot que d'inventer une politique de peremption pour une trace
+     * d'usage sans importance. */
+    gsize n = 0;
+    g_autofree gchar **cles = g_key_file_get_keys(kf, "reprises", &n, NULL);
+    if (n > REPRISE_MAX_ENTREES) {
+        g_key_file_remove_group(kf, "reprises", NULL);
+        g_key_file_set_double(kf, "reprises", cle, position);
+    }
+
+    g_autofree gchar *dossier = g_path_get_dirname(chemin);
+    g_mkdir_with_parents(dossier, 0700);
+
+    GError *e = NULL;
+    if (!g_key_file_save_to_file(kf, chemin, &e)) {
+        /* INVARIANT N.4 : meme une trace sans importance dit quand elle
+         * echoue. Un disque plein se remarque ici avant ailleurs. */
+        g_message("video : reprise non enregistrée (%s)", e ? e->message : "?");
+        g_clear_error(&e);
+    }
+}
+
+static double reprise_lire(const char *fichier)
+{
+    g_autofree gchar *chemin = chemin_reprises();
+    g_autoptr(GKeyFile) kf = g_key_file_new();
+    if (!g_key_file_load_from_file(kf, chemin, G_KEY_FILE_NONE, NULL))
+        return 0.0;
+
+    g_autofree gchar *cle = g_uri_escape_string(fichier, NULL, TRUE);
+    return g_key_file_get_double(kf, "reprises", cle, NULL);
+}
 
 /* ------------------------------------------------------------- affichage */
 
@@ -154,9 +231,8 @@ static void rafraichir_glissiere(App *a, double position)
  * battements pendant lesquels il n'y a rien a faire. */
 static void rafraichir_sous_titre(App *a)
 {
-    gboolean change = FALSE;
-    const char *texte = video_moteur_sous_titre(a->moteur, &change);
-    if (!change) return;
+    g_autofree gchar *texte = NULL;
+    if (!video_moteur_sous_titre(a->moteur, &texte)) return;
 
     if (texte && *texte) {
         gtk_label_set_markup(GTK_LABEL(a->st_texte), texte);
@@ -180,6 +256,20 @@ static gboolean sur_battement(GtkWidget *w, GdkFrameClock *horloge, gpointer u)
     }
 
     AVFrame *trame = video_moteur_image_due(a->moteur);
+
+    /* IMAGE_DUE PEUT AVOIR TOUT DEMOLI SOUS NOS PIEDS.
+     *
+     * C'est elle qui constate la fin du fichier et appelle le rappel de
+     * fin ; celui-ci peut fermer la fenetre, ce qui detruit les widgets et
+     * ferme le moteur. Tout ce qui suit toucherait alors des pointeurs
+     * morts. Trouve le 10 septembre 2026 en laissant une mire aller
+     * jusqu'au bout : « gtk_label_set_text: assertion GTK_IS_LABEL failed »,
+     * juste apres le bilan. */
+    if (!a->moteur) {
+        av_frame_free(&trame);
+        return G_SOURCE_REMOVE;
+    }
+
     if (trame) {
         GdkTexture *t = video_image_texture(&a->images, trame,
                                             gtk_widget_get_display(a->image));
@@ -574,6 +664,9 @@ static gboolean sur_fermeture(GtkWindow *w, gpointer u)
     (void) w;
     App *a = u;
     bilan(a, "fermeture");
+    if (a->moteur && a->fichier)
+        reprise_ecrire(a->fichier, video_moteur_position(a->moteur),
+                       video_moteur_duree(a->moteur));
     battement_selon(a, FALSE);
     if (a->retrait) { g_source_remove(a->retrait); a->retrait = 0; }
     /* Le moteur ferme son fil AVANT que la fenetre ne disparaisse : un fil
@@ -812,6 +905,17 @@ static void ouvrir_fichier(App *a, const char *chemin)
     if (!video_moteur_a_audio(a->moteur)) {
         gtk_widget_set_sensitive(a->b_son, FALSE);
         gtk_widget_set_sensitive(a->volume, FALSE);
+    }
+
+    double reprise = reprise_lire(chemin);
+    if (reprise > 0.0 && reprise < duree - REPRISE_FIN_MARGE) {
+        video_moteur_sauter(a->moteur, reprise);
+        /* On MONTRE la reprise plutot que de la subir : les commandes
+         * apparaissent quelques secondes, la glissiere dit ou l'on est, et
+         * revenir au debut est a un geste. Un lecteur qui repart au milieu
+         * sans rien dire donne l'impression de s'etre trompe de fichier. */
+        reveler(a, TRUE, TRUE);
+        g_message("video : reprise à %.0f s", reprise);
     }
 
     a->depart = g_get_monotonic_time();

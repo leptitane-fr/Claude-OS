@@ -97,8 +97,45 @@ static void compteur(uint8_t *Y, int stride, int64_t n)
     }
 }
 
+/* La meme mire, sur seize bits par composante quand il le faut. Le motif est
+ * identique : c'est ce qui permet de comparer une lecture 8 bits et une
+ * lecture 10 bits sans changer autre chose que la profondeur. */
+static void image16(AVFrame *f, int64_t n)
+{
+    for (int y = 0; y < HAUTEUR; y++) {
+        uint16_t *l = (uint16_t *)(f->data[0] + y * f->linesize[0]);
+        for (int x = 0; x < LARGEUR; x++) {
+            int v = ((x * 2 + y + (int)(n * 7)) >> 2) & 0xff;
+            l[x] = (uint16_t)((64 + (v * 876) / 255));   /* plage 64-940 */
+        }
+    }
+    for (int y = 0; y < HAUTEUR / 2; y++) {
+        uint16_t *u = (uint16_t *)(f->data[1] + y * f->linesize[1]);
+        uint16_t *v = (uint16_t *)(f->data[2] + y * f->linesize[2]);
+        for (int x = 0; x < LARGEUR / 2; x++) {
+            u[x] = (uint16_t)(512 + (int)(240 * sin((x + n * 3) * 0.01)));
+            v[x] = (uint16_t)(512 + (int)(240 * cos((y - n * 2) * 0.013)));
+        }
+    }
+    if (n % CADENCE == 0)
+        for (int y = 140; y < 380; y++) {
+            uint16_t *l = (uint16_t *)(f->data[0] + y * f->linesize[0]);
+            for (int x = 32; x < 272; x++) l[x] = 940;
+        }
+    for (int bit = 0; bit < 16; bit++) {
+        int allume = (n >> (15 - bit)) & 1;
+        int x0 = 32 + bit * 72;
+        for (int y = 32; y < 96; y++) {
+            uint16_t *l = (uint16_t *)(f->data[0] + y * f->linesize[0]);
+            for (int x = x0; x < x0 + 64; x++) l[x] = allume ? 940 : 64;
+        }
+    }
+}
+
 static void image(AVFrame *f, int64_t n)
 {
+    if (f->format == AV_PIX_FMT_YUV420P10LE) { image16(f, n); return; }
+
     /* Diagonales mouvantes : du detail reel a coder, a chaque image
      * different, sans etre du bruit -- le bruit ferait exploser le debit et
      * ne ressemblerait a aucune video reelle. */
@@ -191,8 +228,15 @@ int main(int argc, char **argv)
     if (secondes < 1) fatal("duree invalide", 0);
 
     const char *enc_nom = strcmp(codec, "hevc") == 0 ? "libx265"
+                        : strcmp(codec, "hevc10") == 0 ? "libx265"
                         : strcmp(codec, "vp9")  == 0 ? "libvpx-vp9"
                         : "libx264";
+
+    /* DIX BITS, ET CE N'EST PAS UN CAPRICE : c'est le seul cas qui produit
+     * du P010 au lieu du NV12, donc le seul qui eprouve la traduction de
+     * disposition dmabuf du lecteur pour ce format. Un chemin jamais
+     * execute est un chemin dont on ne sait rien. */
+    gboolean dix_bits = strcmp(codec, "hevc10") == 0;
 
     AVFormatContext *fmt = NULL;
     int r = avformat_alloc_output_context2(&fmt, NULL, NULL, sortie);
@@ -212,7 +256,7 @@ int main(int argc, char **argv)
 
     v.ctx->width      = LARGEUR;
     v.ctx->height     = HAUTEUR;
-    v.ctx->pix_fmt    = AV_PIX_FMT_YUV420P;
+    v.ctx->pix_fmt    = dix_bits ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
     v.ctx->time_base  = (AVRational){1, CADENCE};
     v.ctx->framerate  = (AVRational){CADENCE, 1};
     /* Un groupe d'images d'une seconde : c'est ce que fait une video du
@@ -294,8 +338,9 @@ int main(int argc, char **argv)
     int64_t total_img = (int64_t)secondes * CADENCE;
     int64_t total_ech = (int64_t)secondes * ECHANT;
 
-    fprintf(stderr, "fabrique-mire : %s, %d s, %s %dx%d@%d + AAC %d Hz\n",
-            sortie, secondes, enc_nom, LARGEUR, HAUTEUR, CADENCE, ECHANT);
+    fprintf(stderr, "fabrique-mire : %s, %d s, %s %s %dx%d@%d + AAC %d Hz\n",
+            sortie, secondes, enc_nom, dix_bits ? "10 bits" : "8 bits",
+            LARGEUR, HAUTEUR, CADENCE, ECHANT);
 
     /* ENTRELACEMENT A LA MAIN : on ecrit le flux qui est EN RETARD, sinon
      * av_interleaved_write_frame met tout en file et la memoire enfle --

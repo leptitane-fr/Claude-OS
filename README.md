@@ -73,6 +73,7 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`docs/07-journal-des-seances.md`](docs/07-journal-des-seances.md) | **Le fil du projet.** Ce qui a été fait séance par séance, ce qui a été mesuré, ce qui reste à faire — avec la marche à suivre proposée pour l'audio. |
 | [`docs/08-lecteurs-reseau.md`](docs/08-lecteurs-reseau.md) | **Les lecteurs réseau.** Pourquoi des montages du noyau et non gvfs (43 paquets contre 19, et un montage gvfs n'existe que pour GIO), comment l'interface évite de composer une commande privilégiée, ce qui a été mesuré sur le NAS, et ce qui n'est pas établi. |
 | [`docs/09-code-pin.md`](docs/09-code-pin.md) | **Le code PIN de l'écran de connexion.** Pourquoi le PIN déverrouille le mot de passe au lieu de le remplacer (c'est `pam_gnome_keyring` qui l'impose), le coffre Argon2id + AES-256-GCM et ce qui le protège, les paramètres mesurés sur MADOO, le clavier tactile — et, sans détour, **ce que ce confort retire à la sécurité au repos** sur un disque non chiffré. |
+| [`docs/10-clones-claude-desktop.md`](docs/10-clones-claude-desktop.md) | **Deux comptes Claude Desktop en même temps.** Pourquoi `--user-data-dir` et non `CLAUDE_USER_DATA_DIR` (l'application efface celle-ci en build packagé), ce que le cloisonnement sépare — l'état de l'application, pas les fichiers du dépôt —, et le piège du `cmdline` sans NUL qui faisait passer tout clone pour l'installation d'origine. |
 
 ### Installation
 

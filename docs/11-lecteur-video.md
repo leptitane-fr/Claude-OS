@@ -239,7 +239,86 @@ coûté au chemin sans copie** — 451 images sur 451 encore confiées au
 compositeur. Un `GtkGraphicsOffload` cesse d'être pris dès que son contenu est
 rogné ou recouvert ; la capsule est en dessous, pas au-dessus.
 
-## 11.7 Les huit règles d'énergie du lecteur
+## 11.7 Pistes, sous-titres, reprise — phase 3
+
+Un menu dans la capsule liste les **pistes audio** et les **sous-titres**,
+nommés par leur langue ou leur titre — « Piste 2 » à défaut. Changer de piste
+rouvre le décodeur puis **se recale sur la position courante** : sans ce
+recalage, le nouveau décodeur repart là où le démux se trouve, quelques
+secondes plus loin que ce qu'on regarde.
+
+Les sous-titres **ne s'activent pas d'office**, et le menu ne propose une
+section que s'il y a vraiment un choix à faire.
+
+**Mesuré, et ce n'était pas acquis :** l'étiquette de sous-titre posée sur
+l'image **ne coûte rien** au chemin sans copie — 296 images sur 296 encore
+confiées au compositeur, sous-titres affichés. Elle reste **cachée**, et non
+vide, tant qu'il n'y a rien à dire : un widget vide mais visible aurait suffi
+à faire renoncer GTK.
+
+**HEVC 10 bits vérifié.** C'est le seul format qui produit du **P010** au lieu
+du NV12, donc le seul qui éprouve cette branche de la traduction de
+disposition dmabuf — jamais exécutée avant. Mire 10 bits fabriquée pour
+l'occasion : décodage matériel, `fourcc P010`, 206 images sur 206 sans copie,
+image juste en capture.
+
+**Reprise à la position quittée**, avec trois garde-fous : rien sous deux
+minutes de film, rien sous trente secondes de lecture, rien dans la dernière
+minute. Et la reprise **se montre** — les commandes apparaissent quelques
+secondes, la glissière dit où l'on est. Un lecteur qui repart au milieu sans
+rien dire donne l'impression de s'être trompé de fichier.
+
+### Trois pièges payés sur les sous-titres, tous muets
+
+- **FFmpeg rend les sous-titres texte en ASS sous deux formes** : l'ancienne
+  avec `Dialogue:` en tête, l'actuelle sans. Neuf virgules avant le texte dans
+  un cas, **huit** dans l'autre. Ne traiter que la première affiche
+  `0,0,Default,,0,0,0,,seconde 3` à l'écran — le décodage est parfait, seule
+  la lecture du format est fausse.
+- **`end_display_time` est nul en Matroska** : la durée est dans le paquet.
+  Tomber sur le repli de trois secondes faisait se chevaucher trois
+  répliques, ce qui ressemble à un défaut de synchronisation.
+- **La mire écrivait ses sous-titres en bloc à la fin.** Ils se retrouvaient
+  physiquement en fin de fichier ; un lecteur séquentiel ne les rencontre
+  qu'après la vidéo entière. Le décodeur s'ouvrait, la piste était annoncée,
+  et l'écran restait vide sans la moindre erreur.
+
+### Ce que les détecteurs ont dit, et ce qu'ils n'ont pas pu dire
+
+`CLAUDE_OS_SANITIZE=adresse` (ou `fils`) devant `construire.sh`.
+
+**AddressSanitizer : rien**, sur un fichier joué en entier, sous-titres
+affichés, avec le parcours pause/reprise/sauts.
+
+**ThreadSanitizer est inutilisable tel quel sur ce code, et c'est une limite
+de l'outil, pas un résultat.** `GMutex` de GLib est bâti sur des futex que
+ThreadSanitizer ne sait pas voir : **tout** accès pourtant protégé par un
+verrou lui apparaît comme une course. Ses centaines d'avertissements ne
+distinguent donc pas le vrai du faux, et les premiers rapports portaient sur
+`gdbus` et `malloc` à l'intérieur de GLib.
+
+Sa lecture a tout de même servi : elle a poussé à relire les accès partagés
+un par un, et **trois vraies fautes** en sont sorties, qu'aucun essai
+n'aurait révélées :
+
+- `video_moteur_sous_titre()` rendait **le pointeur interne** du texte
+  courant. Le fil de décodage le libère sur un saut : entre le retour de la
+  fonction et l'affichage, la chaîne pouvait disparaître. Un usage après
+  libération qui ne se produit qu'en sautant pile au changement de réplique
+  — donc jamais pendant les essais, et un jour chez l'utilisateur. Rend
+  désormais une copie, et seulement quand le texte change.
+- La **position et l'horloge** étaient lues sans le verrou alors que le fil
+  de décodage les récrit à chaque saut.
+- **La liste des pistes** était bâtie sans le verrou pendant que le fil
+  pouvait remplacer la piste active : deux pistes cochées, ou aucune.
+
+Et un quatrième défaut, trouvé lui en laissant simplement un fichier aller
+**jusqu'au bout** : c'est `video_moteur_image_due()` qui constate la fin et
+appelle le rappel de fin, lequel peut fermer la fenêtre — donc détruire les
+widgets et le moteur — pendant que le battement continue de s'en servir.
+`gtk_label_set_text: assertion GTK_IS_LABEL failed`, juste après le bilan.
+
+## 11.8 Les huit règles d'énergie du lecteur
 
 1. **Zéro scrutation** — pas un minuteur périodique. L'horloge de l'interface
    est l'image présentée.
@@ -252,11 +331,12 @@ rogné ou recouvert ; la capsule est en dessous, pas au-dessus.
 7. Rien de résident : pas de démon, pas de vignettes, pas d'indexation.
 8. **Aucun chiffre annoncé sans mesure.**
 
-## 11.8 Les instruments, et comment s'en servir
+## 11.9 Les instruments, et comment s'en servir
 
 ```sh
 bash shell/essais/construire.sh                 # les deux programmes d'essai
-./shell/essais/build/fabrique-mire mire.mp4 60  # h264 (défaut) | hevc | vp9
+./shell/essais/build/fabrique-mire mire.mp4 60  # h264 (défaut) | hevc | hevc10 | vp9
+# Une sortie en .mkv ajoute une piste de sous-titres, une ligne par seconde.
 
 # Le chemin sans copie est-il pris ? Chercher « Attaching » :
 GDK_DEBUG=offload ./shell/essais/build/sonde-offload mire.mp4 --mode=offload
@@ -275,14 +355,14 @@ bash tools/mesure-conso.sh --tableau            # tous les relevés passés
 Les mires vivent dans `~/.local/share/claude-os/mires/` et ne sont pas dans le
 dépôt : elles se refabriquent.
 
-## 11.9 Ce qui reste à faire
+## 11.10 Ce qui reste à faire
 
 | Phase | Objet | État |
 |---|---|---|
 | 0 | Banc de mesure, sonde, choix d'architecture | **fait, mesuré** |
 | 1 | Noyau de lecture : démux, décodage, audio PipeWire, synchro | **fait, éprouvé au banc sans écran** |
 | 2 | L'interface : vidéo sans bordure, capsule, glissière au survol, tactile | **faite, vue en capture** |
-| 3 | Pistes, sous-titres, vitesse de lecture, reprise à la position | à écrire |
+| 3 | Pistes audio, sous-titres texte, reprise à la position | **fait, vu en capture** |
 | 4 | Campagne d'énergie **sur batterie**, réglages, conclusions | à faire |
 
 Points ouverts, à ne pas oublier :
@@ -303,6 +383,16 @@ Points ouverts, à ne pas oublier :
   la première chose à regarder quand l'écran sera disponible.
 - **La série en plein écran est à refaire** (§11.4), et la campagne
   d'autonomie reste entière — elle exige de débrancher.
+- **La vitesse de lecture n'est pas faite, et c'est délibéré.** La faire
+  correctement demande de conserver la hauteur du son — donc `atempo` de
+  libavfilter, donc une dépendance de plus. La faire en changeant le taux
+  d'échantillonnage coûterait une ligne et donnerait des voix de dessin
+  animé. À trancher avant de l'écrire.
+- **Les sous-titres graphiques** (PGS, VobSub) sont détectés et annoncés au
+  journal, pas affichés : ce sont des images, et cela demande un autre
+  chemin.
+- **VP9 et HEVC 8 bits** n'ont pas été éprouvés faute de temps d'encodage ;
+  ils empruntent le même chemin NV12 que H.264, déjà vérifié.
 - **AV1** n'a pas encore été mesuré sur cette machine ; il sera le pire cas.
 - **La reprise après suspension est cassée** sur MADOO (voir `CLAUDE.md`) : un
   plantage au réveil ne devra pas être imputé au lecteur.

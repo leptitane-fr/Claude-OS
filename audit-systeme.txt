@@ -1,0 +1,218 @@
+
+[1;34m── 1. Les applications, et le lancement depuis le dock[0m
+  épinglées dans shell.conf      claude-desktop chromium foot chrome-eigpmdhekjlgjgcppnanaanbdmnlnagl-Default claude-os-fichiers 
+
+  Pour chaque épinglée : le binaire, et le .desktop que le dock cherche.
+  Un .desktop introuvable donne une icône générique qui ne lance rien.
+  claude-desktop                     desktop=/home/stef/.local/share/applications/claude-desktop.desktop bin=/usr/local/bin/claude-os-claude
+  chromium                           desktop=/usr/share/applications/chromium.desktop       bin=/usr/bin/chromium
+  foot                               desktop=/usr/share/applications/foot.desktop           bin=/usr/bin/foot
+  chrome-eigpmdhekjlgjgcppnanaanbdmnlnagl-Default desktop=/home/stef/.local/share/applications/chrome-eigpmdhekjlgjgcppnanaanbdmnlnagl-Default.desktop bin=/usr/bin/chromium
+  claude-os-fichiers                 desktop=/usr/share/applications/claude-os-fichiers.desktop bin=/usr/bin/claude-os-fichiers
+
+  --- les applications que ce système est censé avoir ---
+  chromium           installé 152.0.7977.82-1~deb13u1 /usr/bin/chromium
+  claude-desktop     installé 1.46388.2          /usr/bin/claude-desktop
+  mousepad           installé 0.6.3-1            /usr/bin/mousepad
+  foot               installé 1.21.0-2           /usr/bin/foot
+
+  entrées .desktop visibles       22 dans /usr/share/applications
+    dont les nôtres               2
+
+  --- journal du shell (c'est là que le dock écrit ses erreurs) ---
+      === 10:39:17 : claude-os-fond ===
+      === 10:39:17 : claude-os-dock ===
+      === 10:39:17 : claude-os-status ===
+      
+      (claude-os-status:1181): Gtk-WARNING **: 10:39:17.449: Unable to acquire the address of the accessibility bus: GDBus.Error:org.
+      (claude-os-fond:1177): Gtk-WARNING **: 10:39:17.449: Unable to acquire the address of the accessibility bus: GDBus.Error:org.frfreedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files. If you are attempting to rueedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files. If you are attempting to run n GTK without a11y support, GTK_A11Y should be set to 'none'.
+      GTK without a11y support, GTK_A11Y should be set to 'none'.
+      
+      (claude-os-dock:1179): Gtk-WARNING **: 10:39:17.449: Unable to acquire the address of the accessibility bus: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files. If you are attempting to run GTK without a11y support, GTK_A11Y should be set to 'none'.
+      
+      (claude-os-lanceur:1234): Gtk-WARNING **: 10:39:23.713: Unable to acquire the address of the accessibility bus: GDBus.Error:org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files. If you are attempting to run GTK without a11y support, GTK_A11Y should be set to 'none'.
+
+[1;34m── 1 bis. L'écran de connexion[0m
+  greetd installé                 0.10.3-4
+  greetd activé                   disabled
+non
+  lightdm installé                1.32.0-6+b2
+  lightdm activé                  enabled
+  claude-os-connexion              /usr/bin/claude-os-connexion
+  serveur X en mémoire            non ✓
+  --- /etc/greetd/config.toml ---
+      # Claude OS — ouverture de session.
+      #
+      # greetd ne dessine rien. Il lance labwc avec une configuration NUE — aucun
+      # raccourci clavier, aucun menu — qui lance claude-os-connexion. Une fois le
+      # mot de passe accepté, greetd remplace le tout par la session.
+      
+      [terminal]
+      # Le premier terminal virtuel, celui qu'on voit au démarrage.
+      vt = 1
+      
+      [default_session]
+      command = "labwc -C /etc/xdg/labwc-greeter"
+      user = "_greetd"
+
+[1;34m── 2. Ce qui tourne[0m
+  mémoire utilisée               834 Mo sur 3802
+
+  --- les 20 processus les plus gourmands, en mémoire RÉELLE (PSS) ---
+            Mo     PID COMMANDE
+          59,9    1234 claude-os-lance
+          58,9    1179 claude-os-dock
+          57,4    1181 claude-os-statu
+          45,8    1104 labwc
+          44,1    1177 claude-os-fond
+           9,3    1105 wireplumber
+           3,7    1103 pipewire
+           2,9    1287 bash
+           2,3    1106 pipewire-pulse
+           2,2    1197 gvfsd
+           1,2    1163 xdg-permission-
+           1,0    1101 dbus-daemon
+           0,6    1293 bash
+           0,4    1364 bash
+           0,4    1294 tee
+           0,3    1368 awk
+           0,3    1367 head
+           0,3    1365 sort
+         290,9          — total des 20
+
+  --- services système actifs ---
+      bluetooth.service
+      cron.service
+      dbus.service
+      getty@tty1.service
+      lightdm.service
+      NetworkManager.service
+      ssh.service
+      systemd-journald.service
+      systemd-logind.service
+      systemd-timesyncd.service
+      systemd-udevd.service
+      udisks2.service
+      user@1000.service
+      wpa_supplicant.service
+
+  --- services utilisateur actifs ---
+      dbus.service
+      gvfs-daemon.service
+      pipewire-pulse.service
+      pipewire.service
+      wireplumber.service
+      xdg-permission-store.service
+
+[1;34m── 3. Ce qui démarre tout seul[0m
+  --- /etc/xdg/autostart : lancé par TOUTE session de bureau ---
+      gnome-keyring-pkcs11.desktop                   Certificate and Key Storage
+      gnome-keyring-secrets.desktop                  Secret Storage Service
+      gnome-keyring-ssh.desktop                      SSH Key Agent
+      xdg-user-dirs.desktop                          User folders update
+
+  --- ~/.config/autostart ---
+
+  --- unités utilisateur activées ---
+      gcr-ssh-agent.service
+      gnome-keyring-daemon.service
+      pipewire-pulse.service
+      pipewire.service
+      wireplumber.service
+      xdg-desktop-portal-rewrite-launchers.service
+      dirmngr.socket
+      gcr-ssh-agent.socket
+      gnome-keyring-daemon.socket
+      gpg-agent-browser.socket
+      gpg-agent-extra.socket
+      gpg-agent-ssh.socket
+      gpg-agent.socket
+      keyboxd.socket
+      pipewire-pulse.socket
+      pipewire.socket
+      ssh-agent.socket
+
+  --- services système activés au démarrage ---
+      anacron.service
+      bluetooth.service
+      console-setup.service
+      cron.service
+      e2scrub_reap.service
+      getty@.service
+      grub-common.service
+      keyboard-setup.service
+      lightdm.service
+      networking.service
+      NetworkManager-dispatcher.service
+      NetworkManager.service
+      ssh.service
+      sshd-keygen.service
+      systemd-pstore.service
+      systemd-timesyncd.service
+      tlp.service
+      udisks2.service
+      wpa_supplicant.service
+      wtmpdb-update-boot.service
+
+[1;34m── 4. Ce qui est installé[0m
+  paquets installés               978
+  occupation                       5,6G utilisés sur 54G
+
+  --- les 40 plus gros, hors bibliothèques ---
+         559,2 Mo  claude-desktop                         optional
+         307,3 Mo  chromium                               optional
+         183,0 Mo  papirus-icon-theme                     optional
+         105,8 Mo  linux-image-6.12.107+deb13-amd64       optional
+         105,6 Mo  linux-image-6.12.94+deb13-amd64        optional
+          66,9 Mo  gcc-14-x86-64-linux-gnu                optional
+          63,9 Mo  chromium-common                        optional
+          48,0 Mo  git                                    optional
+          40,6 Mo  mesa-libgallium                        optional
+          36,1 Mo  g++-14-x86-64-linux-gnu                optional
+          34,2 Mo  firmware-sof-signed                    optional
+          33,7 Mo  cpp-14-x86-64-linux-gnu                optional
+          28,3 Mo  firmware-intel-graphics                optional
+          22,6 Mo  iso-codes                              optional
+          20,8 Mo  fonts-inter                            optional
+          20,4 Mo  intel-microcode                        standard
+          19,5 Mo  perl-modules-5.40                      optional
+          18,7 Mo  firmware-realtek                       optional
+          18,0 Mo  coreutils                              required
+          17,3 Mo  intel-media-va-driver                  optional
+          17,2 Mo  grub-common                            optional
+          15,7 Mo  binutils-common                        optional
+          15,4 Mo  locales                                standard
+          15,2 Mo  fonts-urw-base35                       optional
+          14,2 Mo  kio6                                   optional
+          13,1 Mo  adwaita-icon-theme                     optional
+          12,9 Mo  firmware-misc-nonfree                  optional
+          11,5 Mo  gir1.2-glib-2.0-dev                    optional
+          11,3 Mo  fonts-lato                             optional
+          10,8 Mo  fonts-noto-color-emoji                 optional
+          10,7 Mo  linux-libc-dev                         optional
+          10,0 Mo  udev                                   important
+           9,7 Mo  systemd                                important
+           9,3 Mo  grub-efi-amd64-signed                  optional
+           9,3 Mo  grub-efi-amd64-unsigned                optional
+           8,7 Mo  ifrench-gut                            optional
+           7,9 Mo  gstreamer1.0-plugins-good              optional
+           7,6 Mo  perl-base                              required
+           7,6 Mo  network-manager                        optional
+           7,1 Mo  console-setup-linux                    optional
+
+  --- environnements de bureau étrangers ---
+      gnome-keyring                dépendants installés : AUCUN — purgeable
+      kde-cli-tools                dépendants installés : claude-desktop 
+      kde-cli-tools-data           dépendants installés : kde-cli-tools 
+      kded6                        dépendants installés : kio6 
+
+  --- paquets marqués « installés automatiquement » et sans dépendant ---
+      aucun ✓
+
+[1;34m── 5. Éléments de bureau étrangers, côté fichiers[0m
+  sessions X proposées            lightdm-xsession.desktop 
+  sessions Wayland                 claude-os.desktop labwc.desktop 
+  x-terminal-emulator              /usr/bin/foot
+  x-www-browser                    /usr/bin/chromium
+
+Rapport écrit dans : audit-systeme.txt — le transmettre tel quel.

@@ -31,6 +31,27 @@ noyau. C'est un effet en mémoire, dans `/run` : le démarrage suivant repart
 sans SSH, sans rien à défaire. Générateur : `/etc/grub.d/11_claude-os-ssh`,
 source dans `rootfs/`.
 
+**Deux comptes Claude Desktop peuvent tourner en même temps** (10 septembre
+2026). `claude-os-clone` donne un profil complet par clone —
+`--user-data-dir` pour l'application, `CLAUDE_CONFIG_DIR` pour Claude Code —
+et **ne modifie rien de l'existant** : l'installation d'origine garde son
+lanceur, son profil et son autostart, un clone s'ajoute à côté. Deux instances
+ont été vues tourner en parallèle. **Personne ne s'est encore connecté sur un
+second compte**, et le coût en mémoire n'a pas été mesuré — 4 Go soudés, un
+quart par instance. Détail dans
+[`docs/10`](docs/10-clones-claude-desktop.md).
+
+**Le trousseau n'était désigné à personne** (10 septembre 2026). Chromium
+choisit son magasin de secrets d'après `XDG_CURRENT_DESKTOP` ; sous `labwc`
+qu'il ne reconnaît pas, il retombait sur `basic_text` — stockage en clair — et
+Claude Desktop refusait alors d'écrire son jeton de session, à chaque
+démarrage depuis l'installation. `gnome-keyring` tournait pourtant, déverrouillé
+par PAM. `claude-os-claude` porte désormais
+`--password-store=gnome-libsecret`, et les trois chemins d'ouverture — menu,
+démarrage de session, liens `claude://` — passent tous par lui. **Vérifié dans
+le journal** : l'avertissement a disparu. Une reconnexion unique de l'origine
+est possible au prochain lancement.
+
 **`--deployer` ne suffit pas pour ce fichier** : il copie `rootfs/` vers `/`,
 il ne régénère pas le menu. Après tout déploiement qui touche
 `etc/grub.d/` ou `etc/default/grub.d/`, il faut `sudo update-grub` — sans
@@ -375,6 +396,59 @@ le glisser, l'élastique au bout de la liste, la molette, le pavé, le zoom et l
 pleine résolution, une rafale de navigation puis la fermeture en plein
 décodage — sans une erreur mémoire. Au doigt, voir le paragraphe précédent.
 
+### Le lecteur vidéo
+
+Écrit le 10 septembre 2026 : `claude-os-video`, `shell/src/video*.c`. Détail
+complet et tous les chiffres dans [`docs/11`](docs/11-lecteur-video.md).
+
+**FFmpeg, et le choix a été MESURÉ avant d'être fait.** Les codecs sont dans
+`libavcodec` : une fois le lecteur installé, il n'y a plus jamais de « codec
+manquant ». libmpv aurait tiré 151 paquets contre 40, et sa sortie
+`dmabuf-wayland` ne s'embarque pas dans une fenêtre GTK.
+
+**L'image n'est jamais recopiée** : VA-API → `av_hwframe_map` → dmabuf →
+`GdkDmabufTexture` → `GtkGraphicsOffload`. Mire 1080p30, repos à 2,92 W :
+
+| offload | dmabuf | logiciel | **copie** |
+|---|---|---|---|
+| 3,24 W | 3,30 W | 4,08 W | **5,45 W** |
+
+**Le chemin naïf — décodage matériel PUIS `av_hwframe_transfer_data` — coûte
+huit fois le chemin retenu**, et davantage que tout décoder au logiciel.
+Relire une surface tuilée depuis la mémoire du GPU est lent et cher sans
+apparaître comme du temps processeur. C'est le code qu'on écrit sans y
+penser : ne pas le réintroduire.
+
+**Aucun minuteur périodique.** L'affichage suit le *frame clock* de GTK, donc
+les frame callbacks du compositeur. Fenêtre masquée, plus de battement, plus
+de décodage — sans une ligne pour le détecter.
+
+**Deux pièges de mesure qui ont coûté une série entière, et qui vaudront pour
+tout ce qui touche à l'affichage :**
+
+- **Une mesure écran éteint ou verrouillé ne mesure rien.** Sous
+  `ext-session-lock-v1` le compositeur masque toutes les fenêtres : plus un
+  frame callback, plus une image composée, GPU au repos. Les chiffres sont
+  plus bas donc flatteurs. `tools/mesure-conso.sh` **refuse** désormais de
+  mesurer dans cet état.
+- **Un lecteur qui s'arrête quand personne ne regarde marche.** Une heure a
+  été perdue à chercher une panne dans le décodeur alors que l'écran était
+  simplement éteint.
+
+**`gtk_widget_add_tick_callback()` sur un widget pas encore réalisé** rend un
+identifiant valide et n'arme aucune horloge : le rappel est appelé une fois,
+puis plus jamais, sans erreur. Le poser au « map ».
+
+**Éprouver sans l'écran :** `bash shell/essais/banc-video.sh mire.mp4 20
+--capture=/tmp/vu.png --revele --scenario` lance un labwc sans écran, joue le
+parcours pause/reprise/sauts et capture le rendu. C'est par là que tout a été
+jugé, la machine s'étant verrouillée pendant la séance.
+
+**RIEN N'A ÉTÉ VU SUR LE VRAI ÉCRAN, ni entendu, et le lecteur N'EST PAS
+INSTALLÉ.** Il est dans `meson.build` et compile sans un avertissement, mais
+`--compiler` réinstalle *tout* le shell. Restent à confirmer sur MADOO : les
+couleurs, le son, la fluidité, et surtout **les gestes au doigt**.
+
 ### Ce qui reste ouvert
 
 | Sujet | État |
@@ -388,6 +462,7 @@ décodage — sans une erreur mémoire. Au doigt, voir le paragraphe précédent
 | Réglages : durées brutes | Le panneau montre ce qui est écrit, pas ce qui est appliqué après bornage par `shell_energie_delais_mode()`. La Console, elle, dit vrai. |
 | `console.c` non converti | Le rétroéclairage y est encore soudé au widget du curseur, en double de `retroeclairage.c`. |
 | Capot par mode | Le verrou s'ancre sur l'extinction ; le capot reste géré par logind, donc identique pour les trois modes. |
+| **Lecteur vidéo** | Écrit, compilé, éprouvé au banc sans écran — **jamais vu sur la machine, jamais installé**. Les mesures d'énergie en plein écran sont à refaire (la première série a été prise écran éteint), et la campagne d'autonomie exige de débrancher. Vitesse de lecture non faite, délibérément : voir `docs/11`. |
 | Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
 
 ---

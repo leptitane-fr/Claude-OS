@@ -1,0 +1,246 @@
+#!/bin/sh
+#-------------------------------------------------------------------------------
+# Claude OS — Clones de Claude Desktop
+#
+# POURQUOI
+# Claude Desktop ne connaît qu'un compte : tout son état — cookie de session,
+# base locale, sessions Claude Code — vit dans ~/.config/Claude. Se connecter
+# avec un second compte écrase le premier.
+#
+# COMMENT
+# Chromium — donc Electron, donc Claude Desktop — accepte « --user-data-dir ».
+# Mesuré sur la machine : l'application ouvre alors un profil complet et
+# indépendant, verrou d'instance compris. Deux instances tournent donc côte à
+# côte, chacune sur son compte. Claude Code, lui, suit « CLAUDE_CONFIG_DIR ».
+# Un clone = ces deux répertoires, rien de plus.
+#
+# LE TROUSSEAU
+# Chromium choisit son magasin de secrets d'après XDG_CURRENT_DESKTOP. Ici
+# c'est « labwc », qu'il ne reconnaît pas : il retombe sur « basic_text », le
+# stockage en clair, et l'application refuse alors d'y écrire son jeton de
+# session — « Votre connexion ne sera pas enregistrée sur cet appareil ».
+#
+# Le trousseau existe pourtant, et PAM le déverrouille à l'ouverture de
+# session. Il suffit de le désigner : « --password-store=gnome-libsecret ».
+# Mesuré le 10 septembre 2026 — l'avertissement isEncryptionAvailable=false
+# disparaît du journal.
+#
+# CE QUI N'EST PAS TOUCHÉ
+# L'installation d'origine reste intacte : même lanceur, même profil, même
+# entrée de menu, même autostart. Un clone s'ajoute à côté, il ne s'interpose
+# nulle part. Supprimer cet outil ne demande donc rien à défaire.
+#
+# CE QUE LE CLOISONNEMENT NE COUVRE PAS
+# Il sépare l'état de l'application, pas les fichiers sur lesquels on
+# travaille. Deux clones ouverts sur le même dépôt écrivent dans le même arbre
+# de travail git — à toi de ne pas les faire se marcher dessus.
+#-------------------------------------------------------------------------------
+set -u
+
+RACINE="${CLAUDE_OS_CLONES:-$HOME/.local/share/claude-os/clones}"
+APPS="$HOME/.local/share/applications"
+LANCEUR=/usr/local/bin/claude-os-claude
+CLI_ORIGINE="$HOME/.claude"
+DONNEES_ORIGINE="$HOME/.config/Claude"
+
+erreur() { printf 'claude-os-clone: %s\n' "$*" >&2; exit 1; }
+info()   { printf '%s\n' "$*"; }
+
+valider_nom() {
+	case "$1" in
+		'' ) erreur "nom de clone vide." ;;
+		*[!a-zA-Z0-9_-]* ) erreur "« $1 » : lettres, chiffres, tiret et souligné seulement." ;;
+	esac
+}
+
+# Un clone tourne-t-il ? Seul le processus principal — celui sans « --type= » —
+# porte le profil. On lit /proc plutôt qu'un fichier de PID : un fichier
+# survit aux plantages, /proc non.
+#
+# Le cmdline est découpé à l'espace, pas au NUL : mesuré sur la machine,
+# l'application réécrit son titre de processus au démarrage et les séparateurs
+# NUL disparaissent. Découper au NUL ne trouvait alors aucun drapeau, et tout
+# clone passait pour l'installation d'origine.
+pid_de() {
+	rep="$1"
+	for f in /proc/[0-9]*/cmdline; do
+		pid="${f%/cmdline}"; pid="${pid##*/}"
+		[ -r "$f" ] || continue
+		[ "$(cat "/proc/$pid/comm" 2>/dev/null)" = claude-desktop ] || continue
+		cmd=" $(tr '\0' ' ' < "$f" 2>/dev/null) "
+		case "$cmd" in *" --type="*) continue ;; esac
+		case "$cmd" in
+			*" --user-data-dir=$rep "*)
+				echo "$pid"; return 0 ;;
+			*" --user-data-dir="*)
+				continue ;;
+			*)
+				# Aucun profil sur la ligne : c'est l'installation d'origine.
+				[ "$rep" = "$DONNEES_ORIGINE" ] && { echo "$pid"; return 0; } ;;
+		esac
+	done
+	return 1
+}
+
+clones() {
+	[ -d "$RACINE" ] || return 0
+	for d in "$RACINE"/*/; do
+		[ -d "$d" ] || continue
+		n="${d%/}"; echo "${n##*/}"
+	done
+}
+
+cmd_creer() {
+	nom="${1:-}"; valider_nom "$nom"
+	shift 2>/dev/null || true
+	libelle="${1:-$nom}"
+	[ -d "$RACINE/$nom" ] && erreur "le clone « $nom » existe déjà."
+	mkdir -p "$RACINE/$nom/donnees" "$RACINE/$nom/cli" || erreur "création impossible."
+	chmod 700 "$RACINE/$nom/donnees" "$RACINE/$nom/cli"
+	printf '%s\n' "$libelle" > "$RACINE/$nom/libelle"
+
+	# Les consignes globales (~/.claude/CLAUDE.md) valent pour la machine, pas
+	# pour un compte : on les partage par lien plutôt que d'en faire des copies
+	# qui divergeraient en silence. Le reste de ~/.claude — sessions, projets,
+	# identifiants — reste cloisonné.
+	[ -f "$CLI_ORIGINE/CLAUDE.md" ] && ln -sf "$CLI_ORIGINE/CLAUDE.md" "$RACINE/$nom/cli/CLAUDE.md"
+
+	# La déclaration des serveurs MCP est une configuration d'outillage, pas un
+	# élément de compte : on la recopie pour que le clone soit utilisable tout
+	# de suite. Copie et non lien — le clone doit pouvoir diverger.
+	[ -f "$DONNEES_ORIGINE/claude_desktop_config.json" ] && \
+		cp "$DONNEES_ORIGINE/claude_desktop_config.json" "$RACINE/$nom/donnees/" 2>/dev/null
+
+	cmd_integrer >/dev/null
+	info "Clone « $nom » créé ($libelle)."
+	info "Il s'ouvrira sur l'écran de connexion : claude-os-clone lancer $nom"
+}
+
+cmd_lancer() {
+	nom="${1:-}"; valider_nom "$nom"
+	[ -d "$RACINE/$nom" ] || erreur "clone « $nom » inconnu."
+	donnees="$RACINE/$nom/donnees"
+	if pid_de "$donnees" >/dev/null; then
+		# L'instance est déjà là. Relancer avec le même profil ne crée pas de
+		# doublon : Electron passe la main à l'instance en place, qui remonte
+		# sa fenêtre. C'est exactement ce qu'on veut d'un second clic.
+		info "Le clone « $nom » tourne déjà — sa fenêtre est ramenée au premier plan."
+	fi
+	CLAUDE_CONFIG_DIR="$RACINE/$nom/cli" \
+		setsid "$LANCEUR" --user-data-dir="$donnees" \
+			--password-store=gnome-libsecret >/dev/null 2>&1 < /dev/null &
+}
+
+cmd_arreter() {
+	nom="${1:-}"; valider_nom "$nom"
+	[ -d "$RACINE/$nom" ] || erreur "clone « $nom » inconnu."
+	pid="$(pid_de "$RACINE/$nom/donnees")" || { info "Le clone « $nom » ne tourne pas."; return 0; }
+	# SIGTERM : l'application l'intercepte et ferme proprement — sessions
+	# closes, écritures vidées sur disque.
+	kill -TERM "$pid" 2>/dev/null
+	i=0
+	while [ $i -lt 40 ]; do
+		pid_de "$RACINE/$nom/donnees" >/dev/null || { info "Clone « $nom » arrêté."; return 0; }
+		sleep 1; i=$((i + 1))
+	done
+	kill -KILL "$pid" 2>/dev/null
+	info "Clone « $nom » arrêté de force après 40 s."
+}
+
+cmd_liste() {
+	if pid_de "$DONNEES_ORIGINE" >/dev/null; then etat='en cours'; else etat='arrêté'; fi
+	printf '  %-16s %-26s %s\n' '(origine)' 'Installation principale' "$etat"
+	for n in $(clones); do
+		lib="$(cat "$RACINE/$n/libelle" 2>/dev/null || echo "$n")"
+		if pid_de "$RACINE/$n/donnees" >/dev/null; then etat='en cours'; else etat='arrêté'; fi
+		# Le fichier Cookies existe dès le premier lancement, même sans
+		# session : c'est le compte retenu par l'application qui fait foi.
+		if grep -q '"lastKnownAccountUuid": *"' "$RACINE/$n/donnees/config.json" 2>/dev/null
+		then connecte='identifiants conservés'
+		else connecte='jamais connecté'
+		fi
+		printf '  %-16s %-26s %-9s (%s)\n' "$n" "$lib" "$etat" "$connecte"
+	done
+	[ -n "$(clones)" ] || info "  (aucun clone — voir : claude-os-clone creer <nom>)"
+}
+
+cmd_supprimer() {
+	nom="${1:-}"; valider_nom "$nom"
+	[ -d "$RACINE/$nom" ] || erreur "clone « $nom » inconnu."
+	pid_de "$RACINE/$nom/donnees" >/dev/null && erreur "clone « $nom » en cours : l'arrêter d'abord."
+	printf 'Supprimer le clone « %s » et tout son état local ? [oui/non] ' "$nom"
+	read -r rep
+	[ "$rep" = oui ] || { info "Rien n'a été supprimé."; return 0; }
+	rm -rf "$RACINE/$nom"
+	cmd_integrer >/dev/null
+	info "Clone « $nom » supprimé."
+}
+
+# Déconnexion : on efface ce qui prouve la session, on garde le reste.
+cmd_oublier() {
+	nom="${1:-}"; valider_nom "$nom"
+	[ -d "$RACINE/$nom" ] || erreur "clone « $nom » inconnu."
+	pid_de "$RACINE/$nom/donnees" >/dev/null && erreur "clone « $nom » en cours : l'arrêter d'abord."
+	d="$RACINE/$nom/donnees"
+	for f in Cookies Cookies-journal 'Local Storage' 'Session Storage' ant-device-registry.json buddy-tokens.json; do
+		rm -rf "$d/$f"
+	done
+	rm -f "$RACINE/$nom/cli/.credentials.json" "$RACINE/$nom/cli/.claude.json" 2>/dev/null
+	info "Clone « $nom » déconnecté : il redemandera une authentification."
+}
+
+cmd_integrer() {
+	mkdir -p "$APPS"
+	rm -f "$APPS"/claude-os-clone-*.desktop
+	for n in $(clones); do
+		lib="$(cat "$RACINE/$n/libelle" 2>/dev/null || echo "$n")"
+		cat > "$APPS/claude-os-clone-$n.desktop" <<DESK
+[Desktop Entry]
+Type=Application
+Name=Claude — $lib
+Comment=Instance Claude Desktop séparée, compte « $n »
+Exec=/usr/local/bin/claude-os-clone lancer $n
+Icon=claude-desktop
+Terminal=false
+Categories=Utility;Network;
+StartupNotify=true
+StartupWMClass=com.anthropic.Claude
+DESK
+	done
+	command -v update-desktop-database >/dev/null 2>&1 && \
+		update-desktop-database "$APPS" >/dev/null 2>&1
+	info "Entrées de menu régénérées dans $APPS."
+}
+
+cmd_aide() {
+	cat <<'AIDE'
+claude-os-clone — plusieurs instances de Claude Desktop, en même temps
+
+  liste                      l'origine, les clones, qui tourne
+  creer <nom> [libellé]      nouveau clone, profil vierge
+  lancer <nom>               ouvre le clone, en parallèle du reste
+  arreter <nom>              ferme proprement ce clone
+  oublier <nom>              déconnexion : réauthentification exigée
+  supprimer <nom>            efface un clone et tout son état local
+  integrer                   régénère les entrées du menu du bureau
+
+L'installation d'origine n'est ni modifiée ni gênée : un clone s'ajoute à
+côté. Chaque clone garde ses identifiants, donc son ouverture est automatique.
+
+Attention : le cloisonnement sépare l'état de l'application, pas les fichiers.
+Deux instances ouvertes sur le même dépôt écrivent dans le même arbre de
+travail git.
+AIDE
+}
+
+case "${1:-liste}" in
+	liste|list)     cmd_liste ;;
+	creer)          shift; cmd_creer "$@" ;;
+	lancer)         shift; cmd_lancer "${1:-}" ;;
+	arreter)        shift; cmd_arreter "${1:-}" ;;
+	oublier)        shift; cmd_oublier "${1:-}" ;;
+	supprimer)      shift; cmd_supprimer "${1:-}" ;;
+	integrer)       cmd_integrer ;;
+	aide|-h|--help) cmd_aide ;;
+	*)              erreur "commande inconnue « $1 ». Voir : claude-os-clone aide" ;;
+esac

@@ -1,0 +1,168 @@
+
+[1;34m── 1. La session[0m
+  2 1000 stef seat0 1068 user    - no -
+  3 1000 stef -     1080 manager - no -
+  5 1000 stef -     1191 user    - no -
+  Display=:0
+  Remote=no
+  Desktop=openbox
+  Type=x11
+  Class=user
+  Active=yes
+  State=active
+  SESSION DÉMARRÉE                 openbox ✗  ← ce n'est pas Claude OS
+  préférence ~/.dmrc               openbox
+  préférence AccountsService       <aucune>
+  sessions proposées                claude-os.desktop lightdm-xsession.desktop openbox.desktop 
+  XDG_SESSION_TYPE                   tty
+  XDG_RUNTIME_DIR                    /run/user/1000
+
+[1;34m── 2. Le bus de session — le point critique[0m
+  /run/user/1000/bus                 présent ✓
+  dbus-user-session                  1.16.2-2
+  dbus-x11                           
+  dbus.socket : active
+
+[1;34m── 3. Ce qui tourne[0m
+  labwc                              absent
+  claude-os-fond                     absent
+  claude-os-dock                     absent
+  claude-os-status                   absent
+  foot                               absent
+  lightdm                            en cours (pid 827 1068 )
+  --- toute ligne de commande contenant « claude-os » ---
+
+[1;34m── 4. Les binaires et les styles[0m
+  claude-os-fond                     /usr/bin/claude-os-fond
+  claude-os-dock                     /usr/bin/claude-os-dock
+  claude-os-status                   /usr/bin/claude-os-status
+  claude-os-lanceur                  /usr/bin/claude-os-lanceur
+  claude-os-fichiers                 /usr/bin/claude-os-fichiers
+  claude-os-reglages                 /usr/bin/claude-os-reglages
+  styles                             shell.css theme-clair.css theme-claude-clair.css theme-claude-sombre.css theme-sombre.css 
+  restes /usr/local/bin              /usr/local/bin/claude-os-greeter   ← masquent /usr/bin
+
+[1;34m── 5. La configuration de labwc[0m
+  /etc/xdg/labwc                     autostart environment rc.xml 
+  ~/.config/labwc                    
+  XDG_CONFIG_DIRS                    <vide, défaut /etc/xdg>
+  --- autostart réellement lu ---
+  >>> /etc/xdg/labwc/autostart
+      #!/bin/sh
+      # Composants du shell Claude OS, lancés par labwc à l'ouverture de session.
+      #
+      # Trois processus séparés et non un seul : un défaut dans la barre d'état ne
+      # doit pas emporter le dock, et chacun se relance isolément sans fermer la
+      # session.
+      #
+      # Le fond d'écran en premier : il occupe la couche la plus basse, et le voir
+      # apparaître après le dock donnerait un démarrage en deux temps.
+      #
+      # LA TRACE N'EST PAS UN LUXE
+      #
+      # Ces programmes n'ont pas de terminal. Quand l'un d'eux refuse de démarrer,
+      # son message se perd et il ne reste qu'un écran noir — c'est exactement ce
+      # qui est arrivé au premier démarrage de la session définitive, et il a fallu
+      # relancer le dock à la main depuis SSH pour lire la cause. La sortie est
+      # donc conservée.
+      
+      JOURNAL="${XDG_STATE_HOME:-$HOME/.local/state}/claude-os"
+      mkdir -p "$JOURNAL"
+      
+      # Le journal est REMIS À ZÉRO à chaque ouverture de session : on veut savoir
+      # ce qui s'est passé cette fois-ci, pas accumuler des mois de démarrages.
+      : > "$JOURNAL/shell.log"
+      
+      lancer() {
+      	printf '=== %s : %s ===\n' "$(date '+%H:%M:%S')" "$1" >> "$JOURNAL/shell.log"
+      	"$@" >> "$JOURNAL/shell.log" 2>&1 &
+      }
+      
+      # Noms nus plutôt que chemins absolus : le PATH décide, ce qui permet de
+      # tester une version compilée à la main sans toucher à ce fichier.
+      lancer claude-os-fond
+      lancer claude-os-dock
+      lancer claude-os-status
+
+[1;34m── 6. La session déclarée[0m
+  wayland-sessions                   claude-os.desktop 
+  xsessions                          lightdm-xsession.desktop openbox.desktop 
+  [Seat:*]
+  # Les sessions Wayland ne sont pas cherchées partout selon les versions :
+  # on nomme les trois répertoires plutôt que de s'en remettre au défaut.
+  sessions-directory=/usr/share/lightdm/sessions:/usr/share/wayland-sessions:/usr/share/xsessions
+  user-session=claude-os
+
+[1;34m── 7. Le shell.conf[0m
+  [dock]
+  pinned=claude-desktop;chromium;foot;chrome-eigpmdhekjlgjgcppnanaanbdmnlnagl-Default;claude-os-fichiers;
+  reserve_space=false
+  
+  [appearance]
+  font=DejaVu Serif
+  icon_theme=Papirus-Dark
+  theme=claude-sombre
+  
+  [wallpaper]
+  image=/usr/share/claude-os/wallpaper/default.png
+  fill=true
+
+[1;34m── 8. Essai à la main : ce que dit le dock quand il démarre[0m
+  WAYLAND_DISPLAY                    <introuvable>
+  Impossible : aucune socket Wayland. La session est-elle bien ouverte ?
+
+[1;34m── 9. Journaux[0m
+  --- journal utilisateur ---
+  sept. 07 14:23:32 Claude-OS systemd[1080]: Started dbus.service - D-Bus User Message Bus.
+  sept. 07 14:23:32 Claude-OS systemd[1080]: Startup finished in 200ms.
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit does not give us MaxRealtimePriority, using 1
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit does not give us MinNiceLevel, using 0
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit does not give us RTTimeUSecMax, using -1
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit does not give us MaxRealtimePriority, using 1
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit does not give us MinNiceLevel, using 0
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit does not give us RTTimeUSecMax, using -1
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit does not give us MaxRealtimePriority, using 1
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit does not give us MinNiceLevel, using 0
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit does not give us RTTimeUSecMax, using -1
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: wp-internal-comp-loader: Loading profile 'main'
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: default: Failed to get percentage from UPower: org.freedesktop.DBus.Error.NameHasNoOwner
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: wp-device: SPA handle 'api.libcamera.enum.manager' could not be loaded; is it installed?
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: s-monitors-libcamera: PipeWire's libcamera SPA plugin is missing or broken. Some camera types may not be supported.
+  sept. 07 14:23:33 Claude-OS wireplumber[1101]: m-portal-permissionstore: <WpPortalPermissionStorePlugin:0x5641f7183400> Lookup: The name org.freedesktop.impl.portal.PermissionStore was not provided by any .service files (org.freedesktop.DBus.Error.ServiceUnknown)
+  --- lightdm / labwc / claude-os ---
+  sept. 07 14:23:32 Claude-OS systemd[1080]: Started dbus.service - D-Bus User Message Bus.
+  sept. 07 14:23:32 Claude-OS systemd[1080]: Startup finished in 200ms.
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit does not give us MaxRealtimePriority, using 1
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit does not give us MinNiceLevel, using 0
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire[1100]: mod.rt: RTKit does not give us RTTimeUSecMax, using -1
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit does not give us MaxRealtimePriority, using 1
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit does not give us MinNiceLevel, using 0
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS pipewire-pulse[1103]: mod.rt: RTKit does not give us RTTimeUSecMax, using -1
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit does not give us MaxRealtimePriority, using 1
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit does not give us MinNiceLevel, using 0
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit error: org.freedesktop.DBus.Error.ServiceUnknown
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: mod.rt: RTKit does not give us RTTimeUSecMax, using -1
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: wp-internal-comp-loader: Loading profile 'main'
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: default: Failed to get percentage from UPower: org.freedesktop.DBus.Error.NameHasNoOwner
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: wp-device: SPA handle 'api.libcamera.enum.manager' could not be loaded; is it installed?
+  sept. 07 14:23:32 Claude-OS wireplumber[1101]: s-monitors-libcamera: PipeWire's libcamera SPA plugin is missing or broken. Some camera types may not be supported.
+  sept. 07 14:23:33 Claude-OS wireplumber[1101]: m-portal-permissionstore: <WpPortalPermissionStorePlugin:0x5641f7183400> Lookup: The name org.freedesktop.impl.portal.PermissionStore was not provided by any .service files (org.freedesktop.DBus.Error.ServiceUnknown)
+
+Rapport écrit dans : diag-session.txt — le transmettre tel quel.
