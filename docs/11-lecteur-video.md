@@ -4,8 +4,11 @@ Un lecteur pour Claude OS, dont le fil rouge est l'économie d'énergie. Cette
 page dit **ce qui a été mesuré**, dans l'ordre où ça l'a été. Ce qui n'est pas
 établi y est écrit comme tel.
 
-État au 10 septembre 2026 : **phase 0 terminée**, architecture validée par la
-mesure. Le lecteur lui-même n'est pas encore écrit.
+État au 10 septembre 2026 : **phases 0 et 1 terminées**. L'architecture est
+validée par la mesure, et le noyau de lecture joue une vidéo complète, en
+son, avec pause et saut précis. **Rien n'a encore été vu sur le vrai écran** :
+la machine s'est verrouillée pendant la séance, et tout ce qui suit a été
+éprouvé sur le banc sans écran.
 
 ---
 
@@ -95,31 +98,94 @@ surface tuilée depuis la mémoire du GPU est lente et chère, sans pour autant
 apparaître comme du temps processeur. C'est le résultat le plus utile de la
 phase 0 — c'est exactement le code qu'on écrit sans y penser.
 
-### En plein écran — la comparaison propre
+### En plein écran — MESURES ANNULÉES
 
-**Un piège a été évité ici.** La première mesure en plein écran donnait
-2,40 W, soit *moins que le repos*. Rien de miraculeux : le plein écran masque
-Claude Desktop, qui consommait 23 % de processeur. La série a donc été refaite
-entièrement en plein écran, où l'occultation est identique pour les quatre
-chemins et les écarts redeviennent lisibles.
+Une série avait été prise en plein écran et donnait des chiffres plus bas :
+2,23 à 2,40 W pour `offload`, 2,54 pour `dmabuf`. On en avait conclu que le
+balayage direct rapportait 0,2 W.
 
-| Chemin, en plein écran | SoC |
+**Cette conclusion était fausse, et les mesures avec.** À 20:14:12 ce jour-là,
+`claude-os-verrou` s'est monté : la veille progressive avait éteint le
+rétroéclairage, puis verrouillé la session. Sous `ext-session-lock-v1`, le
+compositeur masque **toutes** les fenêtres. Plus un « frame callback », plus
+une image composée, le GPU au repos. Les cinq mesures de 20:13 à 20:15 ne
+portent sur rien de ce qu'elles annoncent — et elles étaient flatteuses, ce
+qui est la pire espèce d'erreur de mesure.
+
+Le premier récit donné de ces chiffres — « le plein écran masque Claude
+Desktop, qui consommait 23 % de processeur » — était une explication
+plausible d'un phénomène qui n'existait pas. C'est exactement ce contre quoi
+la méthode du projet met en garde.
+
+**Ce qui en a été tiré :** `tools/mesure-conso.sh` lit désormais le
+rétroéclairage et cherche `claude-os-verrou` **avant** de mesurer, et
+**refuse** de rendre un chiffre dans cet état. `--quand-meme` reste possible
+pour qui veut justement mesurer l'écran éteint ; le relevé en porte alors la
+mention.
+
+La série en plein écran est **à refaire, écran allumé**, ainsi que toute la
+campagne d'autonomie — qui exige en plus de débrancher.
+
+## 11.5 Le noyau de lecture — phase 1
+
+`shell/src/video-moteur.c`, `video-audio.c`, `video-image.c`, `video.c`.
+
+**Ce qui commande le tempo :** l'audio donne l'heure, le compositeur donne le
+rythme d'affichage par le *frame clock* de GTK, et le fil de décodage
+travaille trois images d'avance puis s'endort sur une condition. **Aucun
+minuteur périodique dans tout le lecteur** — le seul du programme est celui
+du parcours automatique de banc, `--scenario`.
+
+Bénéfice obtenu sans une ligne de code : fenêtre masquée, le compositeur
+cesse d'appeler, GTK cesse de battre, plus personne ne dépile d'image, et le
+décodage vidéo s'arrête de lui-même. Une heuristique de visibilité aurait pu
+se tromper ; celle-ci ne le peut pas.
+
+### Ce que le banc constate
+
+Mire 1080p30 H.264, 40 s, banc sans écran :
+
+| | |
 |---|---|
-| **`offload`** | **2,40 / 2,23 W** |
-| `dmabuf` | 2,54 W |
-| `logiciel` | 2,85 W |
-| `copie` | 3,64 W |
+| images affichées | 1196, soit 29,9 par seconde |
+| images sautées | **2**, toutes deux au démarrage |
+| passées par le chemin sans copie | **1196 sur 1196** |
+| écart de synchronisation | **7,5 ms** en moyenne, 43 ms au pire |
+| horloge d'affichage | 89 Hz |
 
-L'écart `offload` / `dmabuf` — environ 0,2 W, près de 9 % du SoC — est ce que
-rapporte le fait de ne plus composer du tout : le compositeur donne le tampon
-au balayage.
+Le parcours automatique — lecture, pause, reprise, saut à 40 s, saut arrière
+de 10 s, retour au début — passe : la position gèle en pause sans dériver, et
+chaque saut atterrit à moins de 40 ms de sa cible.
 
-**Ce qui n'est PAS établi :** aucun chiffre d'autonomie. Toutes ces mesures
-ont été faites sur secteur, où la batterie ne mesure rien. Il faudra une
-campagne câble débranché avant d'écrire le mot « record » ailleurs que dans
-une intention.
+### Deux pièges payés, tous deux muets
 
-## 11.5 Les huit règles d'énergie du lecteur
+**L'horloge audio était un escalier.** `pw_stream_get_time_n` ne rend qu'un
+instantané, actualisé une fois par cycle du graphe — 42,7 ms avec le quantum
+long choisi ici. Sans extrapoler l'âge de cet instantané, l'horloge avance par
+marches de 42,7 ms, ce qui couvre 1,28 image à 30 im/s : **une fois sur
+quatre, deux images deviennent dues au même battement et l'une est sautée.**
+Résultat mesuré avant correction : 23 images par seconde au lieu de 30,
+6,7 sauts par seconde, et un écart de synchronisation de 16 ms. Après
+correction : 29,9 images par seconde, 2 sauts en 40 secondes, 7,5 ms d'écart.
+Le symptôme — une saccade parfaitement régulière — désignait le décodeur, qui
+n'y était pour rien. L'en-tête `stream.h` de PipeWire documente
+l'extrapolation ; il fallait la lire jusqu'au bout.
+
+**Un saut ne tombe que sur une image-clé.** Avec un groupe d'images d'une
+seconde, viser 32,9 s faisait commencer à 32,0 s. Invisible sur un bouton
+« −10 s », très visible en tirant une glissière au doigt. Le moteur décode
+donc de l'ancrage jusqu'à la cible en jetant ce qui précède — au pire un
+groupe d'images, 25 ms.
+
+**Et un troisième, de méthode :** pendant une heure, le lecteur a paru mort —
+une seule image, aucun battement — alors qu'il fonctionnait. C'est l'écran
+qui était éteint puis verrouillé. La sonde de la phase 0, elle, continuait à
+décoder dans le vide, parce qu'elle était cadencée par un minuteur : la
+comparaison des deux comportements est ce qui a fini par désigner le
+compositeur. **Un lecteur qui s'arrête quand personne ne regarde est un
+lecteur qui marche.**
+
+## 11.6 Les huit règles d'énergie du lecteur
 
 1. **Zéro scrutation** — pas un minuteur périodique. L'horloge de l'interface
    est l'image présentée.
@@ -132,7 +198,7 @@ une intention.
 7. Rien de résident : pas de démon, pas de vignettes, pas d'indexation.
 8. **Aucun chiffre annoncé sans mesure.**
 
-## 11.6 Les instruments, et comment s'en servir
+## 11.7 Les instruments, et comment s'en servir
 
 ```sh
 bash shell/essais/construire.sh                 # les deux programmes d'essai
@@ -141,6 +207,11 @@ bash shell/essais/construire.sh                 # les deux programmes d'essai
 # Le chemin sans copie est-il pris ? Chercher « Attaching » :
 GDK_DEBUG=offload ./shell/essais/build/sonde-offload mire.mp4 --mode=offload
 
+# Le lecteur, sur un compositeur sans écran — utilisable écran éteint ou
+# verrouillé, ce qui est précisément quand tout le reste devient trompeur :
+bash shell/essais/banc-video.sh mire.mp4 40
+bash shell/essais/banc-video.sh mire.mp4 30 --scenario   # pause, sauts, reprise
+
 bash tools/mesure-conso.sh -d 30 --contre "…" "libellé"
 bash tools/mesure-conso.sh --tableau            # tous les relevés passés
 ```
@@ -148,19 +219,25 @@ bash tools/mesure-conso.sh --tableau            # tous les relevés passés
 Les mires vivent dans `~/.local/share/claude-os/mires/` et ne sont pas dans le
 dépôt : elles se refabriquent.
 
-## 11.7 Ce qui reste à faire
+## 11.8 Ce qui reste à faire
 
 | Phase | Objet | État |
 |---|---|---|
 | 0 | Banc de mesure, sonde, choix d'architecture | **fait, mesuré** |
-| 1 | Noyau de lecture : démux, décodage, audio PipeWire, synchro | à écrire |
+| 1 | Noyau de lecture : démux, décodage, audio PipeWire, synchro | **fait, éprouvé au banc sans écran** |
 | 2 | L'interface : vidéo sans bordure, capsule, glissière au survol, tactile | à écrire |
 | 3 | Pistes, sous-titres, MIME, intégration au bureau | à écrire |
 | 4 | Campagne d'énergie **sur batterie**, réglages, conclusions | à faire |
 
 Points ouverts, à ne pas oublier :
 
-- **L'espace colorimétrique YUV de GTK** (§11.3) — non jugé à l'œil.
+- **RIEN N'A ÉTÉ VU SUR LE VRAI ÉCRAN.** Ni image, ni couleurs, ni son jugé à
+  l'oreille. Le lecteur n'est pas installé et n'est pas dans `meson.build` ; il
+  se compile par `shell/essais/construire.sh`.
+- **L'espace colorimétrique YUV de GTK** (§11.3) — non jugé à l'œil, et c'est
+  la première chose à regarder quand l'écran sera disponible.
+- **La série en plein écran est à refaire** (§11.4), et la campagne
+  d'autonomie reste entière — elle exige de débrancher.
 - **AV1** n'a pas encore été mesuré sur cette machine ; il sera le pire cas.
 - **La reprise après suspension est cassée** sur MADOO (voir `CLAUDE.md`) : un
   plantage au réveil ne devra pas être imputé au lecteur.

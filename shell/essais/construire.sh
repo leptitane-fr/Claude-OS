@@ -20,7 +20,7 @@ mkdir -p "$BUILD"
 
 # -O2 et non -Os : ces programmes mesurent des chemins de décodage, et une
 # construction bridée fausserait la mesure qu'ils servent à faire.
-COMMUN=(-std=c11 -O2 -g -Wall -Wextra -Wno-unused-parameter)
+COMMUN=(-std=gnu11 -O2 -g -Wall -Wextra -Wno-unused-parameter)
 
 construire() {
 	local nom="$1"; shift
@@ -39,7 +39,7 @@ construire() {
 flags() { pkg-config --cflags --libs "$@" || { echo "pkg-config a échoué pour : $*" >&2; exit 1; }; }
 
 CIBLES=("$@")
-[ ${#CIBLES[@]} -gt 0 ] || CIBLES=(fabrique-mire sonde-offload)
+[ ${#CIBLES[@]} -gt 0 ] || CIBLES=(fabrique-mire sonde-offload video)
 
 ECHECS=0
 echo "Construction des essais du lecteur vidéo :"
@@ -48,6 +48,19 @@ for c in "${CIBLES[@]}"; do
 		fabrique-mire)
 			# shellcheck disable=SC2046
 			construire fabrique-mire $(flags libavcodec libavformat libavutil) -lm || ECHECS=$((ECHECS+1))
+			;;
+		video)
+			# Le lecteur lui-meme, compile ici tant que la phase 1 dure :
+			# meson.build appartient aussi a l'autre instance, on n'y touche
+			# qu'une fois le programme en etat de marche.
+			# shellcheck disable=SC2046
+			gcc "${COMMUN[@]}" -I"$ICI/../src" \
+			    "$ICI/../src/video.c" "$ICI/../src/video-moteur.c" \
+			    "$ICI/../src/video-image.c" "$ICI/../src/video-audio.c" \
+			    -o "$BUILD/claude-os-video" \
+			    $(flags gtk4 libavcodec libavformat libavutil libswscale libswresample libdrm libpipewire-0.3) -lm \
+			    || { echo "  video : ÉCHEC de la compilation" >&2; ECHECS=$((ECHECS+1)); }
+			echo "  video…"
 			;;
 		sonde-offload)
 			# shellcheck disable=SC2046

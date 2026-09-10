@@ -12,6 +12,8 @@
 #   bash tools/mesure-conso.sh -d 60 --contre "chromium --app=file:///.../mire.mp4"
 #   bash tools/mesure-conso.sh --tableau            # relit les relevés passés
 #
+# Le banc REFUSE de mesurer écran éteint ou verrouillé : voir plus bas.
+#
 # Les relevés s'accumulent dans ~/.local/state/claude-os/conso.tsv, pour que
 # deux mesures faites à deux jours d'écart restent comparables.
 #
@@ -56,6 +58,7 @@ DUREE=30
 INTERVALLE=2
 LIBELLE=""
 COMMANDE=""
+QUAND_MEME=""
 ETAT="${XDG_STATE_HOME:-$HOME/.local/state}/claude-os"
 TABLEAU="$ETAT/conso.tsv"
 
@@ -68,6 +71,7 @@ while [ $# -gt 0 ]; do
 		--contre)     COMMANDE="${2:?commande à mesurer}"; shift 2 ;;
 		--tableau)    [ -s "$TABLEAU" ] && column -t -s $'\t' "$TABLEAU" \
 		                  || echo "Aucun relevé dans $TABLEAU" ; exit 0 ;;
+		--quand-meme) QUAND_MEME=1; shift ;;
 		-h|--help)    usage; exit 0 ;;
 		-*)           echo "Option inconnue : $1" >&2; exit 2 ;;
 		*)            LIBELLE="$1"; shift ;;
@@ -97,6 +101,44 @@ else
 	echo "Alimentation : BATTERIE ($BAT_STATUT) — la plateforme entière est mesurée."
 fi
 [ "$PSYS_OK" = "1" ] || echo "  psys : compteur désactivé sur cette machine, ignoré (voir l'en-tête)."
+
+# ------------------------------------------------- l'écran est-il allumé ?
+#
+# CE CONTRÔLE A COÛTÉ UNE SÉRIE ENTIÈRE, le 10 septembre 2026.
+#
+# Cinq mesures de « lecture vidéo en plein écran » ont été prises alors que la
+# veille progressive avait éteint le rétroéclairage, puis que le verrou de
+# session s'était monté. Sous ext-session-lock-v1 le compositeur masque toutes
+# les fenêtres : plus un « frame callback », plus une image composée, et le
+# GPU au repos. Les chiffres étaient plus bas — donc flatteurs — et
+# l'explication qu'on leur a d'abord donnée (« le plein écran masque Claude
+# Desktop ») était fausse. Rien n'était affiché du tout.
+#
+# Une mesure d'affichage écran éteint ne mesure pas ce qu'on croit. Le banc
+# refuse donc de la prendre, et --quand-meme reste possible pour qui mesure
+# justement l'écran éteint.
+
+RETRO=$(cat /sys/class/backlight/*/brightness 2>/dev/null | head -1)
+# « pgrep -x » tronque a 15 caracteres et ne trouverait jamais
+# « claude-os-verrou » ; les crochets evitent que pgrep ne se voie lui-meme.
+VERROU=$(pgrep -f '[c]laude-os-verrou' >/dev/null && echo oui || echo non)
+PROBLEME=""
+[ "${RETRO:-1}" = "0" ] && PROBLEME="le rétroéclairage est éteint"
+[ "$VERROU" = "oui" ]   && PROBLEME="${PROBLEME:+$PROBLEME, et }l'écran est verrouillé"
+
+if [ -n "$PROBLEME" ]; then
+	echo "Écran        : $PROBLEME"
+	if [ -z "$QUAND_MEME" ]; then
+		echo
+		echo "REFUS DE MESURER : rien n'est composé dans cet état, et le chiffre" >&2
+		echo "obtenu serait plus bas que la réalité — donc trompeur." >&2
+		echo "Déverrouiller, ou relancer avec --quand-meme si c'est justement" >&2
+		echo "l'écran éteint que l'on veut mesurer." >&2
+		exit 3
+	fi
+	echo "  --quand-meme : mesure prise malgré tout, le relevé le portera."
+	LIBELLE="$LIBELLE [écran éteint ou verrouillé]"
+fi
 
 CHARGE=$(cut -d' ' -f1 /proc/loadavg)
 echo "Charge avant : $CHARGE"
