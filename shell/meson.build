@@ -157,17 +157,19 @@ executable('claude-os-coffre',
   dependencies : [glib, jsonglib, gcrypt],
   install : true)
 
-executable('claude-os-fichiers',
-  'src/fichiers.c', 'src/fichiers-item.c', 'src/fichiers-ops.c',
-  'src/fichiers-lieux.c', 'src/reseau.c', commun,
-  dependencies : [gtk, layershell, giounix, pangocairo, secret],
-  install : true)
-
-# La visionneuse d'images. gdk-pixbuf est déjà tiré par GTK 4 ; il est nommé
-# ici parce qu'on s'en sert directement — pour décoder réduit, lire
-# l'orientation EXIF et animer les GIF — et qu'une dépendance qu'on utilise
+# gdk-pixbuf est déjà tiré par GTK 4 ; il est nommé ici parce qu'on s'en sert
+# directement — pour décoder réduit, lire l'orientation EXIF, animer les GIF
+# et écrire les vignettes de Fichiers — et qu'une dépendance qu'on utilise
 # sans la déclarer casse le jour où GTK cesse de l'apporter.
 gdkpixbuf = dependency('gdk-pixbuf-2.0')
+
+executable('claude-os-fichiers',
+  'src/fichiers.c', 'src/fichiers-item.c', 'src/fichiers-ops.c',
+  'src/fichiers-lieux.c', 'src/fichiers-apercu.c', 'src/reseau.c', commun,
+  dependencies : [gtk, layershell, giounix, pangocairo, secret, gdkpixbuf],
+  install : true)
+
+# La visionneuse d'images.
 
 executable('claude-os-images',
   'src/images.c', 'src/images-vue.c', commun,
@@ -196,9 +198,38 @@ executable('claude-os-verrou',
   dependencies : [wlclient, xkb, cairo, pangocairo, giounix, jsonglib, pam],
   install : true)
 
+# LE LECTEUR VIDEO.
+#
+# FFmpeg plutot que libmpv ou GStreamer, et ce choix a ete MESURE avant
+# d'etre fait -- voir docs/11. Les codecs sont dans libavcodec : une fois le
+# lecteur installe, il n'y a plus jamais de « codec manquant ».
+#
+# libva et libdrm ne sont pas des dependances decoratives : c'est par elles
+# que l'image decodee arrive a l'ecran SANS JAMAIS ETRE RECOPIEE
+# (av_hwframe_map vers un dmabuf, puis GdkDmabufTexture dans un
+# GtkGraphicsOffload). Mesure sur MADOO, mire 1080p30, repos a 2,92 W :
+# ce chemin coute 3,24 W, le chemin naif -- meme decodage materiel, mais
+# suivi de av_hwframe_transfer_data -- en coute 5,45.
+avcodec    = dependency('libavcodec')
+avformat   = dependency('libavformat')
+avutil     = dependency('libavutil')
+swscale    = dependency('libswscale')     # repli logiciel seulement
+swresample = dependency('libswresample')  # conversion audio vers PipeWire
+libdrm     = dependency('libdrm')         # drm_fourcc.h : NV12, P010
+pipewire   = dependency('libpipewire-0.3')
+
+executable('claude-os-video',
+  'src/video.c', 'src/video-moteur.c', 'src/video-image.c',
+  'src/video-audio.c', commun,
+  dependencies : [gtk, giounix, pangocairo,
+                  avcodec, avformat, avutil, swscale, swresample,
+                  libdrm, pipewire, m_dep],
+  install : true)
+
 install_data(['data/claude-os-reglages.desktop',
               'data/claude-os-fichiers.desktop',
-              'data/os.claude.shell.images.desktop'],
+              'data/os.claude.shell.images.desktop',
+              'data/os.claude.shell.video.desktop'],
   install_dir : get_option('prefix') / get_option('datadir') / 'applications')
 
 # L'icône de la cloche, livrée avec le shell.

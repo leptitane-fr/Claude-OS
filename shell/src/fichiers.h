@@ -29,11 +29,18 @@ struct _FichierItem {
     char     *cle_tri;       /* cle de collation : « Éclair » avant « Zebre »*/
     GIcon    *icone;
     char     *type_texte;    /* « Dossier », « Image PNG »…                 */
+    char     *type_mime;     /* « image/png » ; NULL pour un dossier        */
     goffset   taille;
     gint64    modifie;       /* secondes depuis l'epoque                    */
     gboolean  dossier;
     gboolean  cache;
     gboolean  lien;
+
+    /* La vignette de la vue Apercu, tenue par fichiers-apercu.c. L'element
+     * emet « apercu-pret » quand elle arrive : la case qui l'affiche s'y
+     * abonne a la liaison, et s'en desabonne au recyclage. */
+    GdkTexture *apercu;
+    int         apercu_etat;  /* voir ApercuEtat, fichiers-apercu.h         */
 };
 
 FichierItem *fichier_item_new (GFile *parent, GFileInfo *info);

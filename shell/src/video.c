@@ -139,6 +139,7 @@ static void rafraichir_glissiere(App *a, double position)
 
 static gboolean sur_battement(GtkWidget *w, GdkFrameClock *horloge, gpointer u)
 {
+    (void) w; (void) horloge;
     App *a = u;
     a->battements++;
 
@@ -213,6 +214,7 @@ static void reveler(App *a, gboolean visible, gboolean momentane)
 
 static void sur_entree_zone(GtkEventControllerMotion *c, double x, double y, gpointer u)
 {
+    (void) c; (void) x; (void) y;
     App *a = u;
     a->survol = TRUE;
     reveler(a, TRUE, FALSE);
@@ -220,6 +222,7 @@ static void sur_entree_zone(GtkEventControllerMotion *c, double x, double y, gpo
 
 static void sur_sortie_zone(GtkEventControllerMotion *c, gpointer u)
 {
+    (void) c;
     App *a = u;
     a->survol = FALSE;
     reveler(a, FALSE, FALSE);
@@ -230,6 +233,7 @@ static void sur_sortie_zone(GtkEventControllerMotion *c, gpointer u)
  * visibles -- sinon, regarder ou l'on en est arreterait le film. */
 static void sur_appui(GtkGestureClick *g, int n, double x, double y, gpointer u)
 {
+    (void) x; (void) y;
     App *a = u;
     gboolean deja = gtk_revealer_get_reveal_child(GTK_REVEALER(a->reveleur));
 
@@ -305,13 +309,13 @@ static void sur_erreur(const char *message, gpointer u)
 /* ------------------------------------------------------------ commandes */
 
 static void act_basculer(GtkButton *b, gpointer u)
-{ video_moteur_basculer(((App *)u)->moteur); }
+{ (void) b; video_moteur_basculer(((App *)u)->moteur); }
 
 static void act_reculer(GtkButton *b, gpointer u)
-{ video_moteur_avancer(((App *)u)->moteur, -10.0); }
+{ (void) b; video_moteur_avancer(((App *)u)->moteur, -10.0); }
 
 static void act_avancer(GtkButton *b, gpointer u)
-{ video_moteur_avancer(((App *)u)->moteur, +10.0); }
+{ (void) b; video_moteur_avancer(((App *)u)->moteur, +10.0); }
 
 static void basculer_plein(App *a)
 {
@@ -321,7 +325,7 @@ static void basculer_plein(App *a)
         gtk_window_fullscreen(GTK_WINDOW(a->fenetre));
 }
 
-static void act_plein(GtkButton *b, gpointer u) { basculer_plein((App *)u); }
+static void act_plein(GtkButton *b, gpointer u) { (void) b; basculer_plein((App *)u); }
 
 /* LE PLEIN ECRAN SE LIT SUR LA FENETRE, PAS SUR LE BOUTON.
  *
@@ -331,6 +335,7 @@ static void act_plein(GtkButton *b, gpointer u) { basculer_plein((App *)u); }
  * vrai. Meme lecon que la visionneuse d'images. */
 static void sur_plein_change(GObject *o, GParamSpec *p, gpointer u)
 {
+    (void) o; (void) p;
     App *a = u;
     gboolean plein = gtk_window_is_fullscreen(GTK_WINDOW(a->fenetre));
     gtk_button_set_icon_name(GTK_BUTTON(a->b_plein),
@@ -353,6 +358,7 @@ static void rafraichir_son(App *a)
 
 static void act_sourdine(GtkButton *b, gpointer u)
 {
+    (void) b;
     App *a = u;
     video_moteur_sourdine(a->moteur, !video_moteur_est_muet(a->moteur));
     rafraichir_son(a);
@@ -373,6 +379,7 @@ static void sur_volume(GtkRange *r, gpointer u)
  * payer un decodage par pixel parcouru. */
 static gboolean sur_glissement(GtkRange *r, GtkScrollType t, double valeur, gpointer u)
 {
+    (void) r; (void) t;
     App *a = u;
     a->geste_us = g_get_monotonic_time();
     video_moteur_sauter(a->moteur, valeur);
@@ -387,6 +394,7 @@ static gboolean sur_glissement(GtkRange *r, GtkScrollType t, double valeur, gpoi
 static gboolean sur_touche(GtkEventControllerKey *c, guint val, guint code,
                            GdkModifierType mod, gpointer u)
 {
+    (void) c; (void) code; (void) mod;
     App *a = u;
     switch (val) {
         case GDK_KEY_space:
@@ -447,15 +455,17 @@ static gboolean sur_scenario(gpointer u)
 
 static void sur_apparition(GtkWidget *w, gpointer u)
 {
+    (void) w;
     App *a = u;
     battement_selon(a, video_moteur_etat(a->moteur) == VIDEO_LIT);
 }
 
 static void sur_disparition(GtkWidget *w, gpointer u)
-{ battement_selon((App *)u, FALSE); }
+{ (void) w; battement_selon((App *)u, FALSE); }
 
 static gboolean sur_fermeture(GtkWindow *w, gpointer u)
 {
+    (void) w;
     App *a = u;
     bilan(a, "fermeture");
     battement_selon(a, FALSE);

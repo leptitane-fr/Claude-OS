@@ -9,9 +9,11 @@ fichier_item_finalize (GObject *o)
 
     g_clear_object (&it->file);
     g_clear_object (&it->icone);
+    g_clear_object (&it->apercu);
     g_free (it->nom);
     g_free (it->cle_tri);
     g_free (it->type_texte);
+    g_free (it->type_mime);
 
     G_OBJECT_CLASS (fichier_item_parent_class)->finalize (o);
 }
@@ -20,6 +22,9 @@ static void
 fichier_item_class_init (FichierItemClass *klass)
 {
     G_OBJECT_CLASS (klass)->finalize = fichier_item_finalize;
+
+    g_signal_new ("apercu-pret", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
+                  0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
 static void
@@ -55,6 +60,9 @@ fichier_item_new (GFile *parent, GFileInfo *info)
     it->icone = (ic != NULL) ? g_object_ref (ic) : g_themed_icon_new ("text-x-generic");
 
     const char *ct = g_file_info_get_content_type (info);
+    if (!it->dossier && ct != NULL)
+        it->type_mime = g_content_type_get_mime_type (ct);
+
     if (it->dossier)
         it->type_texte = g_strdup ("Dossier");
     else if (ct != NULL)

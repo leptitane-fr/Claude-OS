@@ -185,7 +185,61 @@ comparaison des deux comportements est ce qui a fini par désigner le
 compositeur. **Un lecteur qui s'arrête quand personne ne regarde est un
 lecteur qui marche.**
 
-## 11.6 Les huit règles d'énergie du lecteur
+## 11.6 L'interface — phase 2
+
+```
++-------------------------------+
+|            vidéo              |  sans aucune bordure : ni cadre, ni marge,
+|                               |  ni coin arrondi, ni ombre
++-------------------------------+
+|        (espace vide)          |  <- au survol, la glissière apparaît ICI
+|     ( o====|--------- )       |
++-------------------------------+
+|     ( capsule des commandes ) |
++-------------------------------+
+```
+
+L'espace vide n'est pas une marge : c'est une **zone sensible**. La glissière
+y apparaît en fondu **par-dessus** le vide — une `GtkOverlay`, jamais une
+boîte : toute autre disposition ferait sauter la vidéo de quelques pixels à
+chaque passage du pointeur.
+
+**Au doigt, le survol n'existe pas.** Un toucher n'importe où révèle la
+glissière, et c'est seulement une fois les commandes visibles qu'un appui sur
+l'image met en pause. Sans cette règle, toucher l'écran pour voir où l'on en
+est arrêterait le film. Les commandes se retirent seules après quatre
+secondes — le seul minuteur du lecteur, à un coup.
+
+Commandes : position et durée, ±10 s, lecture/pause, sourdine, volume, plein
+écran. Clavier : espace, flèches, Origine, M, F, F11, Échap, Q. Cibles de
+44 px, 52 px pour la lecture.
+
+Trois détails qui ne se voient qu'à l'usage, et qui sont tous des règles
+d'énergie appliquées :
+
+- l'étiquette de position n'est réécrite que quand la **seconde** change —
+  sinon elle serait reconstruite quatre-vingts fois par seconde pour afficher
+  le même texte, et chaque réécriture réveille le compositeur ;
+- la glissière n'est mise à jour que si elle est **visible**, et jamais dans
+  les 300 ms qui suivent un geste, sans quoi le curseur saute sous le doigt ;
+- les largeurs de temps sont fixées en caractères : sinon la capsule change
+  de taille au passage de 9 à 10 secondes et les boutons se décalent.
+
+**Le plein écran se lit sur la propriété `fullscreened`**, pas sur le bouton :
+labwc garde pour lui la touche du Chromebook. Même leçon que la visionneuse.
+
+### Comment cela a été jugé, écran verrouillé
+
+`banc-video.sh --capture=fichier.png` capture l'écran du compositeur
+imbriqué par `grim`, et `--revele` force la glissière visible faute de
+pointeur dans un banc sans écran. C'est par là que la mise en page a été vue.
+
+Vérifié au passage, et ce n'était pas acquis : **l'ajout des widgets n'a rien
+coûté au chemin sans copie** — 451 images sur 451 encore confiées au
+compositeur. Un `GtkGraphicsOffload` cesse d'être pris dès que son contenu est
+rogné ou recouvert ; la capsule est en dessous, pas au-dessus.
+
+## 11.7 Les huit règles d'énergie du lecteur
 
 1. **Zéro scrutation** — pas un minuteur périodique. L'horloge de l'interface
    est l'image présentée.
@@ -198,7 +252,7 @@ lecteur qui marche.**
 7. Rien de résident : pas de démon, pas de vignettes, pas d'indexation.
 8. **Aucun chiffre annoncé sans mesure.**
 
-## 11.7 Les instruments, et comment s'en servir
+## 11.8 Les instruments, et comment s'en servir
 
 ```sh
 bash shell/essais/construire.sh                 # les deux programmes d'essai
@@ -212,6 +266,8 @@ GDK_DEBUG=offload ./shell/essais/build/sonde-offload mire.mp4 --mode=offload
 bash shell/essais/banc-video.sh mire.mp4 40
 bash shell/essais/banc-video.sh mire.mp4 30 --scenario   # pause, sauts, reprise
 
+bash shell/essais/banc-video.sh mire.mp4 10 --capture=/tmp/vu.png --revele
+
 bash tools/mesure-conso.sh -d 30 --contre "…" "libellé"
 bash tools/mesure-conso.sh --tableau            # tous les relevés passés
 ```
@@ -219,21 +275,30 @@ bash tools/mesure-conso.sh --tableau            # tous les relevés passés
 Les mires vivent dans `~/.local/share/claude-os/mires/` et ne sont pas dans le
 dépôt : elles se refabriquent.
 
-## 11.8 Ce qui reste à faire
+## 11.9 Ce qui reste à faire
 
 | Phase | Objet | État |
 |---|---|---|
 | 0 | Banc de mesure, sonde, choix d'architecture | **fait, mesuré** |
 | 1 | Noyau de lecture : démux, décodage, audio PipeWire, synchro | **fait, éprouvé au banc sans écran** |
-| 2 | L'interface : vidéo sans bordure, capsule, glissière au survol, tactile | à écrire |
-| 3 | Pistes, sous-titres, MIME, intégration au bureau | à écrire |
+| 2 | L'interface : vidéo sans bordure, capsule, glissière au survol, tactile | **faite, vue en capture** |
+| 3 | Pistes, sous-titres, vitesse de lecture, reprise à la position | à écrire |
 | 4 | Campagne d'énergie **sur batterie**, réglages, conclusions | à faire |
 
 Points ouverts, à ne pas oublier :
 
-- **RIEN N'A ÉTÉ VU SUR LE VRAI ÉCRAN.** Ni image, ni couleurs, ni son jugé à
-  l'oreille. Le lecteur n'est pas installé et n'est pas dans `meson.build` ; il
-  se compile par `shell/essais/construire.sh`.
+- **RIEN N'A ÉTÉ VU SUR LE VRAI ÉCRAN**, ni entendu. Tout a été jugé sur des
+  captures du compositeur sans écran. Restent à confirmer sur MADOO : les
+  couleurs, la fluidité perçue, le son, et surtout **les gestes au doigt** —
+  que le banc ne peut pas produire.
+- **LE LECTEUR N'EST PAS INSTALLÉ.** Il est dans `meson.build` et compile
+  sans un avertissement, mais `--compiler` réinstalle *tout* le shell et
+  l'autre instance travaille dans le même dépôt. À lancer quand vous serez
+  devant la machine :
+
+  ```sh
+  sudo bash install/bascule-session.sh --compiler
+  ```
 - **L'espace colorimétrique YUV de GTK** (§11.3) — non jugé à l'œil, et c'est
   la première chose à regarder quand l'écran sera disponible.
 - **La série en plein écran est à refaire** (§11.4), et la campagne

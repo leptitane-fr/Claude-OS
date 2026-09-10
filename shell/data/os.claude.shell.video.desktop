@@ -1,0 +1,30 @@
+[Desktop Entry]
+Type=Application
+Name=Vidéo
+GenericName=Lecteur vidéo
+Comment=Regarder une vidéo, au doigt, au clavier ou à la souris
+Exec=claude-os-video %U
+Icon=video-player
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=vidéo;video;film;lecteur;lire;media;
+# NOMMÉ D'APRÈS L'IDENTIFIANT DE L'APPLICATION, et non « claude-os-video ».
+#
+# GTK donne à la fenêtre l'app_id « os.claude.shell.video », et c'est par lui
+# que le dock retrouve le .desktop — donc l'icône et le nom — d'une fenêtre
+# ouverte. Nommé comme le binaire, le fichier resterait introuvable : la
+# fenêtre apparaîtrait avec une icône générique, et l'épingler écrirait un
+# identifiant qui ne lance rien. Même leçon que la visionneuse d'images.
+#
+# LES TYPES SONT CEUX QUE FFMPEG DÉCODE, ET C'EST TOUT L'INTÉRÊT.
+#
+# L'exigence de départ était « aucun codec à installer » : les décodeurs sont
+# DANS libavcodec, il n'y a donc pas de liste à tenir à jour au gré des
+# paquets présents — contrairement à une chaîne GStreamer, où déclarer un
+# type qu'aucun greffon ne sait lire promet ce qu'on ne tient pas.
+#
+# Ce qui reste vrai et qu'il faut savoir : sur cette machine, H.264, HEVC,
+# VP9, VP8 et MPEG-2 passent par le matériel ; AV1 est décodé en logiciel
+# (Jasper Lake est Gen11), et le lecteur l'affiche plutôt que de le taire.
+MimeType=video/mp4;video/x-matroska;video/webm;video/quicktime;video/mpeg;video/x-msvideo;video/x-ms-wmv;video/x-flv;video/ogg;video/3gpp;video/3gpp2;video/x-ogm+ogg;video/mp2t;video/x-m4v;video/vnd.avi;application/x-matroska;
+StartupNotify=true

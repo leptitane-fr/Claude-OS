@@ -23,7 +23,7 @@
  * ni la selection ni le tri, et le tri se regle en cliquant les en-tetes de
  * la vue Details, dont le trieur est celui de tout le monde.
  *
- * Les trois vues sont VIRTUELLES : elles ne construisent des widgets que
+ * Les quatre vues sont VIRTUELLES : elles ne construisent des widgets que
  * pour ce qui est a l'ecran. Un repertoire de dix mille fichiers ne coute
  * donc que dix mille petits objets.
  * ========================================================================= */
@@ -35,13 +35,16 @@
 #include "fichiers.h"
 #include "fichiers-ops.h"
 #include "fichiers-lieux.h"
+#include "fichiers-apercu.h"
 #include "reseau.h"
-
-typedef enum { VUE_ICONES, VUE_LISTE, VUE_DETAILS } Vue;
 
 static struct {
     GtkWidget          *fenetre;
-    GtkWidget          *pile;        /* les trois vues                      */
+    GtkWidget          *pile;        /* les quatre vues                     */
+    GtkWidget          *grille;      /* vue Icones                          */
+    GtkWidget          *apercu;      /* vue Apercu                          */
+    GtkWidget          *liste;       /* vue Liste                           */
+    gboolean            tactile;     /* derniere saisie au doigt            */
     GtkWidget          *lieux;
     GtkWidget          *fil;         /* boite du fil d'Ariane               */
     GtkWidget          *fil_defil;   /* son defilement horizontal           */
@@ -61,6 +64,7 @@ static struct {
     GtkFilter          *filtre;
     GtkColumnView      *colonnes;
     GtkColumnViewColumn *col_nom, *col_date, *col_type, *col_taille;
+    GtkColumnViewColumn *col_bourrage;
 
     GFile              *dossier;
     GPtrArray          *histoire;    /* GFile*, du plus ancien au plus recent */
@@ -275,6 +279,9 @@ on_lu (GListStore *magasin, GError *erreur, gpointer data)
 static void
 recharger (void)
 {
+    /* Les vignettes en attente visent les elements qu'on va jeter : ceux
+     * de la relecture sont neufs, et les redemanderont eux-memes. */
+    fichiers_apercu_abandonner ();
     fichiers_lire (F.dossier, F.magasin, on_lu, NULL);
 }
 
@@ -435,6 +442,49 @@ on_items_changed (GListModel *m, guint p, guint r, guint a, gpointer d)
     maj_etat ();
 }
 
+/* UNE VUE QUI ETAIT EN HAUT Y RESTE.
+ *
+ * Les vues de GTK gardent « accroche » l'element du haut quand la liste
+ * change. Or le dossier arrive dans l'ordre du disque et le tri range chaque
+ * element a sa place : le premier recu -- « notes.txt », disons -- restait
+ * accroche en haut, et les dossiers, tries avant lui, s'inseraient AU-DESSUS,
+ * hors de vue. Un dossier s'ouvrait donc deja defile, et « Sous-dossier »
+ * n'apparaissait qu'en remontant. Vu au banc d'essai, dans les trois vues
+ * d'alors.
+ *
+ * Connecte APRES les vues (g_signal_connect_after) : elles ont deja pris
+ * acte du changement, et l'ajustement, lui, n'a pas encore bouge -- la mise
+ * en page vient plus tard. Sa valeur dit donc ou l'on etait AVANT. */
+static void
+garder_en_haut (GListModel *m, guint p, guint r, guint a, gpointer d)
+{
+    (void) p; (void) r; (void) a; (void) d;
+    if (g_list_model_get_n_items (m) == 0)
+        return;
+
+    GtkWidget *vues[] = { F.grille, F.apercu, F.liste, GTK_WIDGET (F.colonnes) };
+    for (guint i = 0; i < G_N_ELEMENTS (vues); i++) {
+        if (vues[i] == NULL)
+            continue;
+        GtkWidget *defil = gtk_widget_get_ancestor (vues[i], GTK_TYPE_SCROLLED_WINDOW);
+        if (defil == NULL)
+            continue;
+        GtkAdjustment *v =
+            gtk_scrolled_window_get_vadjustment (GTK_SCROLLED_WINDOW (defil));
+        if (gtk_adjustment_get_value (v) > 0.0)
+            continue;
+
+        if (GTK_IS_GRID_VIEW (vues[i]))
+            gtk_grid_view_scroll_to (GTK_GRID_VIEW (vues[i]), 0, GTK_LIST_SCROLL_NONE, NULL);
+        else if (GTK_IS_LIST_VIEW (vues[i]))
+            gtk_list_view_scroll_to (GTK_LIST_VIEW (vues[i]), 0, GTK_LIST_SCROLL_NONE, NULL);
+        else
+            gtk_column_view_scroll_to (GTK_COLUMN_VIEW (vues[i]), 0, NULL,
+                                       GTK_LIST_SCROLL_NONE, NULL);
+    }
+}
+
+
 /* -------------------------------------------------------------------------
  * Filtre : fichiers caches et recherche
  * ------------------------------------------------------------------------- */
@@ -515,6 +565,7 @@ static int cmp_taille (gconstpointer x, gconstpointer y, gpointer d)
  * Fabriques de widgets, une par vue
  * ------------------------------------------------------------------------- */
 static void on_clic_item (GtkGestureClick *g, int n, double x, double y, gpointer d);
+static void on_appui_long_item (GtkGestureLongPress *g, double x, double y, gpointer d);
 static GdkContentProvider *on_item_drag (GtkDragSource *s, double x, double y, gpointer d);
 static gboolean on_item_drop (GtkDropTarget *t, const GValue *v, double x, double y, gpointer d);
 
@@ -531,6 +582,16 @@ armer (GtkWidget *w, GtkListItem *li)
     gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (droit), GDK_BUTTON_SECONDARY);
     g_signal_connect (droit, "pressed", G_CALLBACK (on_clic_item), w);
     gtk_widget_add_controller (w, GTK_EVENT_CONTROLLER (droit));
+
+    /* Au doigt, l'appui simple OUVRE (voir on_saisie) : il faut donc une
+     * autre facon de designer un element sans l'ouvrir. L'appui long le
+     * selectionne et montre son menu -- le clic droit du doigt, comme sur
+     * une tablette Windows ou un telephone. Tactile seulement : a la souris,
+     * rester appuye sert a glisser, pas a ouvrir un menu. */
+    GtkGesture *long_ = gtk_gesture_long_press_new ();
+    gtk_gesture_single_set_touch_only (GTK_GESTURE_SINGLE (long_), TRUE);
+    g_signal_connect (long_, "pressed", G_CALLBACK (on_appui_long_item), w);
+    gtk_widget_add_controller (w, GTK_EVENT_CONTROLLER (long_));
 
     GtkDragSource *src = gtk_drag_source_new ();
     gtk_drag_source_set_actions (src, GDK_ACTION_COPY | GDK_ACTION_MOVE);
@@ -552,25 +613,42 @@ item_de (GtkWidget *w)
     return (li != NULL) ? gtk_list_item_get_item (li) : NULL;
 }
 
-/* --- grille --------------------------------------------------------------- */
-static void
-grille_setup (GtkListItemFactory *f, GtkListItem *li, gpointer d)
-{
-    (void) f; (void) d;
+/* --- grilles : Icones et Apercu ------------------------------------------- */
 
+/* UNE CASE DE LARGEUR FIXE, et c'est elle qui porte la selection.
+ *
+ * Auparavant la case suivait son nom, et le surlignage etait celui de la
+ * cellule de la grille. Or GtkGridView donne a TOUTES ses colonnes la
+ * largeur minimale de la plus large : un seul nom sans espace
+ * (« README.md.bash_completion.gz ») que le retour a la ligne par mots ne
+ * savait pas couper imposait 280 px a chaque colonne, et la selection d'une
+ * icone de 48 px s'etalait sur toute cette largeur -- trois colonnes dans
+ * une fenetre qui en loge huit. Mesure au banc d'essai.
+ *
+ * Desormais : largeur fixe, coupe au caractere quand le mot ne tient pas,
+ * deux lignes au plus, et le surlignage sur la case. La grille range alors
+ * autant de colonnes que la fenetre en loge. */
+static GtkWidget *
+case_nouvelle (GtkListItem *li, int cote_image, int largeur, int car_max)
+{
     GtkWidget *img = gtk_image_new ();
-    gtk_image_set_pixel_size (GTK_IMAGE (img), 48);
+    gtk_image_set_pixel_size (GTK_IMAGE (img), cote_image);
+    /* Un carre constant : dans l'Apercu, une icone de 96 px et une vignette
+     * de 128 occupent la meme place, et les noms restent alignes. */
+    gtk_widget_set_size_request (img, cote_image, cote_image);
 
     GtkWidget *nom = gtk_label_new (NULL);
     gtk_widget_add_css_class (nom, "fichiers-nom");
     gtk_label_set_wrap (GTK_LABEL (nom), TRUE);
+    gtk_label_set_wrap_mode (GTK_LABEL (nom), PANGO_WRAP_WORD_CHAR);
     gtk_label_set_lines (GTK_LABEL (nom), 2);
     gtk_label_set_ellipsize (GTK_LABEL (nom), PANGO_ELLIPSIZE_END);
     gtk_label_set_justify (GTK_LABEL (nom), GTK_JUSTIFY_CENTER);
-    gtk_label_set_max_width_chars (GTK_LABEL (nom), 14);
+    gtk_label_set_max_width_chars (GTK_LABEL (nom), car_max);
 
-    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
     gtk_widget_add_css_class (boite, "fichiers-case");
+    gtk_widget_set_size_request (boite, largeur, -1);
     gtk_widget_set_halign (boite, GTK_ALIGN_CENTER);
     gtk_box_append (GTK_BOX (boite), img);
     gtk_box_append (GTK_BOX (boite), nom);
@@ -579,6 +657,14 @@ grille_setup (GtkListItemFactory *f, GtkListItem *li, gpointer d)
     g_object_set_data (G_OBJECT (boite), "nom", nom);
     armer (boite, li);
     gtk_list_item_set_child (li, boite);
+    return boite;
+}
+
+static void
+grille_setup (GtkListItemFactory *f, GtkListItem *li, gpointer d)
+{
+    (void) f; (void) d;
+    case_nouvelle (li, 48, 110, 14);
 }
 
 static void
@@ -603,6 +689,73 @@ case_bind (GtkListItemFactory *f, GtkListItem *li, gpointer d)
     gtk_widget_set_opacity (boite, coupe ? 0.45 : 1.0);
 }
 
+/* --- apercu ---------------------------------------------------------------- */
+#define APERCU_COTE 128        /* la vignette, en pixels logiques          */
+#define APERCU_ICONE 96        /* l'icone, quand il n'y a pas de vignette  */
+
+static void
+apercu_setup (GtkListItemFactory *f, GtkListItem *li, gpointer d)
+{
+    (void) f; (void) d;
+    GtkWidget *boite = case_nouvelle (li, APERCU_COTE, APERCU_COTE + 20, 16);
+    gtk_widget_add_css_class (boite, "fichiers-case-apercu");
+}
+
+static void
+apercu_poser (GtkWidget *boite, FichierItem *it)
+{
+    GtkImage *img = GTK_IMAGE (g_object_get_data (G_OBJECT (boite), "image"));
+    GdkTexture *t = fichiers_apercu_obtenir (it);
+
+    if (t != NULL) {
+        gtk_image_set_from_paintable (img, GDK_PAINTABLE (t));
+        gtk_image_set_pixel_size (img, APERCU_COTE);
+    } else {
+        gtk_image_set_from_gicon (img, it->icone);
+        gtk_image_set_pixel_size (img, APERCU_ICONE);
+    }
+}
+
+/* La vignette arrive apres la liaison. La case verifie qu'elle montre
+ * toujours cet element : entre la demande et la reponse, le defilement a pu
+ * la recycler pour un autre. */
+static void
+on_apercu_pret (FichierItem *it, gpointer data)
+{
+    GtkWidget   *boite = data;
+    GtkListItem *li = g_object_get_data (G_OBJECT (boite), "list-item");
+    if (li != NULL && gtk_list_item_get_item (li) == (gpointer) it)
+        apercu_poser (boite, it);
+}
+
+static void
+apercu_bind (GtkListItemFactory *f, GtkListItem *li, gpointer d)
+{
+    case_bind (f, li, d);
+
+    GtkWidget   *boite = gtk_list_item_get_child (li);
+    FichierItem *it    = gtk_list_item_get_item (li);
+    if (boite == NULL || it == NULL)
+        return;
+
+    fichiers_apercu_regler (gtk_widget_get_scale_factor (boite));
+    g_signal_connect (it, "apercu-pret", G_CALLBACK (on_apercu_pret), boite);
+    apercu_poser (boite, it);
+}
+
+static void
+apercu_unbind (GtkListItemFactory *f, GtkListItem *li, gpointer d)
+{
+    (void) f; (void) d;
+    GtkWidget   *boite = gtk_list_item_get_child (li);
+    FichierItem *it    = gtk_list_item_get_item (li);
+    if (boite == NULL || it == NULL)
+        return;
+
+    g_signal_handlers_disconnect_by_func (it, on_apercu_pret, boite);
+    fichiers_apercu_oublier (it);
+}
+
 /* --- liste ---------------------------------------------------------------- */
 static void
 liste_setup (GtkListItemFactory *f, GtkListItem *li, gpointer d)
@@ -615,7 +768,12 @@ liste_setup (GtkListItemFactory *f, GtkListItem *li, gpointer d)
     GtkWidget *nom = gtk_label_new (NULL);
     gtk_widget_add_css_class (nom, "fichiers-nom");
     gtk_label_set_ellipsize (GTK_LABEL (nom), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_halign (nom, GTK_ALIGN_START);
+    /* L'etiquette occupe tout le reste de la ligne, texte cale a gauche :
+     * l'ajustement au double clic (ajuster_colonne) deduit la marge d'une
+     * cellule en retranchant la largeur de l'etiquette a celle de la
+     * colonne, ce qui suppose qu'elle ait tout recu. */
+    gtk_widget_set_hexpand (nom, TRUE);
+    gtk_label_set_xalign (GTK_LABEL (nom), 0.0);
 
     GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
     gtk_widget_add_css_class (boite, "fichiers-ligne");
@@ -676,6 +834,24 @@ texte_bind (GtkListItemFactory *f, GtkListItem *li, gpointer d)
 
 static char *type_de (FichierItem *it) { return g_strdup (it->type_texte); }
 
+/* La cellule de la colonne de bourrage : vide, mais armee comme les autres,
+ * pour que la ligne se clique et se glisse jusqu'au bord droit. */
+static void
+bourrage_setup (GtkListItemFactory *f, GtkListItem *li, gpointer d)
+{
+    (void) f; (void) d;
+    GtkWidget *vide = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand (vide, TRUE);
+    armer (vide, li);
+    gtk_list_item_set_child (li, vide);
+}
+
+static void
+bourrage_bind (GtkListItemFactory *f, GtkListItem *li, gpointer d)
+{
+    (void) f; (void) li; (void) d;
+}
+
 static GtkListItemFactory *
 fabrique (GCallback setup, GCallback bind, gpointer data)
 {
@@ -685,25 +861,223 @@ fabrique (GCallback setup, GCallback bind, gpointer data)
     return f;
 }
 
-/* `largeur` a -1 laisse la colonne prendre la place restante ; une valeur
- * fixe la borne. Sans bornes, les colonnes se dimensionnent sur leur contenu
- * et la derniere depasse la fenetre -- « 240,0 ko » tronque a droite, vu au
- * banc d'essai. Elles restent redimensionnables a la main. */
+/* TOUTES LES COLONNES ONT UNE LARGEUR FIXE, « Nom » comprise.
+ *
+ * Sans bornes, les colonnes se dimensionnent sur leur contenu et la
+ * derniere depasse la fenetre -- « 240,0 ko » tronque a droite, vu au banc
+ * d'essai. Elles restent redimensionnables a la main, et un double clic sur
+ * la bordure droite d'un en-tete les ramene a la largeur de leur contenu :
+ * c'est GTK qui le fait (header_pressed, gtkcolumnview.c), en rendant
+ * fixed-width a -1.
+ *
+ * « Nom » etait auparavant en expand, et c'etait le defaut : GTK donne tout
+ * l'espace libre aux colonnes en expand, PAR-DESSUS leur largeur naturelle.
+ * La reduire rendait aussitot l'espace libere a elle-meme -- les colonnes de
+ * droite ne pouvaient pas glisser vers la gauche -- et une marge enorme
+ * separait la fin des noms de « Modifié le ». Voir colonne_bourrage(). */
 static GtkColumnViewColumn *
 colonne (const char *titre, GtkListItemFactory *f, GtkSorter *tri, int largeur)
 {
     GtkColumnViewColumn *c = gtk_column_view_column_new (titre, f);
     gtk_column_view_column_set_sorter (c, tri);
     gtk_column_view_column_set_resizable (c, TRUE);
-
-    if (largeur < 0)
-        gtk_column_view_column_set_expand (c, TRUE);
-    else
-        gtk_column_view_column_set_fixed_width (c, largeur);
+    gtk_column_view_column_set_fixed_width (c, largeur);
 
     g_object_unref (tri);
     gtk_column_view_append_column (F.colonnes, c);
     return c;
+}
+
+/* LA COLONNE DE BOURRAGE, invisible, toujours en dernier.
+ *
+ * GTK ne donne JAMAIS de poignee a la derniere colonne (« i + 1 < n » dans
+ * header_drag_begin et header_pressed) : « Taille », derniere, ne se
+ * redimensionnait pas, ni a la main ni au double clic. Et il faut bien que
+ * l'espace libre a droite aille quelque part : sans colonne en expand, les
+ * lignes s'arreteraient a « Taille », et le surlignage avec elles.
+ *
+ * Cette colonne sans titre ni tri prend donc l'espace restant. Toutes les
+ * vraies colonnes ont une poignee, et quand l'une se reduit ou s'ajuste au
+ * double clic, celles de sa droite suivent -- le bourrage absorbe la
+ * difference. */
+static void
+on_colonnes_changees (GListModel *m, guint p, guint r, guint a, gpointer d)
+{
+    (void) p; (void) r; (void) a; (void) d;
+    static gboolean en_cours = FALSE;
+
+    /* Les en-tetes se reordonnent au glisser : si l'on y deplace le
+     * bourrage, il retourne au bout. Le repositionnement rappelle ce
+     * gestionnaire, d'ou le verrou. */
+    guint n = g_list_model_get_n_items (m);
+    if (en_cours || F.col_bourrage == NULL || n == 0)
+        return;
+
+    g_autoptr(GtkColumnViewColumn) dernier = g_list_model_get_item (m, n - 1);
+    if (dernier == F.col_bourrage)
+        return;
+
+    en_cours = TRUE;
+    gtk_column_view_insert_column (F.colonnes, n - 1, F.col_bourrage);
+    en_cours = FALSE;
+}
+
+/* L'AJUSTEMENT AU DOUBLE CLIC MESURE TOUT LE DOSSIER.
+ *
+ * GTK sait deja ramener une colonne a son contenu (header_pressed), mais il
+ * ne mesure que les cellules CONSTRUITES -- les vues sont virtuelles, donc
+ * seulement les lignes a l'ecran. Le nom le plus long, trois lignes plus
+ * bas, restait tronque apres l'ajustement. Vu au banc d'essai.
+ *
+ * On prend donc le double clic avant lui (capture), et l'on mesure le texte
+ * de chaque element du modele avec la police de la vue. La marge d'une
+ * cellule -- icone, espacements, rembourrages du theme -- n'est pas devinee :
+ * elle est lue sur une ligne affichee, colonne moins etiquette. */
+
+static GtkWidget *
+enfant_nomme (GtkWidget *parent, const char *css, guint rang)
+{
+    for (GtkWidget *c = gtk_widget_get_first_child (parent); c != NULL;
+         c = gtk_widget_get_next_sibling (c)) {
+        if (g_strcmp0 (gtk_widget_get_css_name (c), css) != 0)
+            continue;
+        if (rang-- == 0)
+            return c;
+    }
+    return NULL;
+}
+
+static void
+ajuster_colonne (guint rang, GtkWidget *titre)
+{
+    g_autoptr(GtkColumnViewColumn) col =
+        g_list_model_get_item (gtk_column_view_get_columns (F.colonnes), rang);
+    if (col == NULL)
+        return;
+
+    /* Une ligne affichee, et l'etiquette de cette colonne dans cette ligne. */
+    GtkWidget *vue    = enfant_nomme (GTK_WIDGET (F.colonnes), "listview", 0);
+    GtkWidget *ligne  = vue ? enfant_nomme (vue, "row", 0) : NULL;
+    GtkWidget *cell   = ligne ? enfant_nomme (ligne, "cell", rang) : NULL;
+    GtkWidget *contenu = cell ? gtk_widget_get_first_child (cell) : NULL;
+    GtkWidget *etiquette = NULL;
+    if (contenu != NULL)
+        etiquette = GTK_IS_LABEL (contenu)
+                  ? contenu : g_object_get_data (G_OBJECT (contenu), "nom");
+
+    if (etiquette == NULL) {
+        /* Rien d'affiche a quoi prendre la police : le comportement de GTK,
+         * sur ce qu'il a construit, vaut mieux que rien. */
+        gtk_column_view_column_set_fixed_width (col, -1);
+        return;
+    }
+
+    /* La BOITE DE BORDURE du titre, qui est la largeur de la colonne :
+     * gtk_widget_get_width() rend la boite de contenu, rembourrage exclu --
+     * 299 px pour une colonne de 320, et le nom le plus long restait tronque
+     * d'autant. L'etiquette, elle, n'a ni bordure ni rembourrage. */
+    graphene_rect_t b;
+    if (!gtk_widget_compute_bounds (titre, titre, &b))
+        return;
+    int marge = (int) b.size.width - gtk_widget_get_width (etiquette);
+
+    TexteFunc fn = col == F.col_date   ? fichier_item_date_texte
+                 : col == F.col_type   ? type_de
+                 : col == F.col_taille ? fichier_item_taille_texte
+                                       : NULL;
+
+    PangoLayout *mise = gtk_widget_create_pango_layout (etiquette, NULL);
+    int large = 0;
+    guint n = g_list_model_get_n_items (G_LIST_MODEL (F.selection));
+    for (guint i = 0; i < n; i++) {
+        g_autoptr(FichierItem) it = g_list_model_get_item (G_LIST_MODEL (F.selection), i);
+        g_autofree char *t = (fn != NULL) ? fn (it) : g_strdup (it->nom);
+        int w;
+        pango_layout_set_text (mise, t, -1);
+        pango_layout_get_pixel_size (mise, &w, NULL);
+        large = MAX (large, w);
+    }
+    g_object_unref (mise);
+
+    /* Jamais plus etroite que son titre : l'en-tete doit rester lisible,
+     * et c'est aussi la regle de GTK. */
+    int titre_nat;
+    gtk_widget_measure (titre, GTK_ORIENTATION_HORIZONTAL, -1, NULL, &titre_nat,
+                        NULL, NULL);
+
+    /* +2 : l'arrondi des mesures Pango, faute de quoi le dernier caractere
+     * se voit parfois remplace par des points de suspension. */
+    gtk_column_view_column_set_fixed_width (col, MAX (titre_nat, large + marge + 2));
+}
+
+static void
+on_double_clic_entete (GtkGestureClick *g, int n_press, double x, double y,
+                       gpointer data)
+{
+    (void) data; (void) n_press;
+
+    /* Le double clic est compte ICI, et non par n_press : le premier appui
+     * sur une bordure, GTK le reclame pour son glisser de redimensionnement,
+     * ce geste-ci perd la sequence, et son compteur repart a un. */
+    static gint64 dernier = 0;
+    static double dernier_x = -100;
+    int delai_ms = 400;
+    g_object_get (gtk_widget_get_settings (GTK_WIDGET (F.colonnes)),
+                  "gtk-double-click-time", &delai_ms, NULL);
+    gint64 maintenant = g_get_monotonic_time ();
+    gboolean double_clic = maintenant - dernier <= (gint64) delai_ms * 1000
+                        && ABS (x - dernier_x) <= 6;
+    dernier   = double_clic ? 0 : maintenant;
+    dernier_x = x;
+    if (!double_clic)
+        return;
+
+    GtkWidget *entete = enfant_nomme (GTK_WIDGET (F.colonnes), "header", 0);
+    graphene_point_t p;
+    if (entete == NULL
+        || !gtk_widget_compute_point (GTK_WIDGET (F.colonnes), entete,
+                                      &GRAPHENE_POINT_INIT ((float) x, (float) y), &p)
+        || p.y < 0 || p.y > gtk_widget_get_height (entete))
+        return;
+
+    /* La bordure droite de chaque titre, a 4 px pres -- la zone de saisie de
+     * GTK (DRAG_WIDTH, 8 px centres sur le bord). Le bourrage, dernier, n'a
+     * pas de bordure a saisir. */
+    guint rang = 0;
+    for (GtkWidget *t = gtk_widget_get_first_child (entete); t != NULL;
+         t = gtk_widget_get_next_sibling (t), rang++) {
+        if (gtk_widget_get_next_sibling (t) == NULL)
+            break;
+        graphene_rect_t r;
+        if (!gtk_widget_compute_bounds (t, entete, &r))
+            continue;
+        double bord = r.origin.x + r.size.width;
+        if (p.x >= bord - 4 && p.x <= bord + 4) {
+            gtk_gesture_set_state (GTK_GESTURE (g), GTK_EVENT_SEQUENCE_CLAIMED);
+            ajuster_colonne (rang, t);
+            return;
+        }
+    }
+}
+
+static void
+colonne_bourrage (void)
+{
+    F.col_bourrage = gtk_column_view_column_new (
+        NULL, fabrique (G_CALLBACK (bourrage_setup), G_CALLBACK (bourrage_bind), NULL));
+    gtk_column_view_column_set_expand (F.col_bourrage, TRUE);
+    gtk_column_view_column_set_resizable (F.col_bourrage, FALSE);
+    gtk_column_view_append_column (F.colonnes, F.col_bourrage);
+
+    g_signal_connect (gtk_column_view_get_columns (F.colonnes), "items-changed",
+                      G_CALLBACK (on_colonnes_changees), NULL);
+
+    GtkGesture *dbl = gtk_gesture_click_new ();
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (dbl), GDK_BUTTON_PRIMARY);
+    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (dbl),
+                                                GTK_PHASE_CAPTURE);
+    g_signal_connect (dbl, "pressed", G_CALLBACK (on_double_clic_entete), NULL);
+    gtk_widget_add_controller (GTK_WIDGET (F.colonnes), GTK_EVENT_CONTROLLER (dbl));
 }
 
 /* -------------------------------------------------------------------------
@@ -1014,6 +1388,76 @@ act_favori (GSimpleAction *a, GVariant *p, gpointer d)
         fichiers_lieux_ajouter (F.lieux, cible);
 }
 
+/* --- terminal ------------------------------------------------------------- */
+
+/* Le terminal du bureau d'abord -- celui du dock, que claude-os-theme
+ * habille -- puis l'alternative Debian, puis celui de secours de labwc.
+ *
+ * Le dossier est passe DEUX fois : en repertoire courant du processus, que
+ * tout terminal herite, et par --working-directory pour xfce4-terminal. Ce
+ * dernier est mono-instance : un second lancement confie la fenetre au
+ * processus deja ouvert, dont le repertoire courant est celui de SON
+ * lancement. Seule l'option voyage jusqu'a lui. */
+static void
+ouvrir_terminal (GFile *dossier)
+{
+    g_autofree char *chemin = g_file_get_path (dossier);
+    if (chemin == NULL) {
+        signaler ("Impossible d'ouvrir un terminal ici",
+                  "Ce dossier n'a pas de chemin sur le disque.");
+        return;
+    }
+
+    static const char *const TERMINAUX[] = {
+        "xfce4-terminal", "x-terminal-emulator", "foot", NULL
+    };
+
+    g_autofree char *prog = NULL;
+    const char *nom = NULL;
+    for (int i = 0; TERMINAUX[i] != NULL && prog == NULL; i++) {
+        prog = g_find_program_in_path (TERMINAUX[i]);
+        nom  = TERMINAUX[i];
+    }
+    if (prog == NULL) {
+        signaler ("Aucun terminal n'est installé",
+                  "Ni xfce4-terminal, ni x-terminal-emulator, ni foot.");
+        return;
+    }
+
+    g_autoptr(GSubprocessLauncher) l =
+        g_subprocess_launcher_new (G_SUBPROCESS_FLAGS_NONE);
+    g_subprocess_launcher_set_cwd (l, chemin);
+
+    g_autoptr(GError) e = NULL;
+    g_autoptr(GSubprocess) p = NULL;
+    if (g_strcmp0 (nom, "xfce4-terminal") == 0)
+        p = g_subprocess_launcher_spawn (l, &e, prog, "--working-directory", chemin, NULL);
+    else
+        p = g_subprocess_launcher_spawn (l, &e, prog, NULL);
+
+    /* GSubprocess recolte lui-meme le processus a sa fin : le relacher ici
+     * ne laisse pas de zombie. */
+    if (p == NULL)
+        signaler ("Impossible d'ouvrir un terminal", e->message);
+}
+
+static void
+act_terminal (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    ouvrir_terminal (F.dossier);
+}
+
+/* Depuis le menu d'un DOSSIER : le terminal s'ouvre dans ce dossier-la, et
+ * non dans celui qui le contient. */
+static void
+act_terminal_element (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    g_autoptr(FichierItem) it = premier_choisi ();
+    ouvrir_terminal ((it != NULL && it->dossier) ? it->file : F.dossier);
+}
+
 /* --- proprietes ----------------------------------------------------------- */
 static void
 ligne_prop (GtkWidget *grille, int rang, const char *cle, const char *valeur)
@@ -1129,6 +1573,8 @@ static const GActionEntry actions[] = {
     { "nouveau",    act_nouveau,    NULL, NULL, NULL, { 0 } },
     { "proprietes", act_proprietes, NULL, NULL, NULL, { 0 } },
     { "favori",     act_favori,     NULL, NULL, NULL, { 0 } },
+    { "terminal",   act_terminal,   NULL, NULL, NULL, { 0 } },
+    { "terminal-element", act_terminal_element, NULL, NULL, NULL, { 0 } },
     { "tout",       act_tout,       NULL, NULL, NULL, { 0 } },
     { "caches",     act_caches,     NULL, NULL, NULL, { 0 } },
     { "recharger",  act_recharger,  NULL, NULL, NULL, { 0 } },
@@ -1158,12 +1604,10 @@ montrer_menu (GMenu *modele, GtkWidget *ancre, double x, double y)
     gtk_popover_popup (GTK_POPOVER (F.menu));
 }
 
+/* Le menu d'un element, au clic droit comme a l'appui long du doigt. */
 static void
-on_clic_item (GtkGestureClick *g, int n, double x, double y, gpointer data)
+menu_element (GtkGesture *g, GtkWidget *w, double x, double y)
 {
-    GtkWidget *w = data;
-    (void) n;
-
     FichierItem *it = item_de (w);
     GtkListItem *li = g_object_get_data (G_OBJECT (w), "list-item");
     if (it == NULL || li == NULL)
@@ -1173,8 +1617,12 @@ on_clic_item (GtkGestureClick *g, int n, double x, double y, gpointer data)
      * donc en amont -- se declenchait juste apres et remplacait le menu de
      * l'element par le sien : le clic droit sur un fichier proposait
      * « Nouveau dossier ». Un GtkGestureClick ne bloque pas la propagation
-     * de lui-meme, il faut la reclamer. Constate au banc d'essai. */
-    gtk_gesture_set_state (GTK_GESTURE (g), GTK_EVENT_SEQUENCE_CLAIMED);
+     * de lui-meme, il faut la reclamer. Constate au banc d'essai.
+     *
+     * Au doigt, la reclamer a un second effet, voulu : le geste de l'element
+     * de liste se voit refuser la sequence, et le doigt qu'on leve apres
+     * l'appui long n'ouvre pas le fichier. */
+    gtk_gesture_set_state (g, GTK_EVENT_SEQUENCE_CLAIMED);
 
     /* Le clic droit sur un element HORS selection selectionne celui-la seul.
      * Sans cela, « Supprimer » agirait sur ce qui etait selectionne ailleurs,
@@ -1200,10 +1648,12 @@ on_clic_item (GtkGestureClick *g, int n, double x, double y, gpointer data)
     g_menu_append_section (menu, NULL, G_MENU_MODEL (s3));
 
     g_autoptr(GMenu) s4 = g_menu_new ();
-    if (it->dossier)
+    if (it->dossier) {
+        g_menu_append (s4, "Ouvrir dans un terminal", "fichiers.terminal-element");
         g_menu_append (s4, fichiers_lieux_est_favori (F.lieux, it->file)
                            ? "Retirer des favoris" : "Ajouter aux favoris",
                        "fichiers.favori");
+    }
     g_menu_append (s4, "Propriétés", "fichiers.proprietes");
     g_menu_append_section (menu, NULL, G_MENU_MODEL (s4));
 
@@ -1211,16 +1661,51 @@ on_clic_item (GtkGestureClick *g, int n, double x, double y, gpointer data)
 }
 
 static void
-on_clic_fond (GtkGestureClick *g, int n, double x, double y, gpointer data)
+on_clic_item (GtkGestureClick *g, int n, double x, double y, gpointer data)
 {
-    GtkWidget *w = data;
-    (void) g; (void) n;
+    (void) n;
+    menu_element (GTK_GESTURE (g), data, x, y);
+}
 
+static void
+on_appui_long_item (GtkGestureLongPress *g, double x, double y, gpointer data)
+{
+    menu_element (GTK_GESTURE (g), data, x, y);
+}
+
+/* -------------------------------------------------------------------------
+ * Le fond : ce qui n'est pas un element
+ *
+ * Le point vise est-il sur un element, ou « a cote » ? On remonte depuis le
+ * widget touche jusqu'a la pile. Une case de grille (« child »), une ligne
+ * (« row ») ou un widget arme -- c'est un element. Les en-tetes de colonnes
+ * et les barres de defilement ne sont pas le fond non plus : cliquer pour
+ * trier ou pour defiler ne doit pas perdre la selection.
+ * ------------------------------------------------------------------------- */
+static gboolean
+sur_un_element (double x, double y)
+{
+    GtkWidget *w = gtk_widget_pick (F.pile, x, y, GTK_PICK_DEFAULT);
+
+    for (; w != NULL && w != F.pile; w = gtk_widget_get_parent (w)) {
+        const char *n = gtk_widget_get_css_name (w);
+        if (g_strcmp0 (n, "child") == 0 || g_strcmp0 (n, "row") == 0
+            || g_strcmp0 (n, "header") == 0 || g_strcmp0 (n, "scrollbar") == 0
+            || g_object_get_data (G_OBJECT (w), "list-item") != NULL)
+            return TRUE;
+    }
+    return FALSE;
+}
+
+static void
+menu_fond (GtkWidget *w, double x, double y)
+{
     g_autoptr(GMenu) menu = g_menu_new ();
     g_autoptr(GMenu) s1 = g_menu_new ();
     g_menu_append (s1, "Nouveau dossier…", "fichiers.nouveau");
     if (F.presse->len > 0)
         g_menu_append (s1, "Coller", "fichiers.coller");
+    g_menu_append (s1, "Ouvrir un terminal ici", "fichiers.terminal");
     g_menu_append_section (menu, NULL, G_MENU_MODEL (s1));
 
     g_autoptr(GMenu) s2 = g_menu_new ();
@@ -1241,6 +1726,99 @@ on_clic_fond (GtkGestureClick *g, int n, double x, double y, gpointer data)
     g_menu_append_section (menu, NULL, G_MENU_MODEL (s3));
 
     montrer_menu (menu, w, x, y);
+}
+
+/* Clic droit sur le fond : comme dans Windows, la selection tombe d'abord.
+ * Le menu du fond agit sur le dossier, et une selection restee allumee
+ * laisserait croire que « Coller » ou « Nouveau dossier » la concerne. */
+static void
+on_clic_fond (GtkGestureClick *g, int n, double x, double y, gpointer data)
+{
+    (void) g; (void) n;
+    if (!sur_un_element (x, y))
+        gtk_selection_model_unselect_all (F.selection);
+    menu_fond (data, x, y);
+}
+
+static void
+on_appui_long_fond (GtkGestureLongPress *g, double x, double y, gpointer data)
+{
+    if (sur_un_element (x, y))
+        return;
+    gtk_gesture_set_state (GTK_GESTURE (g), GTK_EVENT_SEQUENCE_CLAIMED);
+    gtk_selection_model_unselect_all (F.selection);
+    menu_fond (data, x, y);
+}
+
+/* LE CLIC A COTE DESELECTIONNE TOUT.
+ *
+ * Au RELACHEMENT, et non a l'appui : au doigt, poser le doigt a cote d'un
+ * element pour faire defiler la vue ne doit pas perdre la selection. Le
+ * defilement reclame la sequence, ce geste-ci est annule, et « released »
+ * n'arrive jamais. Seul un appui bref -- un vrai clic -- deselectionne.
+ *
+ * Pose en CAPTURE sur la pile, pour voir passer le clic avant les vues. Il
+ * ne reclame rien : un clic sur un element continue son chemin jusqu'a
+ * l'element de liste, qui le selectionne comme avant.
+ *
+ * Ctrl et Maj gardent la selection : ce sont les touches qu'on tient pour
+ * l'etendre, et les relacher un peu tard ne doit pas tout effacer. */
+static void
+on_relache_fond (GtkGestureClick *g, int n, double x, double y, gpointer data)
+{
+    (void) n; (void) data;
+    GdkModifierType m =
+        gtk_event_controller_get_current_event_state (GTK_EVENT_CONTROLLER (g));
+    if (m & (GDK_CONTROL_MASK | GDK_SHIFT_MASK))
+        return;
+    if (!sur_un_element (x, y))
+        gtk_selection_model_unselect_all (F.selection);
+}
+
+/* -------------------------------------------------------------------------
+ * Le doigt ouvre d'un seul appui
+ *
+ * A la souris, un clic selectionne et un double clic ouvre : c'est le
+ * comportement de Windows, et il est garde. Au doigt, le double appui est
+ * penible et imprecis ; un appui simple ouvre, comme sur une tablette.
+ *
+ * GTK sait faire l'un ou l'autre -- « single-click-activate » -- mais pour
+ * toute la vue, et en mode simple clic une souris SELECTIONNE AU SURVOL.
+ * On bascule donc selon le dernier appareil utilise : le premier contact du
+ * doigt passe les vues en appui simple, le premier mouvement de souris ou de
+ * pave les ramene au double clic.
+ *
+ * Controleur « legacy » en capture sur la fenetre : il voit chaque evenement
+ * avant tout geste, donc AVANT que l'element de liste ne decide, au
+ * relachement, s'il ouvre ou s'il selectionne. Il ne consomme rien.
+ * ------------------------------------------------------------------------- */
+static void
+regler_tactile (gboolean tactile)
+{
+    if (F.tactile == tactile)
+        return;
+    F.tactile = tactile;
+
+    gtk_grid_view_set_single_click_activate (GTK_GRID_VIEW (F.grille), tactile);
+    gtk_grid_view_set_single_click_activate (GTK_GRID_VIEW (F.apercu), tactile);
+    gtk_list_view_set_single_click_activate (GTK_LIST_VIEW (F.liste), tactile);
+    gtk_column_view_set_single_click_activate (F.colonnes, tactile);
+}
+
+static gboolean
+on_saisie (GtkEventControllerLegacy *c, GdkEvent *e, gpointer data)
+{
+    (void) c; (void) data;
+    GdkEventType t = gdk_event_get_event_type (e);
+
+    if (t == GDK_TOUCH_BEGIN) {
+        regler_tactile (TRUE);
+    } else if (t == GDK_BUTTON_PRESS || t == GDK_MOTION_NOTIFY) {
+        GdkDevice *dev = gdk_event_get_device (e);
+        if (dev != NULL && gdk_device_get_source (dev) != GDK_SOURCE_TOUCHSCREEN)
+            regler_tactile (FALSE);
+    }
+    return GDK_EVENT_PROPAGATE;
 }
 
 /* -------------------------------------------------------------------------
@@ -1469,7 +2047,7 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_window_set_title (GTK_WINDOW (F.fenetre), "Fichiers");
     gtk_window_set_default_size (GTK_WINDOW (F.fenetre), 1040, 660);
 
-    /* --- le modele, partage par les trois vues --- */
+    /* --- le modele, partage par les quatre vues --- */
     F.magasin = g_list_store_new (FICHIERS_TYPE_ITEM);
     F.filtre  = GTK_FILTER (gtk_custom_filter_new (retenu, NULL, NULL));
     F.modele_filtre = gtk_filter_list_model_new (
@@ -1491,7 +2069,7 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     F.col_nom = colonne ("Nom",
         fabrique (G_CALLBACK (colonne_nom_setup), G_CALLBACK (case_bind), NULL),
-        GTK_SORTER (gtk_custom_sorter_new (cmp_nom, NULL, NULL)), -1);
+        GTK_SORTER (gtk_custom_sorter_new (cmp_nom, NULL, NULL)), 320);
     F.col_date = colonne ("Modifié le",
         fabrique (G_CALLBACK (texte_setup), G_CALLBACK (texte_bind),
                   fichier_item_date_texte),
@@ -1503,6 +2081,7 @@ on_activate (GtkApplication *app, gpointer user_data)
         fabrique (G_CALLBACK (texte_setup), G_CALLBACK (texte_bind),
                   fichier_item_taille_texte),
         GTK_SORTER (gtk_custom_sorter_new (cmp_taille, NULL, NULL)), 100);
+    colonne_bourrage ();
 
     /* Le trieur de la vue Details est LE trieur : cliquer un en-tete
      * reordonne aussi les vues Icones et Liste, et le menu « Trier par »
@@ -1513,43 +2092,84 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_column_view_sort_by_column (F.colonnes, F.col_nom, GTK_SORT_ASCENDING);
     gtk_column_view_set_model (F.colonnes, F.selection);
 
-    /* --- vues Icones et Liste --- */
-    GtkWidget *grille = gtk_grid_view_new (
+    /* --- vues Icones, Apercu et Liste --- */
+    /* Autant de colonnes que la fenetre en loge : les cases ont une largeur
+     * fixe (voir case_nouvelle), et un plafond bas etalerait l'espace
+     * restant ENTRE elles sur un grand ecran. */
+    F.grille = gtk_grid_view_new (
         g_object_ref (F.selection),
         fabrique (G_CALLBACK (grille_setup), G_CALLBACK (case_bind), NULL));
-    gtk_grid_view_set_max_columns (GTK_GRID_VIEW (grille), 12);
-    gtk_grid_view_set_min_columns (GTK_GRID_VIEW (grille), 3);
-    gtk_widget_add_css_class (grille, "fichiers-grille");
+    gtk_grid_view_set_max_columns (GTK_GRID_VIEW (F.grille), 32);
+    gtk_grid_view_set_min_columns (GTK_GRID_VIEW (F.grille), 2);
+    gtk_widget_add_css_class (F.grille, "fichiers-grille");
 
-    GtkWidget *liste = gtk_list_view_new (
+    GtkListItemFactory *f_apercu = gtk_signal_list_item_factory_new ();
+    g_signal_connect (f_apercu, "setup",  G_CALLBACK (apercu_setup),  NULL);
+    g_signal_connect (f_apercu, "bind",   G_CALLBACK (apercu_bind),   NULL);
+    g_signal_connect (f_apercu, "unbind", G_CALLBACK (apercu_unbind), NULL);
+    F.apercu = gtk_grid_view_new (g_object_ref (F.selection), f_apercu);
+    gtk_grid_view_set_max_columns (GTK_GRID_VIEW (F.apercu), 32);
+    gtk_grid_view_set_min_columns (GTK_GRID_VIEW (F.apercu), 1);
+    gtk_widget_add_css_class (F.apercu, "fichiers-grille");
+    gtk_widget_add_css_class (F.apercu, "fichiers-apercu");
+
+    F.liste = gtk_list_view_new (
         g_object_ref (F.selection),
         fabrique (G_CALLBACK (liste_setup), G_CALLBACK (case_bind), NULL));
-    gtk_widget_add_css_class (liste, "fichiers-liste");
+    gtk_widget_add_css_class (F.liste, "fichiers-liste");
 
-    g_signal_connect (grille, "activate", G_CALLBACK (on_active), NULL);
-    g_signal_connect (liste,  "activate", G_CALLBACK (on_active), NULL);
+    g_signal_connect (F.grille, "activate", G_CALLBACK (on_active), NULL);
+    g_signal_connect (F.apercu, "activate", G_CALLBACK (on_active), NULL);
+    g_signal_connect (F.liste,  "activate", G_CALLBACK (on_active), NULL);
     g_signal_connect (F.colonnes, "activate", G_CALLBACK (on_active), NULL);
+    g_signal_connect_after (F.selection, "items-changed",
+                            G_CALLBACK (garder_en_haut), NULL);
+    /* Le modele survit aux vues. En se detruisant, la vue Details retire
+     * son trieur : le modele se retrie, et garder_en_haut() visait des vues
+     * deja liberees -- trois Gtk-CRITICAL a chaque fermeture, vus sous
+     * AddressSanitizer. Se desabonner sur « destroy » ne suffit pas : une
+     * GtkWindow detruit ses enfants AVANT d'emettre ce signal. Des pointeurs
+     * faibles, remis a NULL a la liberation de chaque vue. */
+    g_object_add_weak_pointer (G_OBJECT (F.grille),   (gpointer *) &F.grille);
+    g_object_add_weak_pointer (G_OBJECT (F.apercu),   (gpointer *) &F.apercu);
+    g_object_add_weak_pointer (G_OBJECT (F.liste),    (gpointer *) &F.liste);
+    g_object_add_weak_pointer (G_OBJECT (F.colonnes), (gpointer *) &F.colonnes);
 
     GtkWidget *d_grille = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (d_grille), grille);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (d_grille), F.grille);
+    GtkWidget *d_apercu = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (d_apercu), F.apercu);
     GtkWidget *d_liste = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (d_liste), liste);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (d_liste), F.liste);
     GtkWidget *d_col = gtk_scrolled_window_new ();
     gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (d_col), GTK_WIDGET (F.colonnes));
 
     F.pile = gtk_stack_new ();
     gtk_stack_add_named (GTK_STACK (F.pile), d_grille, "icones");
+    gtk_stack_add_named (GTK_STACK (F.pile), d_apercu, "apercu");
     gtk_stack_add_named (GTK_STACK (F.pile), d_liste,  "liste");
     gtk_stack_add_named (GTK_STACK (F.pile), d_col,    "details");
     gtk_widget_set_hexpand (F.pile, TRUE);
     gtk_widget_set_vexpand (F.pile, TRUE);
 
     /* Clic droit sur le fond, et depot dans le dossier courant : poses sur
-     * la pile, ils valent pour les trois vues d'un coup. */
+     * la pile, ils valent pour toutes les vues d'un coup. */
     GtkGestureClick *fond = GTK_GESTURE_CLICK (gtk_gesture_click_new ());
     gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (fond), GDK_BUTTON_SECONDARY);
     g_signal_connect (fond, "pressed", G_CALLBACK (on_clic_fond), F.pile);
     gtk_widget_add_controller (F.pile, GTK_EVENT_CONTROLLER (fond));
+
+    GtkGesture *fond_long = gtk_gesture_long_press_new ();
+    gtk_gesture_single_set_touch_only (GTK_GESTURE_SINGLE (fond_long), TRUE);
+    g_signal_connect (fond_long, "pressed", G_CALLBACK (on_appui_long_fond), F.pile);
+    gtk_widget_add_controller (F.pile, GTK_EVENT_CONTROLLER (fond_long));
+
+    GtkGestureClick *a_cote = GTK_GESTURE_CLICK (gtk_gesture_click_new ());
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (a_cote), GDK_BUTTON_PRIMARY);
+    gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (a_cote),
+                                                GTK_PHASE_CAPTURE);
+    g_signal_connect (a_cote, "released", G_CALLBACK (on_relache_fond), NULL);
+    gtk_widget_add_controller (F.pile, GTK_EVENT_CONTROLLER (a_cote));
 
     GtkDropTarget *depot = gtk_drop_target_new (GDK_TYPE_FILE_LIST,
                                                 GDK_ACTION_COPY | GDK_ACTION_MOVE);
@@ -1598,8 +2218,10 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     GtkWidget *vues = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_add_css_class (vues, "fichiers-vues");
+    /* Du plus grand au plus dense, comme le menu Affichage de Windows. */
     const struct { const char *nom, *cible; } v[] = {
-        { "Icônes", "icones" }, { "Liste", "liste" }, { "Détails", "details" }
+        { "Aperçu", "apercu" }, { "Icônes", "icones" },
+        { "Liste", "liste" },   { "Détails", "details" }
     };
     for (guint i = 0; i < G_N_ELEMENTS (v); i++) {
         GtkWidget *b = gtk_toggle_button_new_with_label (v[i].nom);
@@ -1700,6 +2322,11 @@ on_activate (GtkApplication *app, gpointer user_data)
         GTK_EVENT_CONTROLLER_KEY (gtk_event_controller_key_new ());
     g_signal_connect (k, "key-pressed", G_CALLBACK (on_touche), NULL);
     gtk_widget_add_controller (F.fenetre, GTK_EVENT_CONTROLLER (k));
+
+    GtkEventController *saisie = gtk_event_controller_legacy_new ();
+    gtk_event_controller_set_propagation_phase (saisie, GTK_PHASE_CAPTURE);
+    g_signal_connect (saisie, "event", G_CALLBACK (on_saisie), NULL);
+    gtk_widget_add_controller (F.fenetre, saisie);
 
     gtk_window_present (GTK_WINDOW (F.fenetre));
 

@@ -91,7 +91,7 @@ struct _VideoMoteur {
 
 /* ------------------------------------------------------------- utilitaires */
 
-static void dire_erreur(VideoMoteur *m, const char *quoi, int code)
+static void dire_erreur(const char *quoi, int code)
 {
     char buf[AV_ERROR_MAX_STRING_SIZE] = {0};
     if (code < 0) av_strerror(code, buf, sizeof buf);
@@ -210,7 +210,7 @@ static void executer_saut(VideoMoteur *m, double cible)
     int64_t ou = (int64_t)(cible * AV_TIME_BASE);
     int r = avformat_seek_file(m->fmt, -1, INT64_MIN, ou, ou, 0);
     if (r < 0) {
-        dire_erreur(m, "avformat_seek_file", r);
+        dire_erreur("avformat_seek_file", r);
         return;
     }
 
@@ -263,7 +263,7 @@ static gpointer fil_decodage(gpointer data)
             if (m->dec_v) avcodec_send_packet(m->dec_v, NULL);
             if (m->dec_a) avcodec_send_packet(m->dec_a, NULL);
         } else if (r < 0) {
-            dire_erreur(m, "av_read_frame", r);
+            dire_erreur("av_read_frame", r);
             g_mutex_lock(&m->verrou); m->demux_fini = TRUE; g_mutex_unlock(&m->verrou);
             continue;
         }
@@ -272,11 +272,11 @@ static gpointer fil_decodage(gpointer data)
             if (paquet->stream_index == m->piste_v && m->dec_v) {
                 int s = avcodec_send_packet(m->dec_v, paquet);
                 if (s < 0 && s != AVERROR(EAGAIN))
-                    dire_erreur(m, "send_packet video", s);
+                    dire_erreur("send_packet video", s);
             } else if (paquet->stream_index == m->piste_a && m->dec_a) {
                 int s = avcodec_send_packet(m->dec_a, paquet);
                 if (s < 0 && s != AVERROR(EAGAIN))
-                    dire_erreur(m, "send_packet audio", s);
+                    dire_erreur("send_packet audio", s);
             }
         }
         av_packet_unref(paquet);
@@ -300,7 +300,7 @@ static gpointer fil_decodage(gpointer data)
                     }
                     break;
                 }
-                if (q < 0) { dire_erreur(m, "receive_frame", q); break; }
+                if (q < 0) { dire_erreur("receive_frame", q); break; }
 
                 int64_t pts_brut = trame->best_effort_timestamp != AV_NOPTS_VALUE
                                  ? trame->best_effort_timestamp : trame->pts;
