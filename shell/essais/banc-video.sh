@@ -23,6 +23,7 @@
 # Usage :
 #   bash shell/essais/banc-video.sh mire.mp4 [secondes]
 #   bash shell/essais/banc-video.sh mire.mp4 10 --sonde     # la sonde plutôt
+#   bash shell/essais/banc-video.sh mire.mp4 10 --capture=/tmp/vu.png
 #
 # Le journal complet reste dans /tmp/claude-os-banc-video.log
 
@@ -33,10 +34,12 @@ BUILD="$ICI/build"
 FICHIER="${1:?fichier vidéo à lire}"
 SECONDES="${2:-10}"
 shift 2 2>/dev/null || shift $#
-SONDE=""; SCENARIO=""
+SONDE=""; SCENARIO=""; CAPTURE=""; REVELE=""
 for arg in "$@"; do
 	[ "$arg" = "--sonde" ] && SONDE=1
 	[ "$arg" = "--scenario" ] && SCENARIO=" --scenario"
+	[ "$arg" = "--revele" ] && REVELE=" --revele"
+	case "$arg" in --capture=*) CAPTURE="${arg#--capture=}" ;; esac
 done
 
 [ -x "$BUILD/claude-os-video" ] || { echo "Compiler d'abord : bash $ICI/construire.sh" >&2; exit 1; }
@@ -64,10 +67,16 @@ LANCEUR="$CONF/lancer.sh"
 	echo '#!/bin/sh'
 	echo "exec > '$JOURNAL' 2>&1"
 	echo 'export GDK_DEBUG=offload'
+	# LA CAPTURE : grim, dans le compositeur imbrique, apres que le lecteur
+	# a eu le temps d'afficher. C'est le seul moyen de VOIR l'interface
+	# quand l'ecran de la machine est eteint ou verrouille.
+	if [ -n "$CAPTURE" ]; then
+		echo "( sleep 4; grim '$CAPTURE' ) &"
+	fi
 	if [ -n "$SONDE" ]; then
 		echo "exec '$BUILD/sonde-offload' '$FICHIER' --mode=offload --duree=$SECONDES"
 	else
-		echo "exec '$BUILD/claude-os-video' '$FICHIER' --essai=$SECONDES$SCENARIO"
+		echo "exec '$BUILD/claude-os-video' '$FICHIER' --essai=$SECONDES$SCENARIO$REVELE"
 	fi
 } > "$LANCEUR"
 chmod +x "$LANCEUR"
@@ -88,5 +97,8 @@ echo "  images confiées au compositeur (sans copie) : $ATTACHES"
 grep -E "^\*\* Message|WARNING|CRITICAL|erreur|échec" "$JOURNAL" \
 	| grep -vE "Gdk-DEBUG" \
 	| sed 's/^/  /'
+echo
+[ -n "$CAPTURE" ] && [ -f "$CAPTURE" ] && \
+	echo "  capture : $CAPTURE ($(file -b "$CAPTURE" | cut -d, -f2 | tr -d ' '))"
 echo
 echo "Journal complet : $JOURNAL"

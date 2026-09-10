@@ -1024,29 +1024,50 @@ window.fichiers { background-color: @surface; }
 .fichiers-liste,
 .fichiers-colonnes { background-color: @surface; }
 
-.fichiers-case  { padding: 10px 6px; }
+.fichiers-case  { padding: 8px 4px 6px 4px; }
 .fichiers-ligne { padding: 4px 8px; }
 
 .fichiers-nom    { font-size: 13px; color: @text; }
 .fichiers-detail { font-size: 12px; color: @text-dim; }
 
-/* La sélection, dans les trois vues. Les nœuds diffèrent — « child » pour
-   une grille, « row » pour une liste — mais le rendu doit être identique. */
-.fichiers-grille > child,
+/* La sélection, dans toutes les vues. Même rayon, même accent : une grille
+   et une liste diffèrent par leur forme, pas par leur langage. */
+.fichiers-case,
 .fichiers-liste > row,
 .fichiers-colonnes row {
   border-radius: 10px;
-  margin: 1px 4px;
   transition: background-color 120ms ease-out;
 }
 
+.fichiers-liste > row,
+.fichiers-colonnes row { margin: 1px 4px; }
+
+/* Dans les grilles, c'est la CASE qui s'allume, pas la cellule : la cellule
+   a la largeur de la colonne, la case celle de l'icône et de son nom. La
+   cellule reste transparente, et ne garde qu'un espacement entre voisines. */
+.fichiers-grille > child,
 .fichiers-grille > child:hover,
+.fichiers-grille > child:selected {
+  background: none;
+  background-color: transparent;
+  padding: 3px;
+  margin: 0;
+  border-radius: 10px;
+}
+
+.fichiers-grille > child:hover .fichiers-case,
 .fichiers-liste > row:hover,
 .fichiers-colonnes row:hover { background-color: @surface-alt; }
 
-.fichiers-grille > child:selected,
+.fichiers-grille > child:selected .fichiers-case,
 .fichiers-liste > row:selected,
 .fichiers-colonnes row:selected { background-color: @accent; }
+
+/* Un cadre fin sous la case au clavier : sans lui, la cellule qui a le
+   focus ne se distingue plus, maintenant qu'elle est transparente. */
+.fichiers-grille > child:focus-visible .fichiers-case {
+  box-shadow: inset 0 0 0 2px @accent;
+}
 
 .fichiers-grille > child:selected .fichiers-nom,
 .fichiers-liste > row:selected .fichiers-nom,
@@ -1597,4 +1618,132 @@ window.images { background-color: @surface; }
   background-color: transparent;
   padding: 2px;
   min-width: 296px;
+}
+
+/* =========================================================================
+   Vidéo — claude-os-video
+
+   Trois règles, et elles viennent toutes de la même exigence : la vidéo
+   d'abord.
+
+   1. LA VIDÉO N'A AUCUNE BORDURE. Pas de cadre, pas de marge, pas de coin
+      arrondi, pas d'ombre. Le tampon décodé est posé tel quel ; tout ce
+      qu'on dessinerait autour serait, littéralement, du travail en plus
+      pour le compositeur.
+   2. LE FOND EST NOIR, et non @surface. Une vidéo n'a pas le même format
+      que la fenêtre : les bandes qui restent doivent disparaître, pas
+      s'afficher en gris clair à côté de l'image.
+   3. LA CAPSULE FLOTTE. Elle ne touche ni la vidéo ni le bord, et l'espace
+      qui la sépare de l'image est une zone sensible, pas une marge.
+   ========================================================================= */
+
+.video-fenetre,
+.video-pile {
+  background-color: #000000;
+}
+
+/* L'ESPACE VIDE, entre la vidéo et la capsule. Il ne se voit pas — c'est le
+   propos — mais il reçoit le survol et le toucher. */
+.video-zone {
+  background-color: #000000;
+  padding: 0 24px;
+}
+
+/* La glissière : fine au repos, et jamais encombrante. Elle n'existe que
+   révélée, donc elle peut se permettre d'être discrète. */
+.video-glissiere trough {
+  min-height: 5px;
+  border-radius: 3px;
+  background-color: alpha(#ffffff, 0.22);
+  border: none;
+}
+.video-glissiere highlight {
+  min-height: 5px;
+  border-radius: 3px;
+  background-color: @accent;
+}
+.video-glissiere slider {
+  min-width: 16px;
+  min-height: 16px;
+  border-radius: 9px;
+  background-color: #ffffff;
+  border: none;
+  box-shadow: 0 1px 4px alpha(#000000, 0.6);
+  /* Marge négative : sans elle GTK réserve la hauteur de la poignée pour la
+     piste, et la zone gagne dix pixels de vide. Même leçon que .qs-curseur. */
+  margin: -6px;
+  transition: min-width 120ms ease-out, min-height 120ms ease-out;
+}
+/* Au doigt comme à la souris, la poignée grossit quand on la tient : c'est
+   ce qui dit qu'on a bien attrapé quelque chose. */
+.video-glissiere:hover slider,
+.video-glissiere slider:active {
+  min-width: 22px;
+  min-height: 22px;
+  margin: -9px;
+}
+
+/* LA CAPSULE. Une pastille posée sous la vidéo, centrée, jamais collée au
+   bord — 14 px en bas, pour que le pouce ne la manque pas en tablette. */
+.video-capsule {
+  background-color: alpha(@surface, 0.92);
+  border: 1px solid @border;
+  border-radius: 26px;
+  padding: 5px 12px;
+  margin: 0 16px 14px 16px;
+  box-shadow: 0 4px 18px alpha(#000000, 0.45);
+}
+
+/* 44 px : la cible tactile minimale. Ce n'est pas un chiffre décoratif —
+   en dessous, un doigt manque le bouton une fois sur cinq. */
+.video-bouton {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 22px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  color: @text;
+  transition: background-color 120ms ease-out;
+}
+.video-bouton:hover    { background-color: @surface-alt; }
+.video-bouton:active   { background-color: @surface-sunk; }
+.video-bouton:disabled { opacity: 0.35; }
+
+/* Le bouton lecture est le seul qu'on vise sans regarder. */
+.video-bouton-grand {
+  min-width: 52px;
+  min-height: 52px;
+  border-radius: 26px;
+  background-color: @accent;
+  color: @on-accent;
+}
+.video-bouton-grand:hover  { background-color: @accent-hover; }
+.video-bouton-grand:active { background-color: @accent-press; }
+
+.video-temps {
+  font-size: 12px;
+  color: @text;
+  font-feature-settings: "tnum";   /* chiffres de largeur fixe : sinon la
+                                      capsule tremble à chaque seconde */
+  padding: 0 2px;
+}
+.video-temps-total { color: @text-dim; }
+
+.video-volume trough    { min-height: 5px; border-radius: 3px;
+                          background-color: @surface-sunk; }
+.video-volume highlight { min-height: 5px; border-radius: 3px;
+                          background-color: @text; }
+.video-volume slider    { min-width: 15px; min-height: 15px;
+                          border-radius: 8px; background-color: @text;
+                          border: none; margin: -5px; }
+
+/* « décodage logiciel » : dit seulement quand c'est vrai, et sans dramatiser
+   — c'est une information, pas une alarme. */
+.video-codec {
+  font-size: 11px;
+  color: @warn;
+  padding: 0 6px;
 }

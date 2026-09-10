@@ -59,6 +59,13 @@ void         video_moteur_sauter(VideoMoteur *m, double secondes);
 void         video_moteur_avancer(VideoMoteur *m, double delta);
 
 gboolean     video_moteur_a_audio(VideoMoteur *m);
+
+/* Volume de 0 a 1, et sourdine. La sourdine garde le volume en memoire :
+ * couper puis retablir doit rendre le meme niveau, pas 100 %. */
+void         video_moteur_volume(VideoMoteur *m, double v);
+double       video_moteur_volume_actuel(VideoMoteur *m);
+void         video_moteur_sourdine(VideoMoteur *m, gboolean muet);
+gboolean     video_moteur_est_muet(VideoMoteur *m);
 gboolean     video_moteur_a_video(VideoMoteur *m);
 int          video_moteur_largeur(VideoMoteur *m);
 int          video_moteur_hauteur(VideoMoteur *m);

@@ -1,6 +1,4 @@
-/* Claude OS -- « Vidéo », le lecteur. Phase 1 : le noyau de lecture, dans une
- * fenetre nue. L'interface demandee -- image sans bordure, capsule de
- * commandes, glissiere revelee au survol -- vient ensuite.
+/* Claude OS -- « Vidéo », le lecteur.
  *
  * CE QUI BAT LA MESURE, ET POURQUOI CE N'EST PAS UN MINUTEUR.
  *
@@ -15,12 +13,46 @@
  *
  * Un g_timeout_add(1000/30, ...) aurait fait la meme chose a l'ecran, et
  * aurait battu dans le vide fenetre masquee comme en pause.
+ *
+ * LA FORME DEMANDEE, ET CE QU'ELLE IMPLIQUE.
+ *
+ *   +-------------------------------+
+ *   |                               |  la video, SANS AUCUNE BORDURE :
+ *   |            video              |  ni cadre, ni marge, ni coin arrondi.
+ *   |                               |
+ *   +-------------------------------+
+ *   |        (espace vide)          |  <- au survol, la glissiere apparait ICI
+ *   |     ( o====|--------- )       |
+ *   +-------------------------------+
+ *   |     ( capsule des commandes ) |
+ *   +-------------------------------+
+ *
+ * L'espace vide n'est pas une marge : c'est une ZONE SENSIBLE. La glissiere
+ * y apparait en fondu, PAR-DESSUS le vide, sans jamais deplacer la video ni
+ * la capsule -- un decalage de mise en page a chaque survol serait
+ * insupportable a l'usage. D'ou une GtkOverlay, et non une boite.
+ *
+ * AU DOIGT, LE SURVOL N'EXISTE PAS. Un toucher n'importe ou revele la
+ * glissiere ; c'est seulement une fois les commandes visibles qu'un appui
+ * sur l'image met en pause. Sans cette regle, toucher l'ecran pour voir ou
+ * l'on en est arreterait la lecture -- exactement l'inverse de ce qu'on
+ * voulait.
  */
 
 #include "video-moteur.h"
 #include "video-image.h"
+#include "config.h"
 
 #include <gtk/gtk.h>
+
+/* Hauteur de l'espace vide. Assez haut pour qu'un doigt le vise sans viser,
+ * assez bas pour rester un intervalle et non un bandeau. */
+#define ZONE_VIDE_PX 46
+
+/* Combien de temps la glissiere reste apres le dernier contact tactile.
+ * C'est le SEUL minuteur du lecteur, il est a un coup, et il n'existe que
+ * pendant les quelques secondes qui suivent un toucher. */
+#define RETRAIT_S 4
 
 typedef struct {
     GtkApplication *app;
@@ -28,20 +60,82 @@ typedef struct {
     GtkWidget      *image;
     GtkWidget      *offload;
 
+    GtkWidget      *zone;          /* l'espace vide, sensible au survol   */
+    GtkWidget      *reveleur;
+    GtkWidget      *glissiere;
+    GtkWidget      *capsule;
+
+    GtkWidget      *b_lecture;
+    GtkWidget      *b_plein;
+    GtkWidget      *b_son;
+    GtkWidget      *volume;
+    GtkWidget      *l_position;
+    GtkWidget      *l_duree;
+    GtkWidget      *l_codec;
+
     VideoMoteur    *moteur;
     VideoImage      images;
-    guint           battement;      /* identifiant du tick callback        */
+    guint           battement;
+    guint           retrait;        /* minuteur a un coup du retrait      */
+
+    gint64          geste_us;       /* dernier geste sur la glissiere     */
+    int             seconde_affichee;
+    gboolean        survol;
 
     gchar          *fichier;
-    int             duree_essai;    /* --essai=N : quitter apres N secondes */
-    gboolean        plein;          /* --plein-ecran                        */
-    gboolean        scenario;       /* --scenario : parcours automatique    */
+    int             duree_essai;
+    gboolean        plein;
+    gboolean        scenario;
+    gboolean        revele;         /* --revele : banc, pour la capture     */
     int             etape;
     gint64          depart;
-    gint64          battements;     /* combien de fois l'horloge a battu   */
+    gint64          battements;
 } App;
 
-/* ------------------------------------------------------------ affichage */
+static void bilan(App *a, const char *quand);
+static void act_sourdine(GtkButton *b, gpointer u);
+
+/* ------------------------------------------------------------- affichage */
+
+static gchar *duree_texte(double s)
+{
+    if (s < 0) s = 0;
+    int total = (int)(s + 0.5);
+    int h = total / 3600, m = (total / 60) % 60, sec = total % 60;
+    return h > 0 ? g_strdup_printf("%d:%02d:%02d", h, m, sec)
+                 : g_strdup_printf("%d:%02d", m, sec);
+}
+
+/* La position ne se reecrit QUE quand la seconde change. Sans ce garde-fou,
+ * l'etiquette serait reconstruite quatre-vingts fois par seconde pour
+ * afficher le meme texte, et chaque reecriture invalide une zone de la
+ * fenetre -- donc reveille le compositeur pour rien. */
+static void rafraichir_position(App *a, double position)
+{
+    int s = (int)position;
+    if (s == a->seconde_affichee) return;
+    a->seconde_affichee = s;
+
+    gchar *t = duree_texte(position);
+    gtk_label_set_text(GTK_LABEL(a->l_position), t);
+    g_free(t);
+}
+
+static void rafraichir_glissiere(App *a, double position)
+{
+    /* Pendant qu'on tire la glissiere, on ne la contredit pas : sans ce
+     * delai, le curseur saute sous le doigt entre deux positions. */
+    if (g_get_monotonic_time() - a->geste_us < 300 * G_TIME_SPAN_MILLISECOND)
+        return;
+    if (!gtk_revealer_get_reveal_child(GTK_REVEALER(a->reveleur)))
+        return;                     /* invisible : rien a redessiner      */
+
+    g_signal_handlers_block_matched(a->glissiere, G_SIGNAL_MATCH_DATA, 0, 0,
+                                    NULL, NULL, a);
+    gtk_range_set_value(GTK_RANGE(a->glissiere), position);
+    g_signal_handlers_unblock_matched(a->glissiere, G_SIGNAL_MATCH_DATA, 0, 0,
+                                      NULL, NULL, a);
+}
 
 static gboolean sur_battement(GtkWidget *w, GdkFrameClock *horloge, gpointer u)
 {
@@ -55,74 +149,128 @@ static gboolean sur_battement(GtkWidget *w, GdkFrameClock *horloge, gpointer u)
     }
 
     AVFrame *trame = video_moteur_image_due(a->moteur);
-    if (!trame) return G_SOURCE_CONTINUE;
+    if (trame) {
+        GdkTexture *t = video_image_texture(&a->images, trame,
+                                            gtk_widget_get_display(a->image));
+        /* La texture dmabuf garde sa propre reference sur les tampons : la
+         * trame decodee peut etre rendue au decodeur des maintenant, ce qui
+         * lui evite d'attendre une surface libre. */
+        av_frame_free(&trame);
 
-    GdkTexture *t = video_image_texture(&a->images, trame,
-                                        gtk_widget_get_display(a->image));
-    /* La texture dmabuf garde sa propre reference sur les tampons : la trame
-     * decodee peut etre rendue au decodeur des maintenant, ce qui lui evite
-     * d'attendre une surface libre. */
-    av_frame_free(&trame);
-
-    if (t) {
-        gtk_picture_set_paintable(GTK_PICTURE(a->image), GDK_PAINTABLE(t));
-        g_object_unref(t);
+        if (t) {
+            gtk_picture_set_paintable(GTK_PICTURE(a->image), GDK_PAINTABLE(t));
+            g_object_unref(t);
+        }
     }
+
+    double position = video_moteur_position(a->moteur);
+    rafraichir_position(a, position);
+    rafraichir_glissiere(a, position);
     return G_SOURCE_CONTINUE;
 }
 
-/* LE BATTEMENT NE SE POSE QUE SUR UN WIDGET DEJA AFFICHE.
+/* Le battement n'existe QUE pendant la lecture, et seulement sur un widget
+ * deja affiche.
  *
- * Piege paye le 10 septembre 2026, et il ne se voit pas a la lecture du
- * code : gtk_widget_add_tick_callback() sur un widget PAS ENCORE REALISE
- * enregistre bien le rappel -- gtk_widget_get_realized() dira ensuite oui,
- * l'identifiant sera valide -- mais l'horloge d'images n'est jamais mise en
- * marche. Le rappel est alors appele UNE FOIS, a la premiere image que GTK
- * dessine de toute facon, puis plus jamais. La fenetre reste sur cette
- * unique image, sans une erreur, et tout le reste du lecteur parait en
- * cause : le decodeur, l'audio, le compositeur.
- *
- * Le battement est donc pose au « map » et retire au « unmap ». Benefice de
- * cote, et il est exactement dans la ligne du projet : une fenetre reduite
- * cesse de battre, donc de decoder, sans une ligne de plus. */
+ * PIEGE PAYE LE 10 SEPTEMBRE 2026, et il ne se voit pas a la lecture :
+ * gtk_widget_add_tick_callback() sur un widget pas encore realise enregistre
+ * le rappel et rend un identifiant valide, mais n'a pas d'horloge a mettre
+ * en marche. Le rappel est alors appele UNE fois, a la premiere image que
+ * GTK dessine de toute facon, puis plus jamais -- sans une erreur. */
 static void battement_selon(App *a, gboolean actif)
 {
     if (actif && !gtk_widget_get_mapped(a->image)) return;
 
-    if (actif && !a->battement) {
-        a->battement = gtk_widget_add_tick_callback(a->image, sur_battement,
-                                                    a, NULL);
-    } else if (!actif && a->battement) {
+    if (actif && !a->battement)
+        a->battement = gtk_widget_add_tick_callback(a->image, sur_battement, a, NULL);
+    else if (!actif && a->battement) {
         gtk_widget_remove_tick_callback(a->image, a->battement);
         a->battement = 0;
     }
 }
 
+/* ------------------------------------------------- la glissiere revelee */
+
+static gboolean retirer_glissiere(gpointer u)
+{
+    App *a = u;
+    a->retrait = 0;
+    if (!a->survol)
+        gtk_revealer_set_reveal_child(GTK_REVEALER(a->reveleur), FALSE);
+    return G_SOURCE_REMOVE;
+}
+
+/* « momentane » : au doigt, la glissiere se retire seule ; a la souris,
+ * elle suit le survol et n'a pas besoin de minuteur. */
+static void reveler(App *a, gboolean visible, gboolean momentane)
+{
+    gtk_revealer_set_reveal_child(GTK_REVEALER(a->reveleur), visible);
+
+    if (a->retrait) { g_source_remove(a->retrait); a->retrait = 0; }
+    if (visible && momentane)
+        a->retrait = g_timeout_add_seconds(RETRAIT_S, retirer_glissiere, a);
+}
+
+static void sur_entree_zone(GtkEventControllerMotion *c, double x, double y, gpointer u)
+{
+    App *a = u;
+    a->survol = TRUE;
+    reveler(a, TRUE, FALSE);
+}
+
+static void sur_sortie_zone(GtkEventControllerMotion *c, gpointer u)
+{
+    App *a = u;
+    a->survol = FALSE;
+    reveler(a, FALSE, FALSE);
+}
+
+/* LE TOUCHER, PARTOUT. Le premier contact revele, et ne met pas en pause.
+ * Un appui sur l'image ne bascule la lecture que si les commandes sont deja
+ * visibles -- sinon, regarder ou l'on en est arreterait le film. */
+static void sur_appui(GtkGestureClick *g, int n, double x, double y, gpointer u)
+{
+    App *a = u;
+    gboolean deja = gtk_revealer_get_reveal_child(GTK_REVEALER(a->reveleur));
+
+    GdkEvent *ev = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(g));
+    GdkDevice *dev = ev ? gdk_event_get_device(ev) : NULL;
+    gboolean tactile = dev && gdk_device_get_source(dev) == GDK_SOURCE_TOUCHSCREEN;
+
+    reveler(a, TRUE, tactile);
+    if (!deja) return;                    /* le premier contact ne fait que reveler */
+
+    if (n == 2 || tactile)
+        video_moteur_basculer(a->moteur);
+}
+
 /* --------------------------------------------------------------- moteur */
+
+static void rafraichir_bouton_lecture(App *a)
+{
+    gboolean lit = video_moteur_etat(a->moteur) == VIDEO_LIT;
+    gtk_button_set_icon_name(GTK_BUTTON(a->b_lecture),
+                             lit ? "media-playback-pause-symbolic"
+                                 : "media-playback-start-symbolic");
+    gtk_widget_set_tooltip_text(a->b_lecture, lit ? "Pause" : "Lecture");
+}
 
 static void sur_etat(VideoEtat etat, gpointer u)
 {
     App *a = u;
     battement_selon(a, etat == VIDEO_LIT);
+    rafraichir_bouton_lecture(a);
+
+    /* A l'arret la position n'avance plus : on la pose une derniere fois,
+     * sinon l'etiquette garde la seconde d'avant. */
+    if (etat != VIDEO_LIT) {
+        double p = video_moteur_position(a->moteur);
+        a->seconde_affichee = -1;
+        rafraichir_position(a, p);
+        rafraichir_glissiere(a, p);
+    }
 }
 
-static void sur_apparition(GtkWidget *w, gpointer u)
-{
-    App *a = u;
-    battement_selon(a, video_moteur_etat(a->moteur) == VIDEO_LIT);
-}
-
-static void sur_disparition(GtkWidget *w, gpointer u)
-{
-    battement_selon((App *)u, FALSE);
-}
-
-/* LE BILAN, ET POURQUOI IL EST IMPRIME PLUTOT QUE SUPPOSE.
- *
- * Quatre chiffres suffisent a dire si une lecture s'est bien passee, et
- * aucun ne se devine a l'oeil : le nombre d'images sautees (zero, en regime
- * etabli), la part passee par le chemin sans copie (tout, sauf codec non
- * accelere), et l'ecart de synchronisation moyen et maximal. */
 static void bilan(App *a, const char *quand)
 {
     if (!a->moteur) return;
@@ -144,6 +292,7 @@ static void sur_fin(gpointer u)
 {
     App *a = u;
     bilan(a, "fin du fichier");
+    reveler(a, TRUE, FALSE);          /* on rend la main a l'utilisateur */
     if (a->duree_essai > 0) gtk_window_close(GTK_WINDOW(a->fenetre));
 }
 
@@ -153,19 +302,119 @@ static void sur_erreur(const char *message, gpointer u)
     g_warning("video : %s", message);
 }
 
-static void bilan(App *a, const char *quand);
+/* ------------------------------------------------------------ commandes */
+
+static void act_basculer(GtkButton *b, gpointer u)
+{ video_moteur_basculer(((App *)u)->moteur); }
+
+static void act_reculer(GtkButton *b, gpointer u)
+{ video_moteur_avancer(((App *)u)->moteur, -10.0); }
+
+static void act_avancer(GtkButton *b, gpointer u)
+{ video_moteur_avancer(((App *)u)->moteur, +10.0); }
+
+static void basculer_plein(App *a)
+{
+    if (gtk_window_is_fullscreen(GTK_WINDOW(a->fenetre)))
+        gtk_window_unfullscreen(GTK_WINDOW(a->fenetre));
+    else
+        gtk_window_fullscreen(GTK_WINDOW(a->fenetre));
+}
+
+static void act_plein(GtkButton *b, gpointer u) { basculer_plein((App *)u); }
+
+/* LE PLEIN ECRAN SE LIT SUR LA FENETRE, PAS SUR LE BOUTON.
+ *
+ * labwc garde pour lui la touche « plein ecran » du Chromebook : la fenetre
+ * peut donc changer d'etat sans que nous l'ayons demande. Suivre la
+ * propriete « fullscreened » est la seule facon d'avoir une icone qui dit
+ * vrai. Meme lecon que la visionneuse d'images. */
+static void sur_plein_change(GObject *o, GParamSpec *p, gpointer u)
+{
+    App *a = u;
+    gboolean plein = gtk_window_is_fullscreen(GTK_WINDOW(a->fenetre));
+    gtk_button_set_icon_name(GTK_BUTTON(a->b_plein),
+                             plein ? "view-restore-symbolic"
+                                   : "view-fullscreen-symbolic");
+    gtk_widget_set_tooltip_text(a->b_plein,
+                                plein ? "Quitter le plein écran" : "Plein écran");
+}
+
+static void rafraichir_son(App *a)
+{
+    gboolean muet = video_moteur_est_muet(a->moteur);
+    double   v    = video_moteur_volume_actuel(a->moteur);
+    const char *icone = (muet || v <= 0.001) ? "audio-volume-muted-symbolic"
+                      : v < 0.5              ? "audio-volume-medium-symbolic"
+                                             : "audio-volume-high-symbolic";
+    gtk_button_set_icon_name(GTK_BUTTON(a->b_son), icone);
+    gtk_widget_set_tooltip_text(a->b_son, muet ? "Rétablir le son" : "Couper le son");
+}
+
+static void act_sourdine(GtkButton *b, gpointer u)
+{
+    App *a = u;
+    video_moteur_sourdine(a->moteur, !video_moteur_est_muet(a->moteur));
+    rafraichir_son(a);
+}
+
+static void sur_volume(GtkRange *r, gpointer u)
+{
+    App *a = u;
+    video_moteur_volume(a->moteur, gtk_range_get_value(r));
+    if (video_moteur_est_muet(a->moteur)) video_moteur_sourdine(a->moteur, FALSE);
+    rafraichir_son(a);
+}
+
+/* On saute a CHAQUE mouvement de la glissiere, sans attendre le lacher.
+ * Ce n'est pas couteux : le moteur ne garde qu'UNE demande de saut en
+ * attente, les demandes rapides s'ecrasent donc les unes les autres et seule
+ * la derniere est executee. On voit defiler les images sous le doigt sans
+ * payer un decodage par pixel parcouru. */
+static gboolean sur_glissement(GtkRange *r, GtkScrollType t, double valeur, gpointer u)
+{
+    App *a = u;
+    a->geste_us = g_get_monotonic_time();
+    video_moteur_sauter(a->moteur, valeur);
+    a->seconde_affichee = -1;
+    rafraichir_position(a, valeur);
+    reveler(a, TRUE, TRUE);
+    return FALSE;
+}
+
+/* -------------------------------------------------------------- clavier */
+
+static gboolean sur_touche(GtkEventControllerKey *c, guint val, guint code,
+                           GdkModifierType mod, gpointer u)
+{
+    App *a = u;
+    switch (val) {
+        case GDK_KEY_space:
+        case GDK_KEY_k:      video_moteur_basculer(a->moteur);       return TRUE;
+        case GDK_KEY_Left:   video_moteur_avancer(a->moteur, -10.0); return TRUE;
+        case GDK_KEY_Right:  video_moteur_avancer(a->moteur, +10.0); return TRUE;
+        case GDK_KEY_Down:   video_moteur_avancer(a->moteur,  -5.0); return TRUE;
+        case GDK_KEY_Up:     video_moteur_avancer(a->moteur,  +5.0); return TRUE;
+        case GDK_KEY_Home:   video_moteur_sauter(a->moteur, 0.0);    return TRUE;
+        case GDK_KEY_m:      act_sourdine(NULL, a);                  return TRUE;
+        case GDK_KEY_f:
+        case GDK_KEY_F11:    basculer_plein(a);                      return TRUE;
+        case GDK_KEY_Escape:
+            if (gtk_window_is_fullscreen(GTK_WINDOW(a->fenetre)))
+                gtk_window_unfullscreen(GTK_WINDOW(a->fenetre));
+            else
+                gtk_window_close(GTK_WINDOW(a->fenetre));
+            return TRUE;
+        case GDK_KEY_q:      gtk_window_close(GTK_WINDOW(a->fenetre)); return TRUE;
+    }
+    return FALSE;
+}
 
 /* ------------------------------------------------------------- scenario */
 
 /* UN PARCOURS AUTOMATIQUE, PARCE QUE L'ECRAN N'EST PAS TOUJOURS DISPONIBLE.
- *
- * Pause, reprise, saut avant, saut arriere, retour au debut : ce sont les
- * gestes qui cassent un lecteur, et ce sont ceux qu'on ne peut pas eprouver
- * sans les faire. Ce parcours les fait tout seul et dit ce qu'il constate,
- * pour que le banc sans ecran (essais/banc-video.sh) vaille verification.
- *
- * Il n'est actif que sur --scenario : c'est un mode de banc, pas un mode du
- * lecteur, et il est le seul endroit du programme ou vit un minuteur. */
+ * Pause, reprise, sauts : les gestes qui cassent un lecteur, et ceux qu'on
+ * ne peut pas eprouver sans les faire. Mode de banc, pas mode du lecteur. */
 static gboolean sur_scenario(gpointer u)
 {
     App *a = u;
@@ -181,11 +430,11 @@ static gboolean sur_scenario(gpointer u)
               video_moteur_position(m), video_moteur_etat(m));
 
     switch (a->etape++) {
-        case 0: video_moteur_pause(m);              break;
-        case 1: video_moteur_lire(m);               break;
-        case 2: video_moteur_sauter(m, 40.0);       break;
-        case 3: video_moteur_avancer(m, -10.0);     break;
-        case 4: video_moteur_sauter(m, 0.0);        break;
+        case 0: video_moteur_pause(m);          break;
+        case 1: video_moteur_lire(m);           break;
+        case 2: video_moteur_sauter(m, 40.0);   break;
+        case 3: video_moteur_avancer(m, -10.0); break;
+        case 4: video_moteur_sauter(m, 0.0);    break;
         default:
             bilan(a, "fin du scenario");
             gtk_window_close(GTK_WINDOW(a->fenetre));
@@ -194,80 +443,182 @@ static gboolean sur_scenario(gpointer u)
     return G_SOURCE_CONTINUE;
 }
 
-/* -------------------------------------------------------------- clavier */
+/* -------------------------------------------------------------- fenetre */
 
-static gboolean sur_touche(GtkEventControllerKey *c, guint val, guint code,
-                           GdkModifierType mod, gpointer u)
+static void sur_apparition(GtkWidget *w, gpointer u)
 {
     App *a = u;
-    switch (val) {
-        case GDK_KEY_space:
-        case GDK_KEY_k:          video_moteur_basculer(a->moteur);       return TRUE;
-        case GDK_KEY_Left:       video_moteur_avancer(a->moteur, -10.0); return TRUE;
-        case GDK_KEY_Right:      video_moteur_avancer(a->moteur, +10.0); return TRUE;
-        case GDK_KEY_Down:       video_moteur_avancer(a->moteur,  -5.0); return TRUE;
-        case GDK_KEY_Up:         video_moteur_avancer(a->moteur,  +5.0); return TRUE;
-        case GDK_KEY_Home:       video_moteur_sauter(a->moteur, 0.0);    return TRUE;
-        case GDK_KEY_f:
-        case GDK_KEY_F11:
-            if (gtk_window_is_fullscreen(GTK_WINDOW(a->fenetre)))
-                gtk_window_unfullscreen(GTK_WINDOW(a->fenetre));
-            else
-                gtk_window_fullscreen(GTK_WINDOW(a->fenetre));
-            return TRUE;
-        case GDK_KEY_Escape:
-            if (gtk_window_is_fullscreen(GTK_WINDOW(a->fenetre)))
-                gtk_window_unfullscreen(GTK_WINDOW(a->fenetre));
-            else
-                gtk_window_close(GTK_WINDOW(a->fenetre));
-            return TRUE;
-        case GDK_KEY_q:          gtk_window_close(GTK_WINDOW(a->fenetre)); return TRUE;
-    }
-    return FALSE;
+    battement_selon(a, video_moteur_etat(a->moteur) == VIDEO_LIT);
 }
 
-/* ------------------------------------------------------------- fenetre */
+static void sur_disparition(GtkWidget *w, gpointer u)
+{ battement_selon((App *)u, FALSE); }
 
-static void sur_fermeture(GtkWindow *w, gpointer u)
+static gboolean sur_fermeture(GtkWindow *w, gpointer u)
 {
     App *a = u;
     bilan(a, "fermeture");
     battement_selon(a, FALSE);
+    if (a->retrait) { g_source_remove(a->retrait); a->retrait = 0; }
     /* Le moteur ferme son fil AVANT que la fenetre ne disparaisse : un fil
      * de decodage qui pousse une image dans une file detruite ne se voit
      * qu'au coredump. */
     g_clear_pointer(&a->moteur, video_moteur_fermer);
     video_image_fin(&a->images);
+    return FALSE;
+}
+
+static GtkWidget *bouton(const char *icone, const char *classe,
+                         GCallback rappel, App *a)
+{
+    GtkWidget *b = gtk_button_new_from_icon_name(icone);
+    gtk_widget_add_css_class(b, "video-bouton");
+    if (classe) gtk_widget_add_css_class(b, classe);
+    /* Un bouton qui prend le focus au clic coupe la frappe physique --
+     * lecon de l'ecran de connexion, elle vaut ici aussi : l'espace doit
+     * mettre en pause meme apres avoir clique sur un bouton. */
+    gtk_widget_set_focus_on_click(b, FALSE);
+    if (rappel) g_signal_connect(b, "clicked", rappel, a);
+    return b;
+}
+
+static GtkWidget *construire_capsule(App *a)
+{
+    GtkWidget *c = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_add_css_class(c, "video-capsule");
+    gtk_widget_set_halign(c, GTK_ALIGN_CENTER);
+
+    a->l_position = gtk_label_new("0:00");
+    gtk_widget_add_css_class(a->l_position, "video-temps");
+    /* Une largeur fixe : sinon la capsule change de taille au passage de 9 a
+     * 10 secondes, et tous les boutons se decalent sous le doigt. */
+    gtk_label_set_width_chars(GTK_LABEL(a->l_position), 5);
+    gtk_label_set_xalign(GTK_LABEL(a->l_position), 1.0);
+
+    a->l_duree = gtk_label_new("0:00");
+    gtk_widget_add_css_class(a->l_duree, "video-temps");
+    gtk_widget_add_css_class(a->l_duree, "video-temps-total");
+    gtk_label_set_width_chars(GTK_LABEL(a->l_duree), 5);
+    gtk_label_set_xalign(GTK_LABEL(a->l_duree), 0.0);
+
+    a->b_lecture = bouton("media-playback-start-symbolic", "video-bouton-grand",
+                          G_CALLBACK(act_basculer), a);
+    a->b_plein   = bouton("view-fullscreen-symbolic", NULL,
+                          G_CALLBACK(act_plein), a);
+    a->b_son     = bouton("audio-volume-high-symbolic", NULL,
+                          G_CALLBACK(act_sourdine), a);
+
+    a->volume = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL, 0.0, 1.0, 0.01);
+    gtk_widget_add_css_class(a->volume, "video-volume");
+    gtk_range_set_value(GTK_RANGE(a->volume), 1.0);
+    gtk_scale_set_draw_value(GTK_SCALE(a->volume), FALSE);
+    gtk_widget_set_size_request(a->volume, 96, -1);
+    gtk_widget_set_valign(a->volume, GTK_ALIGN_CENTER);
+    g_signal_connect(a->volume, "value-changed", G_CALLBACK(sur_volume), a);
+
+    a->l_codec = gtk_label_new("");
+    gtk_widget_add_css_class(a->l_codec, "video-codec");
+
+    GtkWidget *barre = gtk_label_new("/");
+    gtk_widget_add_css_class(barre, "video-temps");
+
+    gtk_box_append(GTK_BOX(c), a->l_position);
+    gtk_box_append(GTK_BOX(c), barre);
+    gtk_box_append(GTK_BOX(c), a->l_duree);
+    gtk_box_append(GTK_BOX(c),
+                   bouton("media-seek-backward-symbolic", NULL,
+                          G_CALLBACK(act_reculer), a));
+    gtk_box_append(GTK_BOX(c), a->b_lecture);
+    gtk_box_append(GTK_BOX(c),
+                   bouton("media-seek-forward-symbolic", NULL,
+                          G_CALLBACK(act_avancer), a));
+    gtk_box_append(GTK_BOX(c), a->b_son);
+    gtk_box_append(GTK_BOX(c), a->volume);
+    gtk_box_append(GTK_BOX(c), a->l_codec);
+    gtk_box_append(GTK_BOX(c), a->b_plein);
+    return c;
+}
+
+/* L'ESPACE VIDE ET SA GLISSIERE. Une GtkOverlay, et non une boite : la
+ * glissiere doit apparaitre PAR-DESSUS le vide, sans en changer la hauteur.
+ * Toute autre disposition ferait sauter la video a chaque survol. */
+static GtkWidget *construire_zone(App *a)
+{
+    GtkWidget *vide = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_size_request(vide, -1, ZONE_VIDE_PX);
+
+    a->glissiere = gtk_scale_new_with_range(GTK_ORIENTATION_HORIZONTAL,
+                                            0.0, 1.0, 0.1);
+    gtk_widget_add_css_class(a->glissiere, "video-glissiere");
+    gtk_scale_set_draw_value(GTK_SCALE(a->glissiere), FALSE);
+    gtk_widget_set_valign(a->glissiere, GTK_ALIGN_CENTER);
+    gtk_widget_set_focus_on_click(a->glissiere, FALSE);
+    g_signal_connect(a->glissiere, "change-value", G_CALLBACK(sur_glissement), a);
+
+    a->reveleur = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(a->reveleur),
+                                     GTK_REVEALER_TRANSITION_TYPE_CROSSFADE);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(a->reveleur), 140);
+    gtk_revealer_set_child(GTK_REVEALER(a->reveleur), a->glissiere);
+    gtk_widget_set_valign(a->reveleur, GTK_ALIGN_CENTER);
+
+    a->zone = gtk_overlay_new();
+    gtk_widget_add_css_class(a->zone, "video-zone");
+    gtk_overlay_set_child(GTK_OVERLAY(a->zone), vide);
+    gtk_overlay_add_overlay(GTK_OVERLAY(a->zone), a->reveleur);
+
+    GtkEventController *survol = gtk_event_controller_motion_new();
+    g_signal_connect(survol, "enter", G_CALLBACK(sur_entree_zone), a);
+    g_signal_connect(survol, "leave", G_CALLBACK(sur_sortie_zone), a);
+    gtk_widget_add_controller(a->zone, survol);
+    return a->zone;
 }
 
 static void construire(App *a)
 {
     a->fenetre = gtk_application_window_new(a->app);
     gtk_window_set_title(GTK_WINDOW(a->fenetre), "Vidéo");
-    gtk_window_set_default_size(GTK_WINDOW(a->fenetre), 1280, 720);
+    gtk_window_set_default_size(GTK_WINDOW(a->fenetre), 1280, 760);
+    gtk_widget_add_css_class(a->fenetre, "video-fenetre");
 
     a->image = gtk_picture_new();
     gtk_picture_set_content_fit(GTK_PICTURE(a->image), GTK_CONTENT_FIT_CONTAIN);
     gtk_widget_set_hexpand(a->image, TRUE);
     gtk_widget_set_vexpand(a->image, TRUE);
+    g_signal_connect(a->image, "map",   G_CALLBACK(sur_apparition),  a);
+    g_signal_connect(a->image, "unmap", G_CALLBACK(sur_disparition), a);
 
     /* LE WIDGET QUI PORTE TOUT LE BENEFICE. Il ne dessine rien : il demande a
      * GDK de confier l'image au compositeur, dans une sous-surface, plutot
-     * que de la composer dans la fenetre. Mesure du 10 septembre 2026 :
-     * 0,2 W de moins en plein ecran, soit 9 % du SoC. Voir docs/11. */
-    g_signal_connect(a->image, "map",   G_CALLBACK(sur_apparition), a);
-    g_signal_connect(a->image, "unmap", G_CALLBACK(sur_disparition), a);
-
+     * que de la composer dans la fenetre. Voir docs/11.
+     *
+     * C'est aussi lui qui donne la « video sans aucune bordure » : le tampon
+     * est pose tel quel, il n'y a materiellement rien autour. */
     a->offload = gtk_graphics_offload_new(a->image);
     gtk_graphics_offload_set_enabled(GTK_GRAPHICS_OFFLOAD(a->offload),
                                      GTK_GRAPHICS_OFFLOAD_ENABLED);
 
-    gtk_window_set_child(GTK_WINDOW(a->fenetre), a->offload);
+    GtkWidget *pile = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class(pile, "video-pile");
+    gtk_box_append(GTK_BOX(pile), a->offload);
+    gtk_box_append(GTK_BOX(pile), construire_zone(a));
+    a->capsule = construire_capsule(a);
+    gtk_box_append(GTK_BOX(pile), a->capsule);
+
+    gtk_window_set_child(GTK_WINDOW(a->fenetre), pile);
 
     GtkEventController *clavier = gtk_event_controller_key_new();
     g_signal_connect(clavier, "key-pressed", G_CALLBACK(sur_touche), a);
     gtk_widget_add_controller(a->fenetre, clavier);
 
+    /* L'appui sur l'IMAGE, pas sur la fenetre entiere : un clic dans la
+     * capsule doit actionner le bouton vise, pas mettre en pause. */
+    GtkGesture *appui = gtk_gesture_click_new();
+    g_signal_connect(appui, "pressed", G_CALLBACK(sur_appui), a);
+    gtk_widget_add_controller(a->image, GTK_EVENT_CONTROLLER(appui));
+
+    g_signal_connect(a->fenetre, "notify::fullscreened",
+                     G_CALLBACK(sur_plein_change), a);
     g_signal_connect(a->fenetre, "close-request", G_CALLBACK(sur_fermeture), a);
 }
 
@@ -285,26 +636,72 @@ static void ouvrir_fichier(App *a, const char *chemin)
         return;
     }
 
+    double duree = video_moteur_duree(a->moteur);
     g_message("video : %s -- %s %dx%d, %s, %.1f s",
               chemin, video_moteur_codec(a->moteur),
               video_moteur_largeur(a->moteur), video_moteur_hauteur(a->moteur),
               video_moteur_materiel(a->moteur) ? "décodage matériel"
                                                : "décodage logiciel",
-              video_moteur_duree(a->moteur));
+              duree);
+
+    gchar *t = duree_texte(duree);
+    gtk_label_set_text(GTK_LABEL(a->l_duree), t);
+    g_free(t);
+
+    gtk_range_set_range(GTK_RANGE(a->glissiere), 0.0, MAX(duree, 0.1));
+
+    gchar *nom = g_path_get_basename(chemin);
+    gtk_window_set_title(GTK_WINDOW(a->fenetre), nom);
+    g_free(nom);
+
+    /* DIRE QUAND ON PAIE. Sur cette machine, un codec non accelere -- AV1 --
+     * occupe les quatre coeurs. Le taire ferait passer une lecture couteuse
+     * pour une lecture ordinaire. */
+    if (!video_moteur_materiel(a->moteur)) {
+        gtk_label_set_text(GTK_LABEL(a->l_codec), "décodage logiciel");
+        gtk_widget_set_tooltip_text(a->l_codec,
+            "Ce format n'est pas accéléré par le matériel de cette machine : "
+            "la lecture consomme davantage.");
+    }
+
+    if (!video_moteur_a_audio(a->moteur)) {
+        gtk_widget_set_sensitive(a->b_son, FALSE);
+        gtk_widget_set_sensitive(a->volume, FALSE);
+    }
 
     a->depart = g_get_monotonic_time();
+    a->seconde_affichee = -1;
     video_moteur_lire(a->moteur);
+    rafraichir_bouton_lecture(a);
 
+    if (a->revele)   reveler(a, TRUE, FALSE);
     if (a->scenario) g_timeout_add_seconds(3, sur_scenario, a);
+}
+
+static void sur_demarrage(GtkApplication *app, gpointer cfg)
+{
+    shell_styles_startup(app, cfg);
 }
 
 static void sur_activation(GApplication *app, gpointer u)
 {
     App *a = u;
     if (!a->fichier) {
-        g_printerr("Usage : claude-os-video <fichier> [--essai=<secondes>]\n");
+        g_printerr("Usage : claude-os-video <fichier> "
+                   "[--plein-ecran] [--essai=<secondes>] [--scenario]\n");
         return;
     }
+
+    ShellConfig *cfg = g_object_get_data(G_OBJECT(app), "cfg");
+    if (cfg) {
+        shell_config_apply(cfg);
+        /* Les widgets GTK ordinaires -- infobulles, boites de dialogue -- ne
+         * passent pas par notre feuille de style. Sans cela ils resteraient
+         * clairs dans une fenetre sombre. */
+        g_object_set(gtk_settings_get_default(),
+                     "gtk-application-prefer-dark-theme", cfg->dark, NULL);
+    }
+
     video_image_init(&a->images);
     construire(a);
     if (a->plein) gtk_window_fullscreen(GTK_WINDOW(a->fenetre));
@@ -321,6 +718,10 @@ int main(int argc, char **argv)
             a.plein = TRUE;
         } else if (!strcmp(argv[i], "--scenario")) {
             a.scenario = TRUE;
+        } else if (!strcmp(argv[i], "--revele")) {
+            /* Mode de banc : sans pointeur, le survol ne peut pas etre
+             * joue ; on montre la glissiere pour pouvoir la regarder. */
+            a.revele = TRUE;
         } else if (g_str_has_prefix(argv[i], "--essai=")) {
             a.duree_essai = atoi(argv[i] + 8);
         } else if (argv[i][0] != '-') {
@@ -332,11 +733,16 @@ int main(int argc, char **argv)
         }
     }
 
+    ShellConfig *cfg = shell_config_load();
+
     a.app = gtk_application_new("os.claude.shell.video", G_APPLICATION_NON_UNIQUE);
+    g_object_set_data(G_OBJECT(a.app), "cfg", cfg);
+    g_signal_connect(a.app, "startup",  G_CALLBACK(sur_demarrage),  cfg);
     g_signal_connect(a.app, "activate", G_CALLBACK(sur_activation), &a);
     int code = g_application_run(G_APPLICATION(a.app), 0, NULL);
 
     g_object_unref(a.app);
+    shell_config_free(cfg);
     g_free(a.fichier);
     return code;
 }

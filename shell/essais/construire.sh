@@ -54,11 +54,20 @@ for c in "${CIBLES[@]}"; do
 			# meson.build appartient aussi a l'autre instance, on n'y touche
 			# qu'une fois le programme en etat de marche.
 			# shellcheck disable=SC2046
+			# SHELL_DATA_DIR : le DEPOT, et non /usr, tant que le lecteur
+			# n'est pas installe. C'est ce qui permet d'eprouver une
+			# feuille de style modifiee sans passer par « meson install »,
+			# donc sans toucher a la machine pendant que l'autre instance
+			# travaille. Le binaire produit ici est un binaire de banc.
+			DATA_DIR="${CLAUDE_OS_DATA_DIR:-$ICI/..}"
 			gcc "${COMMUN[@]}" -I"$ICI/../src" \
+			    -DSHELL_DATA_DIR="\"$DATA_DIR\"" \
 			    "$ICI/../src/video.c" "$ICI/../src/video-moteur.c" \
 			    "$ICI/../src/video-image.c" "$ICI/../src/video-audio.c" \
+			    "$ICI/../src/config.c" "$ICI/../src/visibility.c" \
+			    "$ICI/../src/sysfs.c" "$ICI/../src/modes-energie.c" \
 			    -o "$BUILD/claude-os-video" \
-			    $(flags gtk4 libavcodec libavformat libavutil libswscale libswresample libdrm libpipewire-0.3) -lm \
+			    $(flags gtk4 gio-unix-2.0 pangocairo libavcodec libavformat libavutil libswscale libswresample libdrm libpipewire-0.3) -lm \
 			    || { echo "  video : ÉCHEC de la compilation" >&2; ECHECS=$((ECHECS+1)); }
 			echo "  video…"
 			;;

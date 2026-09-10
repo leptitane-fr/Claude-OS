@@ -60,6 +60,11 @@ gboolean    video_audio_horloge(VideoAudio *a, double *secondes);
 
 void        video_audio_pause(VideoAudio *a, gboolean en_pause);
 
+/* Le gain, de 0 a 1. Applique au moment ou les echantillons partent vers le
+ * serveur, et non a l'ecriture : un volume change en pause doit s'entendre
+ * des la reprise, pas apres les 200 ms deja en file. */
+void        video_audio_gain(VideoAudio *a, double gain);
+
 /* Jette tout ce qui est en file. A appeler sur un saut : sans cela, on
  * entend encore l'ancienne position pendant une demi-seconde. */
 void        video_audio_vider(VideoAudio *a);

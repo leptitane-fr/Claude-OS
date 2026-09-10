@@ -55,6 +55,7 @@ struct _VideoAudio {
 
     gboolean en_pause;
     gboolean joue_quelque_chose;
+    gdouble  gain;            /* 0 a 1, lu par le fil temps reel        */
 };
 
 /* ------------------------------------------------------------ le rappel RT */
@@ -89,6 +90,16 @@ static void sur_traitement(void *data)
         ecrit += n;
     }
     g_mutex_unlock(&a->verrou);
+
+    /* LE GAIN, ICI ET PAS AILLEURS. Une multiplication par echantillon sur
+     * ce que l'on vient de copier : le volume reagit en un quantum, et rien
+     * n'est deja « teinte » dans le tampon. A 1.0 exactement on ne touche a
+     * rien -- le cas courant ne doit pas payer pour l'exception. */
+    double g = a->gain;
+    if (g != 1.0 && ecrit > 0) {
+        int total = ecrit * a->canaux;
+        for (int i = 0; i < total; i++) sortie[i] *= (float)g;
+    }
 
     /* SOUS-ALIMENTATION : on complete par du silence plutot que de rendre un
      * tampon court. Un tampon court fait sauter le graphe entier, et le
@@ -147,6 +158,7 @@ VideoAudio *video_audio_ouvrir(int taux, int canaux, GError **erreur)
     a->taux     = taux;
     a->canaux   = canaux;
     a->capacite = taux * TAMPON_MS / 1000;
+    a->gain     = 1.0;
     a->anneau   = g_malloc0((size_t)a->capacite * canaux * sizeof(float));
     g_mutex_init(&a->verrou);
 
@@ -350,6 +362,11 @@ void video_audio_pause(VideoAudio *a, gboolean en_pause)
     pw_thread_loop_lock(a->boucle);
     pw_stream_set_active(a->flux, !en_pause);
     pw_thread_loop_unlock(a->boucle);
+}
+
+void video_audio_gain(VideoAudio *a, double gain)
+{
+    if (a) a->gain = CLAMP(gain, 0.0, 1.0);
 }
 
 void video_audio_vider(VideoAudio *a)

@@ -85,6 +85,8 @@ struct _VideoMoteur {
     gint64            sautees, vues;
     double            ecart_somme, ecart_max;   /* synchronisation */
     VideoEtat         etat;
+    double            volume;
+    gboolean          muet;
 };
 
 /* ------------------------------------------------------------- utilitaires */
@@ -317,6 +319,7 @@ static gpointer fil_decodage(gpointer data)
                         else       m->rattrape_a = FALSE;
                         if (!m->rattrape_v && !m->rattrape_a)
                             m->rattrapage = -1.0;
+    m->volume  = 1.0;
                     }
                 }
                 g_mutex_unlock(&m->verrou);
@@ -413,6 +416,7 @@ VideoMoteur *video_moteur_ouvrir(const char *chemin,
     m->piste_v = m->piste_a = -1;
     m->images  = g_queue_new();
     m->rattrapage = -1.0;
+    m->volume  = 1.0;
     m->etat    = VIDEO_ARRETE;
     if (rappels) m->rappels = *rappels;
     g_mutex_init(&m->verrou);
@@ -583,6 +587,22 @@ void video_moteur_basculer(VideoMoteur *m)
 VideoEtat video_moteur_etat(VideoMoteur *m)  { return m ? m->etat : VIDEO_ARRETE; }
 double    video_moteur_duree(VideoMoteur *m) { return m ? m->duree : 0.0; }
 gboolean  video_moteur_a_audio(VideoMoteur *m) { return m && m->audio; }
+
+void video_moteur_volume(VideoMoteur *m, double v)
+{
+    if (!m) return;
+    m->volume = CLAMP(v, 0.0, 1.0);
+    if (m->audio) video_audio_gain(m->audio, m->muet ? 0.0 : m->volume);
+}
+double video_moteur_volume_actuel(VideoMoteur *m) { return m ? m->volume : 0.0; }
+gboolean video_moteur_est_muet(VideoMoteur *m) { return m && m->muet; }
+
+void video_moteur_sourdine(VideoMoteur *m, gboolean muet)
+{
+    if (!m) return;
+    m->muet = muet;
+    if (m->audio) video_audio_gain(m->audio, muet ? 0.0 : m->volume);
+}
 gboolean  video_moteur_a_video(VideoMoteur *m) { return m && m->dec_v; }
 int       video_moteur_largeur(VideoMoteur *m) { return m ? m->largeur : 0; }
 int       video_moteur_hauteur(VideoMoteur *m) { return m ? m->hauteur : 0; }
