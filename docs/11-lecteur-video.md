@@ -306,6 +306,37 @@ coûté au chemin sans copie** — 451 images sur 451 encore confiées au
 compositeur. Un `GtkGraphicsOffload` cesse d'être pris dès que son contenu est
 rogné ou recouvert ; la capsule est en dessous, pas au-dessus.
 
+### Ce que l'usage a corrigé, le 10 septembre au soir
+
+Six retours, tous constatés sur la machine, aucun visible au banc.
+
+| Constat | Ce qui a été fait |
+|---|---|
+| La fenêtre a une bordure et une barre de titre | `set_decorated(FALSE)` et fond **transparent** : il ne reste que l'image, la capsule et la glissière. La fenêtre se déplace en tirant la capsule — un `GtkWindowHandle` — ou à l'Alt-glisser de labwc |
+| Le double appui met en pause au lieu du plein écran | L'appui simple est **retardé** du temps du double clic (borné à 300 ms) ; un second appui l'annule et prend le plein écran. Le retour visuel, lui, reste immédiat |
+| En plein écran la capsule reste affichée | Elle s'efface en entrant, revient au mouvement de pointeur ou à l'appui, et se retire seule |
+| Les boutons ±10 s ne servent à rien | Remplacés par **vidéo précédente / suivante**, sur le dossier courant. Les flèches du clavier font toujours le saut |
+| Le sélecteur s'ouvre **derrière** la fenêtre | Il était créé avant que la fenêtre ne soit affichée. Ouvert au `map`, modal et transitoire |
+| Le sélecteur ne montre pas les lecteurs réseau | Ils sont montés sous `/run/claude-os/reseau/`, que `g_unix_mount_guess_should_display()` ne retient pas. Ajoutés à la main, lus dans `/proc/mounts` |
+
+**Le plein écran ne remet pas les commandes dans la pile.** Elles flottent
+toujours dans une `GtkOverlay` ; ce qui change est la marge basse de l'image
+— la hauteur des commandes en fenêtre, zéro en plein écran. Les remettre
+dans le flux ferait sauter l'image de cent pixels à chaque mouvement de
+souris.
+
+**`GtkFileDialog` ne sait pas ajouter un raccourci de dossier.** L'API
+recommandée depuis GTK 4.10 n'expose que le dossier initial ; avec elle, les
+lecteurs réseau resteraient hors d'atteinte. On garde donc
+`GtkFileChooserDialog`, déprécié mais capable, et on le dit dans le code
+plutôt que de le subir.
+
+**Et un piège de méthode :** `gtk_window_present()` affiche la fenêtre
+*pendant* l'appel. S'abonner à `map` juste après, c'est s'abonner à un
+signal déjà passé — la boîte d'ouverture n'arrivait jamais, et l'application
+restait sur une fenêtre vide. Trouvé à la capture d'écran, pas au
+raisonnement.
+
 ## 11.8 Pistes, sous-titres, reprise — phase 3
 
 Un menu dans la capsule liste les **pistes audio** et les **sous-titres**,

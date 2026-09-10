@@ -18,25 +18,43 @@
  *
  *   +-------------------------------+
  *   |                               |  la video, SANS AUCUNE BORDURE :
- *   |            video              |  ni cadre, ni marge, ni coin arrondi.
- *   |                               |
+ *   |            video              |  ni cadre, ni marge, ni coin arrondi,
+ *   |                               |  ET SANS BARRE DE TITRE.
  *   +-------------------------------+
- *   |        (espace vide)          |  <- au survol, la glissiere apparait ICI
- *   |     ( o====|--------- )       |
+ *   :        (fond transparent)     :  <- au survol, la glissiere apparait ICI
+ *   :     ( o====|--------- )       :
  *   +-------------------------------+
  *   |     ( capsule des commandes ) |
  *   +-------------------------------+
+ *
+ * LA FENETRE N'EST PAS DECOREE ET SON FOND EST TRANSPARENT. Il n'y a donc
+ * que trois choses a l'ecran : l'image, la capsule, et la glissiere quand on
+ * la demande. Le bureau se voit entre les deux.
+ *
+ * Consequence a connaitre : sans barre de titre, la fenetre se deplace a
+ * l'Alt-glisser du compositeur -- ou en tirant LA CAPSULE, qui est un
+ * GtkWindowHandle pour cette raison.
  *
  * L'espace vide n'est pas une marge : c'est une ZONE SENSIBLE. La glissiere
  * y apparait en fondu, PAR-DESSUS le vide, sans jamais deplacer la video ni
  * la capsule -- un decalage de mise en page a chaque survol serait
  * insupportable a l'usage. D'ou une GtkOverlay, et non une boite.
  *
- * AU DOIGT, LE SURVOL N'EXISTE PAS. Un toucher n'importe ou revele la
- * glissiere ; c'est seulement une fois les commandes visibles qu'un appui
- * sur l'image met en pause. Sans cette regle, toucher l'ecran pour voir ou
- * l'on en est arreterait la lecture -- exactement l'inverse de ce qu'on
- * voulait.
+ * LES COMMANDES, ET QUAND ELLES SE MONTRENT.
+ *
+ *                      en fenetre                en plein ecran
+ *   capsule            toujours visible          cachee, revient au geste
+ *   glissiere          au survol de la zone      avec la capsule
+ *   mouvement souris   rien                      fait tout revenir
+ *   appui simple       revele + lecture/pause    idem
+ *   appui double       PLEIN ECRAN               PLEIN ECRAN
+ *
+ * L'APPUI SIMPLE EST RETARDE, ET IL LE FAUT. Sans cela, le premier appui
+ * d'un double appui aurait deja bascule la lecture avant que le second
+ * n'arrive : on obtenait « pause puis plein ecran », ce qui est exactement
+ * ce qu'on ne veut pas. Le retard est celui du systeme (gtk-double-click-
+ * time), borne a 300 ms -- au-dela, la pause se sent. Le RETOUR VISUEL, lui,
+ * est immediat : les commandes apparaissent des le premier contact.
  */
 
 #include "video-moteur.h"
@@ -61,11 +79,15 @@ typedef struct {
     GtkWidget      *offload;
 
     GtkWidget      *zone;          /* l'espace vide, sensible au survol   */
-    GtkWidget      *reveleur;
+    GtkWidget      *reveleur;      /* celui de la glissiere               */
     GtkWidget      *glissiere;
     GtkWidget      *capsule;
+    GtkWidget      *rev_capsule;   /* la capsule s'efface en plein ecran  */
+    GtkWidget      *commandes;     /* zone + capsule, flottant au bas     */
 
     GtkWidget      *b_lecture;
+    GtkWidget      *b_prec;
+    GtkWidget      *b_suiv;
     GtkWidget      *b_plein;
     GtkWidget      *b_son;
     GtkWidget      *volume;
@@ -79,6 +101,20 @@ typedef struct {
     VideoImage      images;
     guint           battement;
     guint           retrait;        /* minuteur a un coup du retrait      */
+    guint           appui_simple;   /* minuteur qui distingue un appui d'un
+                                     * double appui                       */
+
+    gboolean        plein_ecran;
+    gboolean        commandes_vues; /* en plein ecran seulement           */
+
+    /* LA LISTE DE LECTURE : les videos du dossier, triees comme Fichiers.
+     * Chargee en ASYNCHRONE, et ce n'est pas un luxe -- un dossier peut
+     * etre sur un partage reseau, et g_file_enumerate_children bloque
+     * jusqu'au delai TCP si le serveur est eteint. Le projet a deja paye
+     * cette lecon dans Fichiers. */
+    GPtrArray      *dossier;        /* gchar*, chemins tries              */
+    int             rang;           /* -1 : liste inconnue                */
+    GCancellable   *annulation;     /* l'enumeration meurt avec la fenetre */
 
     gint64          geste_us;       /* dernier geste sur la glissiere     */
     int             seconde_affichee;
@@ -313,26 +349,68 @@ static void battement_selon(App *a, gboolean actif)
     }
 }
 
-/* ------------------------------------------------- la glissiere revelee */
+/* --------------------------------------------------- montrer et cacher
 
-static gboolean retirer_glissiere(gpointer u)
+   UN SEUL ENDROIT DECIDE DE CE QUI EST VISIBLE, et il tient compte du plein
+   ecran. Deux regles cote a cote -- « en fenetre la capsule reste, en plein
+   ecran elle s'efface » -- eparpillees dans dix rappels, c'est la garantie
+   d'un etat incoherent au premier cas non prevu. */
+
+static void appliquer_visibilite(App *a)
+{
+    gboolean capsule = !a->plein_ecran || a->commandes_vues;
+    gtk_revealer_set_reveal_child(GTK_REVEALER(a->rev_capsule), capsule);
+
+    /* La glissiere suit la capsule en plein ecran ; en fenetre elle garde
+     * sa propre vie, revelee au survol de l'espace vide. */
+    if (a->plein_ecran)
+        gtk_revealer_set_reveal_child(GTK_REVEALER(a->reveleur),
+                                      a->commandes_vues);
+}
+
+static gboolean retirer_commandes(gpointer u)
 {
     App *a = u;
     a->retrait = 0;
-    if (!a->survol)
+    if (a->survol) return G_SOURCE_REMOVE;   /* le pointeur est dessus */
+
+    a->commandes_vues = FALSE;
+    if (!a->plein_ecran)
         gtk_revealer_set_reveal_child(GTK_REVEALER(a->reveleur), FALSE);
+    appliquer_visibilite(a);
     return G_SOURCE_REMOVE;
 }
 
-/* « momentane » : au doigt, la glissiere se retire seule ; a la souris,
- * elle suit le survol et n'a pas besoin de minuteur. */
-static void reveler(App *a, gboolean visible, gboolean momentane)
+/* « momentane » : ce qui est montre se retirera seul. C'est le cas au doigt
+ * et au mouvement de pointeur ; ce n'est pas le cas quand le pointeur
+ * SEJOURNE sur l'espace vide, ou la glissiere doit rester tant qu'il y est. */
+static void commandes_montrer(App *a, gboolean momentane)
 {
-    gtk_revealer_set_reveal_child(GTK_REVEALER(a->reveleur), visible);
+    a->commandes_vues = TRUE;
+    if (!a->plein_ecran)
+        gtk_revealer_set_reveal_child(GTK_REVEALER(a->reveleur), TRUE);
+    appliquer_visibilite(a);
 
     if (a->retrait) { g_source_remove(a->retrait); a->retrait = 0; }
-    if (visible && momentane)
-        a->retrait = g_timeout_add_seconds(RETRAIT_S, retirer_glissiere, a);
+    if (momentane)
+        a->retrait = g_timeout_add_seconds(RETRAIT_S, retirer_commandes, a);
+}
+
+static void commandes_cacher(App *a)
+{
+    if (a->retrait) { g_source_remove(a->retrait); a->retrait = 0; }
+    a->commandes_vues = FALSE;
+    if (!a->plein_ecran)
+        gtk_revealer_set_reveal_child(GTK_REVEALER(a->reveleur), FALSE);
+    appliquer_visibilite(a);
+}
+
+/* Compatibilite avec le reste du fichier : « reveler » ne concerne que la
+ * glissiere, et n'a de sens qu'en fenetre. */
+static void reveler(App *a, gboolean visible, gboolean momentane)
+{
+    if (visible) commandes_montrer(a, momentane);
+    else         commandes_cacher(a);
 }
 
 static void sur_entree_zone(GtkEventControllerMotion *c, double x, double y, gpointer u)
@@ -340,7 +418,7 @@ static void sur_entree_zone(GtkEventControllerMotion *c, double x, double y, gpo
     (void) c; (void) x; (void) y;
     App *a = u;
     a->survol = TRUE;
-    reveler(a, TRUE, FALSE);
+    commandes_montrer(a, FALSE);
 }
 
 static void sur_sortie_zone(GtkEventControllerMotion *c, gpointer u)
@@ -348,27 +426,201 @@ static void sur_sortie_zone(GtkEventControllerMotion *c, gpointer u)
     (void) c;
     App *a = u;
     a->survol = FALSE;
-    reveler(a, FALSE, FALSE);
+    if (a->plein_ecran) commandes_montrer(a, TRUE);   /* se retirera seul */
+    else                commandes_cacher(a);
 }
 
-/* LE TOUCHER, PARTOUT. Le premier contact revele, et ne met pas en pause.
- * Un appui sur l'image ne bascule la lecture que si les commandes sont deja
- * visibles -- sinon, regarder ou l'on en est arreterait le film. */
+/* LE MOUVEMENT DE POINTEUR, EN PLEIN ECRAN SEULEMENT.
+ *
+ * Il rappelle tout, puis tout se retire seul. En fenetre il ne fait rien :
+ * la capsule y est deja la, et faire clignoter la glissiere au moindre
+ * deplacement de souris serait insupportable. */
+static void sur_mouvement(GtkEventControllerMotion *c, double x, double y, gpointer u)
+{
+    (void) c; (void) x; (void) y;
+    App *a = u;
+    if (!a->plein_ecran) return;
+    if (a->commandes_vues && a->retrait) return;   /* deja montre, minuteur armé */
+    commandes_montrer(a, TRUE);
+}
+
+/* ------------------------------------------------------- la liste de lecture
+
+   LES VIDEOS DU DOSSIER, dans l'ordre de Fichiers, pour que « precedente »
+   et « suivante » veuillent dire quelque chose.
+
+   TOUT EST ASYNCHRONE, et ce n'est pas un luxe : le dossier peut etre un
+   partage reseau, et g_file_enumerate_children BLOQUE jusqu'au delai TCP si
+   le serveur ne repond plus. Fichiers a paye cette lecon sur un
+   g_file_query_exists ; on ne la repaie pas ici. */
+
+static void rafraichir_navigation(App *a)
+{
+    gboolean liste = (a->dossier != NULL && a->dossier->len > 1 && a->rang >= 0);
+    gtk_widget_set_sensitive(a->b_prec, liste && a->rang > 0);
+    gtk_widget_set_sensitive(a->b_suiv, liste && a->rang < (int)a->dossier->len - 1);
+}
+
+static int comparer_noms(gconstpointer x, gconstpointer y)
+{
+    const char *a = *(const char * const *)x;
+    const char *b = *(const char * const *)y;
+    /* collate_key_for_filename, comme Fichiers et comme la visionneuse :
+     * « episode2 » avant « episode10 ». */
+    g_autofree gchar *na = g_path_get_basename(a);
+    g_autofree gchar *nb = g_path_get_basename(b);
+    g_autofree gchar *ca = g_utf8_collate_key_for_filename(na, -1);
+    g_autofree gchar *cb = g_utf8_collate_key_for_filename(nb, -1);
+    return strcmp(ca, cb);
+}
+
+static void dossier_termine(App *a)
+{
+    g_ptr_array_sort(a->dossier, comparer_noms);
+
+    a->rang = -1;
+    for (guint i = 0; i < a->dossier->len; i++)
+        if (g_strcmp0(g_ptr_array_index(a->dossier, i), a->fichier) == 0) {
+            a->rang = (int)i;
+            break;
+        }
+    rafraichir_navigation(a);
+}
+
+static void sur_lot(GObject *src, GAsyncResult *res, gpointer u);
+
+static void demander_lot(App *a, GFileEnumerator *e)
+{
+    g_file_enumerator_next_files_async(e, 64, G_PRIORITY_LOW, a->annulation,
+                                       sur_lot, a);
+}
+
+static void sur_lot(GObject *src, GAsyncResult *res, gpointer u)
+{
+    GFileEnumerator *e = G_FILE_ENUMERATOR(src);
+    GError *err = NULL;
+    GList *lot = g_file_enumerator_next_files_finish(e, res, &err);
+
+    if (err) {
+        if (!g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+            g_message("video : dossier illisible (%s) -- pas de navigation",
+                      err->message);
+        g_clear_error(&err);
+        g_object_unref(e);
+        return;
+    }
+
+    App *a = u;
+    if (!lot) {                       /* fini */
+        dossier_termine(a);
+        g_object_unref(e);
+        return;
+    }
+
+    GFile *dir = g_file_enumerator_get_container(e);
+    for (GList *l = lot; l; l = l->next) {
+        GFileInfo *info = l->data;
+        const char *type = g_file_info_get_content_type(info);
+        if (g_file_info_get_is_hidden(info)) continue;
+        if (!type || !g_str_has_prefix(type, "video/")) continue;
+
+        g_autoptr(GFile) f = g_file_get_child(dir, g_file_info_get_name(info));
+        gchar *chemin = g_file_get_path(f);
+        if (chemin) g_ptr_array_add(a->dossier, chemin);
+    }
+    g_list_free_full(lot, g_object_unref);
+
+    demander_lot(a, e);               /* le lot suivant */
+}
+
+static void sur_enumeration(GObject *src, GAsyncResult *res, gpointer u)
+{
+    GError *err = NULL;
+    GFileEnumerator *e = g_file_enumerate_children_finish(G_FILE(src), res, &err);
+    if (!e) {
+        if (!g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED))
+            g_message("video : dossier illisible (%s) -- pas de navigation",
+                      err ? err->message : "?");
+        g_clear_error(&err);
+        return;
+    }
+    demander_lot((App *)u, e);
+}
+
+static void dossier_charger(App *a, const char *chemin)
+{
+    if (a->dossier) g_ptr_array_unref(a->dossier);
+    a->dossier = g_ptr_array_new_with_free_func(g_free);
+    a->rang = -1;
+    rafraichir_navigation(a);
+
+    g_autoptr(GFile) f   = g_file_new_for_path(chemin);
+    g_autoptr(GFile) dir = g_file_get_parent(f);
+    if (!dir) return;
+
+    g_file_enumerate_children_async(dir,
+        G_FILE_ATTRIBUTE_STANDARD_NAME ","
+        G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE ","
+        G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN,
+        G_FILE_QUERY_INFO_NONE, G_PRIORITY_LOW, a->annulation,
+        sur_enumeration, a);
+}
+
+/* ------------------------------------------------- l'appui et le double appui
+
+   LE PROBLEME : un double appui commence par un appui simple. Agir tout de
+   suite sur le premier, c'est mettre en pause PUIS passer en plein ecran --
+   ce que l'utilisateur voyait, et ne voulait pas.
+
+   LA REPONSE : le retour visuel est immediat -- les commandes apparaissent
+   des le premier contact -- mais la bascule lecture/pause est retardee du
+   temps que le systeme accorde au double clic. Si un second appui arrive
+   avant, il annule le premier et prend le plein ecran. */
+
+static void basculer_plein(App *a);
+static void ajuster_marge(App *a);
+
+static int delai_double_appui(App *a)
+{
+    int ms = 400;
+    GtkSettings *r = gtk_widget_get_settings(a->fenetre);
+    if (r) g_object_get(r, "gtk-double-click-time", &ms, NULL);
+    /* Borne haute : au-dela, la pause se sent comme une lenteur. */
+    return CLAMP(ms, 150, 300);
+}
+
+static gboolean appui_simple_expire(gpointer u)
+{
+    App *a = u;
+    a->appui_simple = 0;
+
+    gboolean lisait = (video_moteur_etat(a->moteur) == VIDEO_LIT);
+    video_moteur_basculer(a->moteur);
+
+    /* En pause on laisse les commandes ; on vient de les demander. En
+     * lecture elles se retirent seules -- c'est ce qui a ete demande :
+     * « en pause, un simple appui remet la lecture et l'ensemble disparait
+     * apres quelques secondes ». */
+    commandes_montrer(a, lisait ? FALSE : TRUE);
+    return G_SOURCE_REMOVE;
+}
+
 static void sur_appui(GtkGestureClick *g, int n, double x, double y, gpointer u)
 {
-    (void) x; (void) y;
+    (void) g; (void) x; (void) y;
     App *a = u;
-    gboolean deja = gtk_revealer_get_reveal_child(GTK_REVEALER(a->reveleur));
+    if (!a->moteur) return;
 
-    GdkEvent *ev = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(g));
-    GdkDevice *dev = ev ? gdk_event_get_device(ev) : NULL;
-    gboolean tactile = dev && gdk_device_get_source(dev) == GDK_SOURCE_TOUCHSCREEN;
+    if (n >= 2) {
+        /* Le double appui annule l'appui simple en attente. */
+        if (a->appui_simple) { g_source_remove(a->appui_simple); a->appui_simple = 0; }
+        basculer_plein(a);
+        return;
+    }
 
-    reveler(a, TRUE, tactile);
-    if (!deja) return;                    /* le premier contact ne fait que reveler */
-
-    if (n == 2 || tactile)
-        video_moteur_basculer(a->moteur);
+    commandes_montrer(a, TRUE);          /* retour visuel immediat */
+    if (a->appui_simple) g_source_remove(a->appui_simple);
+    a->appui_simple = g_timeout_add(delai_double_appui(a), appui_simple_expire, a);
 }
 
 /* --------------------------------------------------------------- moteur */
@@ -434,11 +686,33 @@ static void sur_erreur(const char *message, gpointer u)
 static void act_basculer(GtkButton *b, gpointer u)
 { (void) b; video_moteur_basculer(((App *)u)->moteur); }
 
-static void act_reculer(GtkButton *b, gpointer u)
-{ (void) b; video_moteur_avancer(((App *)u)->moteur, -10.0); }
+/* ALLER A UNE AUTRE VIDEO DU DOSSIER.
+ *
+ * Les boutons « -10 s / +10 s » ont ete retires : les fleches du clavier et
+ * la glissiere font deja ce travail, et mieux. Dans un dossier de series ou
+ * de vacances, ce qu'on veut sous le doigt, c'est la video suivante. */
+static void aller_a(App *a, int rang)
+{
+    if (!a->dossier || rang < 0 || rang >= (int)a->dossier->len) return;
 
-static void act_avancer(GtkButton *b, gpointer u)
-{ (void) b; video_moteur_avancer(((App *)u)->moteur, +10.0); }
+    /* On note ou l'on en etait AVANT de quitter, sinon la reprise du film
+     * qu'on laisse est perdue. */
+    if (a->moteur && a->fichier)
+        reprise_ecrire(a->fichier, video_moteur_position(a->moteur),
+                       video_moteur_duree(a->moteur));
+
+    g_free(a->fichier);
+    a->fichier = g_strdup(g_ptr_array_index(a->dossier, rang));
+    a->rang = rang;
+    rafraichir_navigation(a);
+    ouvrir_fichier(a, a->fichier);
+}
+
+static void act_precedente(GtkButton *b, gpointer u)
+{ (void) b; App *a = u; aller_a(a, a->rang - 1); }
+
+static void act_suivante(GtkButton *b, gpointer u)
+{ (void) b; App *a = u; aller_a(a, a->rang + 1); }
 
 static void basculer_plein(App *a)
 {
@@ -461,11 +735,23 @@ static void sur_plein_change(GObject *o, GParamSpec *p, gpointer u)
     (void) o; (void) p;
     App *a = u;
     gboolean plein = gtk_window_is_fullscreen(GTK_WINDOW(a->fenetre));
+
     gtk_button_set_icon_name(GTK_BUTTON(a->b_plein),
                              plein ? "view-restore-symbolic"
                                    : "view-fullscreen-symbolic");
     gtk_widget_set_tooltip_text(a->b_plein,
                                 plein ? "Quitter le plein écran" : "Plein écran");
+
+    a->plein_ecran = plein;
+
+    /* EN ENTRANT, TOUT S'EFFACE ; EN SORTANT, LA CAPSULE REVIENT.
+     *
+     * On ne laisse pas les commandes affichees a l'entree en plein ecran :
+     * on y va pour voir l'image, pas la capsule. Elles reviennent au premier
+     * mouvement ou au premier appui. */
+    if (plein) commandes_cacher(a);
+    else       { a->commandes_vues = FALSE; appliquer_visibilite(a); }
+    ajuster_marge(a);
 }
 
 static void rafraichir_son(App *a)
@@ -602,6 +888,8 @@ static gboolean sur_touche(GtkEventControllerKey *c, guint val, guint code,
         case GDK_KEY_Down:   video_moteur_avancer(a->moteur,  -5.0); return TRUE;
         case GDK_KEY_Up:     video_moteur_avancer(a->moteur,  +5.0); return TRUE;
         case GDK_KEY_Home:   video_moteur_sauter(a->moteur, 0.0);    return TRUE;
+        case GDK_KEY_Page_Up:   aller_a(a, a->rang - 1);             return TRUE;
+        case GDK_KEY_Page_Down: aller_a(a, a->rang + 1);             return TRUE;
         case GDK_KEY_m:      act_sourdine(NULL, a);                  return TRUE;
         case GDK_KEY_f:
         case GDK_KEY_F11:    basculer_plein(a);                      return TRUE;
@@ -679,6 +967,9 @@ static gboolean sur_fermeture(GtkWindow *w, gpointer u)
     (void) w;
     App *a = u;
     bilan(a, "fermeture");
+    if (a->appui_simple) { g_source_remove(a->appui_simple); a->appui_simple = 0; }
+    if (a->annulation)   g_cancellable_cancel(a->annulation);
+    g_clear_pointer(&a->dossier, g_ptr_array_unref);
     if (a->moteur && a->fichier)
         reprise_ecrire(a->fichier, video_moteur_position(a->moteur),
                        video_moteur_duree(a->moteur));
@@ -727,6 +1018,14 @@ static GtkWidget *construire_capsule(App *a)
 
     a->b_lecture = bouton("media-playback-start-symbolic", "video-bouton-grand",
                           G_CALLBACK(act_basculer), a);
+    a->b_prec = bouton("media-skip-backward-symbolic", NULL,
+                       G_CALLBACK(act_precedente), a);
+    a->b_suiv = bouton("media-skip-forward-symbolic", NULL,
+                       G_CALLBACK(act_suivante), a);
+    gtk_widget_set_tooltip_text(a->b_prec, "Vidéo précédente");
+    gtk_widget_set_tooltip_text(a->b_suiv, "Vidéo suivante");
+    gtk_widget_set_sensitive(a->b_prec, FALSE);
+    gtk_widget_set_sensitive(a->b_suiv, FALSE);
     a->b_plein   = bouton("view-fullscreen-symbolic", NULL,
                           G_CALLBACK(act_plein), a);
     a->b_son     = bouton("audio-volume-high-symbolic", NULL,
@@ -758,13 +1057,9 @@ static GtkWidget *construire_capsule(App *a)
     gtk_box_append(GTK_BOX(c), a->l_position);
     gtk_box_append(GTK_BOX(c), barre);
     gtk_box_append(GTK_BOX(c), a->l_duree);
-    gtk_box_append(GTK_BOX(c),
-                   bouton("media-seek-backward-symbolic", NULL,
-                          G_CALLBACK(act_reculer), a));
+    gtk_box_append(GTK_BOX(c), a->b_prec);
     gtk_box_append(GTK_BOX(c), a->b_lecture);
-    gtk_box_append(GTK_BOX(c),
-                   bouton("media-seek-forward-symbolic", NULL,
-                          G_CALLBACK(act_avancer), a));
+    gtk_box_append(GTK_BOX(c), a->b_suiv);
     gtk_box_append(GTK_BOX(c), a->b_son);
     gtk_box_append(GTK_BOX(c), a->volume);
     gtk_box_append(GTK_BOX(c), a->l_codec);
@@ -808,12 +1103,55 @@ static GtkWidget *construire_zone(App *a)
     return a->zone;
 }
 
+/* LA MARGE QUI TIENT LES DEUX MISES EN PAGE.
+ *
+ * Les commandes flottent TOUJOURS dans une GtkOverlay, au bas de l'image.
+ * Ce qui change entre fenetre et plein ecran, c'est la marge basse de
+ * l'image :
+ *
+ *   en fenetre      marge = hauteur des commandes -> elles sont SOUS la
+ *                                                    video, sur le fond
+ *                                                    transparent
+ *   en plein ecran  marge = 0                     -> elles flottent PAR-
+ *                                                    DESSUS l'image
+ *
+ * L'alternative -- les remettre dans la pile en plein ecran -- ferait sauter
+ * l'image de cent pixels a chaque mouvement de souris. Et la hauteur est
+ * MESUREE, jamais devinee : une constante en dur se decalerait au premier
+ * changement de police ou de theme. */
+static void ajuster_marge(App *a)
+{
+    int marge = 0;
+    if (!a->plein_ecran && a->commandes) {
+        int min = 0, nat = 0;
+        gtk_widget_measure(a->commandes, GTK_ORIENTATION_VERTICAL, -1,
+                           &min, &nat, NULL, NULL);
+        marge = nat;
+    }
+    if (a->offload) gtk_widget_set_margin_bottom(a->offload, marge);
+}
+
+static void sur_commandes_affichees(GtkWidget *w, gpointer u)
+{
+    (void) w;
+    ajuster_marge((App *)u);
+}
+
 static void construire(App *a)
 {
     a->fenetre = gtk_application_window_new(a->app);
     gtk_window_set_title(GTK_WINDOW(a->fenetre), "Vidéo");
     gtk_window_set_default_size(GTK_WINDOW(a->fenetre), 1280, 760);
     gtk_widget_add_css_class(a->fenetre, "video-fenetre");
+
+    /* NI BORDURE NI BARRE DE TITRE, et un fond transparent : il ne doit
+     * rester a l'ecran que l'image, la capsule, et la glissiere quand on la
+     * demande. Le compositeur ne decore pas ce qu'on declare non decore.
+     *
+     * Contrepartie assumee : la fenetre n'a plus de barre a saisir. Elle se
+     * deplace a l'Alt-glisser de labwc, ou en tirant LA CAPSULE -- qui est un
+     * GtkWindowHandle pour cette raison. */
+    gtk_window_set_decorated(GTK_WINDOW(a->fenetre), FALSE);
 
     a->image = gtk_picture_new();
     gtk_picture_set_content_fit(GTK_PICTURE(a->image), GTK_CONTENT_FIT_CONTAIN);
@@ -832,8 +1170,7 @@ static void construire(App *a)
     gtk_graphics_offload_set_enabled(GTK_GRAPHICS_OFFLOAD(a->offload),
                                      GTK_GRAPHICS_OFFLOAD_ENABLED);
 
-    /* Le sous-titre par-dessus l'image, dans une GtkOverlay. Cache tant
-     * qu'il n'y a rien a dire -- voir rafraichir_sous_titre(). */
+    /* Le sous-titre par-dessus l'image. Cache tant qu'il n'y a rien a dire. */
     a->st_texte = gtk_label_new("");
     gtk_widget_add_css_class(a->st_texte, "video-sous-titre");
     gtk_label_set_justify(GTK_LABEL(a->st_texte), GTK_JUSTIFY_CENTER);
@@ -843,29 +1180,53 @@ static void construire(App *a)
     gtk_widget_set_visible(a->st_texte, FALSE);
     gtk_widget_set_can_target(a->st_texte, FALSE);   /* il ne vole pas l'appui */
 
-    GtkWidget *sur_image = gtk_overlay_new();
-    gtk_overlay_set_child(GTK_OVERLAY(sur_image), a->offload);
-    gtk_overlay_add_overlay(GTK_OVERLAY(sur_image), a->st_texte);
-    gtk_widget_set_vexpand(sur_image, TRUE);
-
-    GtkWidget *pile = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_add_css_class(pile, "video-pile");
-    gtk_box_append(GTK_BOX(pile), sur_image);
-    gtk_box_append(GTK_BOX(pile), construire_zone(a));
+    /* La capsule : dans un reveleur, parce qu'elle s'efface en plein ecran ;
+     * dans un GtkWindowHandle, parce qu'elle sert de poignee de fenetre. */
     a->capsule = construire_capsule(a);
-    gtk_box_append(GTK_BOX(pile), a->capsule);
+    GtkWidget *poignee = gtk_window_handle_new();
+    gtk_window_handle_set_child(GTK_WINDOW_HANDLE(poignee), a->capsule);
+    gtk_widget_set_halign(poignee, GTK_ALIGN_CENTER);
 
-    gtk_window_set_child(GTK_WINDOW(a->fenetre), pile);
+    a->rev_capsule = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(a->rev_capsule),
+                                     GTK_REVEALER_TRANSITION_TYPE_CROSSFADE);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(a->rev_capsule), 140);
+    gtk_revealer_set_child(GTK_REVEALER(a->rev_capsule), poignee);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(a->rev_capsule), TRUE);
+    gtk_widget_set_halign(a->rev_capsule, GTK_ALIGN_CENTER);
+
+    a->commandes = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_box_append(GTK_BOX(a->commandes), construire_zone(a));
+    gtk_box_append(GTK_BOX(a->commandes), a->rev_capsule);
+    gtk_widget_set_valign(a->commandes, GTK_ALIGN_END);
+    g_signal_connect(a->commandes, "map", G_CALLBACK(sur_commandes_affichees), a);
+
+    GtkWidget *racine = gtk_overlay_new();
+    gtk_widget_add_css_class(racine, "video-pile");
+    gtk_overlay_set_child(GTK_OVERLAY(racine), a->offload);
+    gtk_overlay_add_overlay(GTK_OVERLAY(racine), a->st_texte);
+    gtk_overlay_add_overlay(GTK_OVERLAY(racine), a->commandes);
+
+    gtk_window_set_child(GTK_WINDOW(a->fenetre), racine);
 
     GtkEventController *clavier = gtk_event_controller_key_new();
     g_signal_connect(clavier, "key-pressed", G_CALLBACK(sur_touche), a);
     gtk_widget_add_controller(a->fenetre, clavier);
 
-    /* L'appui sur l'IMAGE, pas sur la fenetre entiere : un clic dans la
-     * capsule doit actionner le bouton vise, pas mettre en pause. */
+    /* L'APPUI EST POSE SUR LA RACINE, ET NON SUR L'IMAGE.
+     *
+     * En plein ecran les commandes flottent par-dessus l'image : un appui
+     * dans leur bande n'atteindrait jamais l'image. Sur la racine, il
+     * atteint tout ce qui ne l'a pas deja pris -- les boutons, eux, gardent
+     * leurs clics. */
     GtkGesture *appui = gtk_gesture_click_new();
     g_signal_connect(appui, "pressed", G_CALLBACK(sur_appui), a);
-    gtk_widget_add_controller(a->image, GTK_EVENT_CONTROLLER(appui));
+    gtk_widget_add_controller(racine, GTK_EVENT_CONTROLLER(appui));
+
+    /* Le mouvement de pointeur rappelle les commandes, en plein ecran. */
+    GtkEventController *mouvement = gtk_event_controller_motion_new();
+    g_signal_connect(mouvement, "motion", G_CALLBACK(sur_mouvement), a);
+    gtk_widget_add_controller(racine, mouvement);
 
     g_signal_connect(a->fenetre, "notify::fullscreened",
                      G_CALLBACK(sur_plein_change), a);
@@ -941,6 +1302,10 @@ static void ouvrir_fichier(App *a, const char *chemin)
         g_message("video : reprise à %.0f s", reprise);
     }
 
+    /* Le dossier est relu a chaque ouverture : on peut avoir change de
+     * dossier par le selecteur, et le contenu a pu bouger entre-temps. */
+    if (g_file_test(chemin, G_FILE_TEST_EXISTS)) dossier_charger(a, chemin);
+
     a->depart = g_get_monotonic_time();
     a->seconde_affichee = -1;
     video_moteur_lire(a->moteur);
@@ -975,55 +1340,145 @@ static void ouvrir_fichier(App *a, const char *chemin)
    « ne démarre pas » -- sans fenêtre, sans message, sans rien. Constaté sur
    MADOO le 10 septembre 2026, et c'est le premier essai qui l'a montré. */
 
-static void sur_fichier_choisi(GObject *source, GAsyncResult *res, gpointer u)
+/* LES LECTEURS RESEAU, DANS LE SELECTEUR.
+ *
+ * Ils sont montes sous /run/claude-os/reseau/<nom>. GIO ne les propose PAS
+ * dans sa barre laterale : g_unix_mount_guess_should_display() ne retient
+ * que /media, /run/media/<user> et le dossier personnel. Un partage monte,
+ * parfaitement accessible, reste donc invisible de toute boite « Ouvrir ».
+ *
+ * On les ajoute donc a la main, lus dans /proc/mounts -- la source de
+ * verite, plutot que la configuration : ce qui compte est ce qui est monte
+ * MAINTENANT, pas ce qui est declare. */
+static GPtrArray *lecteurs_reseau_montes(void)
+{
+    GPtrArray *points = g_ptr_array_new_with_free_func(g_free);
+
+    g_autofree gchar *contenu = NULL;
+    if (!g_file_get_contents("/proc/mounts", &contenu, NULL, NULL))
+        return points;
+
+    g_auto(GStrv) lignes = g_strsplit(contenu, "\n", -1);
+    for (char **l = lignes; l && *l; l++) {
+        g_auto(GStrv) champs = g_strsplit(*l, " ", 3);
+        if (!champs[0] || !champs[1]) continue;
+        if (!g_str_has_prefix(champs[1], "/run/claude-os/reseau/")) continue;
+
+        /* /proc/mounts echappe les espaces en \040 : sans cela, un partage
+         * nomme « Mes vidéos » donnerait un chemin tronque. */
+        g_autofree gchar *point = g_strcompress(champs[1]);
+        g_ptr_array_add(points, g_steal_pointer(&point));
+    }
+    return points;
+}
+
+static void sur_reponse_selecteur(GtkDialog *d, int reponse, gpointer u);
+
+/* LANCE SANS FICHIER, UN LECTEUR DOIT DEMANDER LEQUEL.
+ *
+ * DEUX PIEGES PAYES ICI, tous deux constates sur MADOO.
+ *
+ * 1. La boite s'ouvrait DERRIERE la fenetre. Elle etait creee dans
+ *    l'activation, avant que la fenetre parente ne soit affichee : il n'y
+ *    avait alors rien au-dessus de quoi se placer. Elle est desormais
+ *    ouverte au « map » de la fenetre, modale et transitoire -- les trois
+ *    ensemble, pas l'une des trois.
+ *
+ * 2. GtkFileDialog, l'API recommandee depuis GTK 4.10, NE SAIT PAS ajouter
+ *    de raccourci vers un dossier. Elle n'expose que le dossier initial. Or
+ *    les lecteurs reseau ne sont pas dans la barre laterale de GIO (voir
+ *    ci-dessus) : avec elle, ils resteraient hors d'atteinte, sauf a taper
+ *    le chemin de memoire. On garde donc GtkFileChooserDialog, deprecie
+ *    mais capable, et on le dit plutot que de le subir. */
+static void demander_fichier(App *a)
+{
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    GtkWidget *d = gtk_file_chooser_dialog_new(
+        "Ouvrir une vidéo", GTK_WINDOW(a->fenetre),
+        GTK_FILE_CHOOSER_ACTION_OPEN,
+        "_Annuler", GTK_RESPONSE_CANCEL,
+        "_Ouvrir",  GTK_RESPONSE_ACCEPT,
+        NULL);
+    GtkFileChooser *ch = GTK_FILE_CHOOSER(d);
+
+    GtkFileFilter *videos = gtk_file_filter_new();
+    gtk_file_filter_set_name(videos, "Vidéos");
+    gtk_file_filter_add_mime_type(videos, "video/*");
+    gtk_file_chooser_add_filter(ch, videos);
+
+    GtkFileFilter *tout = gtk_file_filter_new();
+    gtk_file_filter_set_name(tout, "Tous les fichiers");
+    gtk_file_filter_add_pattern(tout, "*");
+    gtk_file_chooser_add_filter(ch, tout);
+
+    g_autoptr(GPtrArray) reseau = lecteurs_reseau_montes();
+    for (guint i = 0; i < reseau->len; i++) {
+        const char *point = g_ptr_array_index(reseau, i);
+        g_autoptr(GFile) f = g_file_new_for_path(point);
+        GError *e = NULL;
+        if (!gtk_file_chooser_add_shortcut_folder(ch, f, &e)) {
+            g_message("video : lecteur réseau « %s » non ajouté (%s)",
+                      point, e ? e->message : "?");
+            g_clear_error(&e);
+        }
+    }
+
+    const char *videos_dir = g_get_user_special_dir(G_USER_DIRECTORY_VIDEOS);
+    if (videos_dir && g_file_test(videos_dir, G_FILE_TEST_IS_DIR)) {
+        g_autoptr(GFile) f = g_file_new_for_path(videos_dir);
+        gtk_file_chooser_set_current_folder(ch, f, NULL);
+    }
+
+    /* Ouvrir sur le dossier du film precedent, quand il y en a un : c'est
+     * presque toujours la ou se trouve le suivant. */
+    if (a->fichier) {
+        g_autoptr(GFile) f = g_file_new_for_path(a->fichier);
+        g_autoptr(GFile) dir = g_file_get_parent(f);
+        if (dir) gtk_file_chooser_set_current_folder(ch, dir, NULL);
+    }
+    G_GNUC_END_IGNORE_DEPRECATIONS
+
+    gtk_window_set_modal(GTK_WINDOW(d), TRUE);
+    gtk_window_set_transient_for(GTK_WINDOW(d), GTK_WINDOW(a->fenetre));
+    gtk_window_set_destroy_with_parent(GTK_WINDOW(d), TRUE);
+    g_signal_connect(d, "response", G_CALLBACK(sur_reponse_selecteur), a);
+    gtk_window_present(GTK_WINDOW(d));
+}
+
+static void sur_reponse_selecteur(GtkDialog *d, int reponse, gpointer u)
 {
     App *a = u;
-    GError *e = NULL;
-    GFile *f = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), res, &e);
 
-    if (!f) {
-        /* Annulé : il n'y a rien à montrer, on referme. Une fenêtre noire
-         * vide serait plus déroutante qu'utile. */
-        if (e && !g_error_matches(e, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED))
-            g_warning("video : %s", e->message);
-        g_clear_error(&e);
-        gtk_window_close(GTK_WINDOW(a->fenetre));
+    if (reponse != GTK_RESPONSE_ACCEPT) {
+        gtk_window_destroy(GTK_WINDOW(d));
+        /* Annule alors qu'aucun film n'est ouvert : il n'y a rien a
+         * montrer, on referme. Une fenetre transparente et vide serait plus
+         * deroutante qu'utile. */
+        if (!a->moteur) gtk_window_close(GTK_WINDOW(a->fenetre));
         return;
     }
+
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    g_autoptr(GFile) f = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(d));
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    gtk_window_destroy(GTK_WINDOW(d));
+    if (!f) return;
 
     g_autofree gchar *chemin = g_file_get_path(f);
     g_autofree gchar *uri    = g_file_get_uri(f);
     g_free(a->fichier);
     a->fichier = g_strdup(chemin ? chemin : uri);
-    g_object_unref(f);
-
     ouvrir_fichier(a, a->fichier);
 }
 
-static void demander_fichier(App *a)
+/* La boite d'ouverture n'est demandee qu'une fois la fenetre AFFICHEE :
+ * creee avant, elle n'a rien au-dessus de quoi se placer et se retrouve
+ * derriere. Une seule fois -- « map » revient a chaque re-affichage. */
+static void sur_fenetre_affichee(GtkWidget *w, gpointer u)
 {
-    GtkFileDialog *d = gtk_file_dialog_new();
-    gtk_file_dialog_set_title(d, "Ouvrir une vidéo");
-
-    GtkFileFilter *videos = gtk_file_filter_new();
-    gtk_file_filter_set_name(videos, "Vidéos");
-    gtk_file_filter_add_mime_type(videos, "video/*");
-
-    GtkFileFilter *tout = gtk_file_filter_new();
-    gtk_file_filter_set_name(tout, "Tous les fichiers");
-    gtk_file_filter_add_pattern(tout, "*");
-
-    GListStore *filtres = g_list_store_new(GTK_TYPE_FILE_FILTER);
-    g_list_store_append(filtres, videos);
-    g_list_store_append(filtres, tout);
-    gtk_file_dialog_set_filters(d, G_LIST_MODEL(filtres));
-    gtk_file_dialog_set_default_filter(d, videos);
-    g_object_unref(filtres);
-    g_object_unref(videos);
-    g_object_unref(tout);
-
-    gtk_file_dialog_open(d, GTK_WINDOW(a->fenetre), NULL, sur_fichier_choisi, a);
-    g_object_unref(d);
+    App *a = u;
+    g_signal_handlers_disconnect_by_func(w, G_CALLBACK(sur_fenetre_affichee), a);
+    demander_fichier(a);
 }
 
 static void sur_demarrage(GtkApplication *app, gpointer cfg)
@@ -1044,13 +1499,25 @@ static void sur_activation(GApplication *app, gpointer u)
                      "gtk-application-prefer-dark-theme", cfg->dark, NULL);
     }
 
+    a->annulation = g_cancellable_new();
+    a->rang = -1;
     video_image_init(&a->images);
     construire(a);
+    /* LE RAPPEL AVANT L'AFFICHAGE, ET NON APRES.
+     *
+     * gtk_window_present() affiche la fenetre TOUT DE SUITE : « map » est
+     * emis pendant l'appel. S'y abonner ensuite, c'est s'abonner a un signal
+     * deja passe -- la boite d'ouverture n'arrivait jamais, et l'application
+     * restait sur une fenetre vide. Constate sur MADOO le 10 septembre 2026,
+     * a la capture d'ecran. */
+    if (!a->fichier)
+        g_signal_connect(a->fenetre, "map",
+                         G_CALLBACK(sur_fenetre_affichee), a);
+
     if (a->plein) gtk_window_fullscreen(GTK_WINDOW(a->fenetre));
     gtk_window_present(GTK_WINDOW(a->fenetre));
 
     if (a->fichier) ouvrir_fichier(a, a->fichier);
-    else            demander_fichier(a);
 }
 
 int main(int argc, char **argv)

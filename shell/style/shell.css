@@ -1630,22 +1630,22 @@ window.images { background-color: @surface; }
       arrondi, pas d'ombre. Le tampon décodé est posé tel quel ; tout ce
       qu'on dessinerait autour serait, littéralement, du travail en plus
       pour le compositeur.
-   2. LE FOND EST NOIR, et non @surface. Une vidéo n'a pas le même format
-      que la fenêtre : les bandes qui restent doivent disparaître, pas
-      s'afficher en gris clair à côté de l'image.
+   2. LE FOND EST TRANSPARENT, ni noir ni @surface. La fenêtre n'a pas de
+      décoration : il ne doit rester à l'écran que l'image, la capsule, et
+      la glissière quand on la demande. Le bureau se voit entre les deux.
    3. LA CAPSULE FLOTTE. Elle ne touche ni la vidéo ni le bord, et l'espace
       qui la sépare de l'image est une zone sensible, pas une marge.
    ========================================================================= */
 
 .video-fenetre,
 .video-pile {
-  background-color: #000000;
+  background-color: transparent;
 }
 
 /* L'ESPACE VIDE, entre la vidéo et la capsule. Il ne se voit pas — c'est le
    propos — mais il reçoit le survol et le toucher. */
 .video-zone {
-  background-color: #000000;
+  background-color: transparent;
   padding: 0 24px;
 }
 
