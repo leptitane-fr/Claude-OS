@@ -254,3 +254,11 @@ install_data(
 install_subdir('style',
   install_dir : data_dir,
   strip_directory : false)
+
+# POSER UN .desktop NE SUFFIT PAS : le systeme lit « mimeinfo.cache », que
+# seul « update-desktop-database » regenere. Sans cette etape, une
+# application installee avec ses types declares reste introuvable, et
+# Fichiers repond « aucune application n'est installee pour ce type de
+# fichier ». Constate sur MADOO le 10 septembre 2026 -- le lecteur video
+# etait en place et son cache datait de deux jours plus tot.
+meson.add_install_script('data/apres-installation.sh')

@@ -97,6 +97,8 @@ typedef struct {
 
 static void bilan(App *a, const char *quand);
 static void act_sourdine(GtkButton *b, gpointer u);
+static void ouvrir_fichier(App *a, const char *chemin);
+static void demander_fichier(App *a);
 static void reveler(App *a, gboolean visible, gboolean momentane);
 
 /* ---------------------------------------------------- reprendre ou l'on en
@@ -610,6 +612,19 @@ static gboolean sur_touche(GtkEventControllerKey *c, guint val, guint code,
                 gtk_window_close(GTK_WINDOW(a->fenetre));
             return TRUE;
         case GDK_KEY_q:      gtk_window_close(GTK_WINDOW(a->fenetre)); return TRUE;
+        case GDK_KEY_o:
+        case GDK_KEY_O:
+            if (mod & GDK_CONTROL_MASK) {
+                /* Le moteur en cours est fermé par ouvrir_fichier ; on note
+                 * d'abord où l'on en était, sinon la reprise du film qu'on
+                 * quitte est perdue. */
+                if (a->moteur && a->fichier)
+                    reprise_ecrire(a->fichier, video_moteur_position(a->moteur),
+                                   video_moteur_duree(a->moteur));
+                demander_fichier(a);
+                return TRUE;
+            }
+            return FALSE;
     }
     return FALSE;
 }
@@ -862,6 +877,14 @@ static void ouvrir_fichier(App *a, const char *chemin)
     GError *err = NULL;
     VideoRappels r = { sur_etat, sur_fin, sur_erreur };
 
+    /* Remplacer un film par un autre : on arrête le battement AVANT de
+     * fermer le moteur, sinon le prochain tick va chercher une image dans
+     * un moteur qui n'existe plus. */
+    if (a->moteur) {
+        battement_selon(a, FALSE);
+        g_clear_pointer(&a->moteur, video_moteur_fermer);
+    }
+
     a->moteur = video_moteur_ouvrir(chemin, &r, a, &err);
     if (!a->moteur) {
         /* INVARIANT N.4 : on ne meurt pas en silence. */
@@ -942,6 +965,67 @@ static void ouvrir_fichier(App *a, const char *chemin)
     if (a->scenario) g_timeout_add_seconds(3, sur_scenario, a);
 }
 
+/* ------------------------------------------------------ choisir un fichier
+
+   LANCÉ SANS FICHIER, UN LECTEUR DOIT DEMANDER LEQUEL.
+   
+   La première version écrivait un mode d'emploi sur la sortie d'erreur et
+   quittait. Depuis un terminal, c'est acceptable ; depuis le menu du bureau,
+   où le .desktop ne passe aucun argument, cela donne une application qui
+   « ne démarre pas » -- sans fenêtre, sans message, sans rien. Constaté sur
+   MADOO le 10 septembre 2026, et c'est le premier essai qui l'a montré. */
+
+static void sur_fichier_choisi(GObject *source, GAsyncResult *res, gpointer u)
+{
+    App *a = u;
+    GError *e = NULL;
+    GFile *f = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(source), res, &e);
+
+    if (!f) {
+        /* Annulé : il n'y a rien à montrer, on referme. Une fenêtre noire
+         * vide serait plus déroutante qu'utile. */
+        if (e && !g_error_matches(e, GTK_DIALOG_ERROR, GTK_DIALOG_ERROR_DISMISSED))
+            g_warning("video : %s", e->message);
+        g_clear_error(&e);
+        gtk_window_close(GTK_WINDOW(a->fenetre));
+        return;
+    }
+
+    g_autofree gchar *chemin = g_file_get_path(f);
+    g_autofree gchar *uri    = g_file_get_uri(f);
+    g_free(a->fichier);
+    a->fichier = g_strdup(chemin ? chemin : uri);
+    g_object_unref(f);
+
+    ouvrir_fichier(a, a->fichier);
+}
+
+static void demander_fichier(App *a)
+{
+    GtkFileDialog *d = gtk_file_dialog_new();
+    gtk_file_dialog_set_title(d, "Ouvrir une vidéo");
+
+    GtkFileFilter *videos = gtk_file_filter_new();
+    gtk_file_filter_set_name(videos, "Vidéos");
+    gtk_file_filter_add_mime_type(videos, "video/*");
+
+    GtkFileFilter *tout = gtk_file_filter_new();
+    gtk_file_filter_set_name(tout, "Tous les fichiers");
+    gtk_file_filter_add_pattern(tout, "*");
+
+    GListStore *filtres = g_list_store_new(GTK_TYPE_FILE_FILTER);
+    g_list_store_append(filtres, videos);
+    g_list_store_append(filtres, tout);
+    gtk_file_dialog_set_filters(d, G_LIST_MODEL(filtres));
+    gtk_file_dialog_set_default_filter(d, videos);
+    g_object_unref(filtres);
+    g_object_unref(videos);
+    g_object_unref(tout);
+
+    gtk_file_dialog_open(d, GTK_WINDOW(a->fenetre), NULL, sur_fichier_choisi, a);
+    g_object_unref(d);
+}
+
 static void sur_demarrage(GtkApplication *app, gpointer cfg)
 {
     shell_styles_startup(app, cfg);
@@ -950,12 +1034,6 @@ static void sur_demarrage(GtkApplication *app, gpointer cfg)
 static void sur_activation(GApplication *app, gpointer u)
 {
     App *a = u;
-    if (!a->fichier) {
-        g_printerr("Usage : claude-os-video <fichier> "
-                   "[--plein-ecran] [--essai=<secondes>] [--scenario]\n");
-        return;
-    }
-
     ShellConfig *cfg = g_object_get_data(G_OBJECT(app), "cfg");
     if (cfg) {
         shell_config_apply(cfg);
@@ -970,7 +1048,9 @@ static void sur_activation(GApplication *app, gpointer u)
     construire(a);
     if (a->plein) gtk_window_fullscreen(GTK_WINDOW(a->fenetre));
     gtk_window_present(GTK_WINDOW(a->fenetre));
-    ouvrir_fichier(a, a->fichier);
+
+    if (a->fichier) ouvrir_fichier(a, a->fichier);
+    else            demander_fichier(a);
 }
 
 int main(int argc, char **argv)
@@ -991,8 +1071,14 @@ int main(int argc, char **argv)
         } else if (g_str_has_prefix(argv[i], "--essai=")) {
             a.duree_essai = atoi(argv[i] + 8);
         } else if (argv[i][0] != '-') {
+            /* LE .desktop PASSE UNE URI, PAS UN CHEMIN. « Exec=… %U » donne
+             * « file:///home/… » ; g_file_new_for_commandline_arg accepte
+             * les deux formes et rend un chemin local quand il y en a un. */
+            g_autoptr(GFile) f = g_file_new_for_commandline_arg(argv[i]);
+            g_autofree gchar *chemin = g_file_get_path(f);
+            g_autofree gchar *uri    = g_file_get_uri(f);
             g_free(a.fichier);
-            a.fichier = g_strdup(argv[i]);
+            a.fichier = g_strdup(chemin ? chemin : uri);
         } else {
             g_printerr("video : option inconnue « %s »\n", argv[i]);
             return 2;
