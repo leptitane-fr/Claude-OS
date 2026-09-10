@@ -168,12 +168,14 @@ RAPL_UNCORE=/sys/class/powercap/intel-rapl:0:1/energy_uj
 # échantillon. La boucle ne fait que lire et écrire sur sa sortie standard.
 ECHANTILLONNEUR='
 for i in $(seq '"$N"'); do
-    printf "%s\t%s\t%s\t%s\t%s\n" \
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
         "$(date +%s.%N)" \
         "$(cat '"$RAPL_PSYS"' 2>/dev/null || echo -1)" \
         "$(cat '"$RAPL_PKG"' 2>/dev/null || echo -1)" \
         "$(cat '"$RAPL_CORE"' 2>/dev/null || echo -1)" \
-        "$(cat '"$RAPL_UNCORE"' 2>/dev/null || echo -1)"
+        "$(cat '"$RAPL_UNCORE"' 2>/dev/null || echo -1)" \
+        "$(cat /sys/class/power_supply/BAT0/current_now 2>/dev/null || echo 0)" \
+        "$(cat /sys/class/power_supply/BAT0/voltage_now 2>/dev/null || echo 0)"
     sleep '"$INTERVALLE"'
 done'
 
@@ -181,14 +183,20 @@ done'
 # dit pas — combien de travail a été fait pour cette énergie.
 lire_cpu()  { awk '/^cpu /{ total=0; for(i=2;i<=NF;i++) total+=$i; print total, $5 }' /proc/stat; }
 lire_irq()  { awk 'NR>1 { for(i=2;i<=5;i++) t+=$i } END { print t+0 }' /proc/interrupts; }
-lire_bat()  {
-	local i v
-	i=$(cat /sys/class/power_supply/BAT0/current_now 2>/dev/null || echo 0)
-	v=$(cat /sys/class/power_supply/BAT0/voltage_now 2>/dev/null || echo 0)
-	awk -v i="$i" -v v="$v" 'BEGIN{ printf "%.3f", (i/1000000)*(v/1000000) }'
-}
+# LA BATTERIE SE MOYENNE, ELLE NE S'ÉCHANTILLONNE PAS DEUX FOIS.
+#
+# La première version lisait current_now avant et après, et faisait la
+# moyenne des deux. Le courant d'une batterie varie de plus d'un watt d'une
+# seconde à l'autre : deux instantanés à trente secondes d'écart donnent un
+# chiffre dont l'incertitude dépasse l'effet qu'on cherche à mesurer.
+# Mesuré le 10 septembre 2026 : la série a rendu « dmabuf » moins gourmand
+# que « offload » à la batterie alors qu'il l'était plus au SoC — deux
+# instruments qui se contredisent, donc au moins un qui ment.
+#
+# Le courant est désormais relevé à chaque échantillon, dans la même boucle
+# que RAPL, et c'est leur moyenne qui est rendue.
 
-CPU_AV=$(lire_cpu); IRQ_AV=$(lire_irq); BAT_AV=$(lire_bat)
+CPU_AV=$(lire_cpu); IRQ_AV=$(lire_irq)
 GPU_MHZ_AV=$(cat /sys/class/drm/card0/gt_act_freq_mhz 2>/dev/null || echo -1)
 
 claude-os-root -c "$ECHANTILLONNEUR" > "$TRACE" &
@@ -211,7 +219,7 @@ if [ -n "$COMMANDE" ]; then
 	trap 'rm -f "$TRACE"' EXIT
 fi
 
-CPU_AP=$(lire_cpu); IRQ_AP=$(lire_irq); BAT_AP=$(lire_bat)
+CPU_AP=$(lire_cpu); IRQ_AP=$(lire_irq)
 GPU_MHZ_AP=$(cat /sys/class/drm/card0/gt_act_freq_mhz 2>/dev/null || echo -1)
 
 # INVARIANT N°4 : une commande qui échoue doit parler.
@@ -264,7 +272,12 @@ OCCUPATION=$(awk -v a="$CPU_AV" -v b="$CPU_AP" 'BEGIN {
 	if (dt <= 0) { print "?" } else { printf "%.1f", 100*(1-di/dt) }
 }')
 IRQ_S=$(awk -v a="$IRQ_AV" -v b="$IRQ_AP" -v d="$DT" 'BEGIN { printf "%.0f", (b-a)/d }')
-BAT_MOY=$(awk -v a="$BAT_AV" -v b="$BAT_AP" 'BEGIN { printf "%.2f", (a+b)/2 }')
+BAT_MOY=$(awk '{ if ($6 > 0 && $7 > 0) { p += ($6/1000000)*($7/1000000); n++ } }
+                END { if (n > 0) printf "%.2f", p/n; else printf "0.00" }' "$TRACE")
+BAT_ECART=$(awk -v moy="$BAT_MOY" '
+    { if ($6 > 0 && $7 > 0) { p = ($6/1000000)*($7/1000000); d = p - moy;
+                              s += d*d; n++ } }
+    END { if (n > 1) printf "%.2f", sqrt(s/(n-1)); else printf "0.00" }' "$TRACE")
 
 echo
 echo "== Résultat =="

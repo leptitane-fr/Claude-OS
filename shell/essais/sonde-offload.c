@@ -64,6 +64,13 @@ typedef struct {
     int               duree;        /* secondes avant de quitter, 0 = tout   */
     gboolean          muet;         /* sans fenetre : mesure du decodage seul */
     gboolean          plein;        /* plein ecran : le balayage direct est possible */
+    /* LE TEMOIN. Une image, puis plus rien : meme fenetre, meme plein
+     * ecran, meme occultation du reste du bureau -- mais aucun decodage et
+     * aucune image nouvelle. C'est LUI le repere, et non le bureau au repos :
+     * un plein ecran masque tout ce qui tournait derriere, et comparer une
+     * lecture en plein ecran a un bureau visible mesure surtout ce qu'on a
+     * cache. */
+    gboolean          fige;
 
     AVFormatContext  *fmt;
     AVCodecContext   *dec;
@@ -331,6 +338,12 @@ static gboolean sur_battement(gpointer data)
         return G_SOURCE_REMOVE;
     }
 
+    if (s->fige && s->images > 0) {
+        /* Une seule image aura ete affichee ; on ne decode plus rien, mais
+         * la fenetre reste, pleine et opaque. */
+        return G_SOURCE_CONTINUE;
+    }
+
     gint64 t0 = g_get_monotonic_time();
     if (!image_suivante(s)) {
         s->fini = TRUE;
@@ -412,6 +425,8 @@ int main(int argc, char **argv)
             s.muet = TRUE;
         } else if (!strcmp(argv[i], "--plein-ecran")) {
             s.plein = TRUE;
+        } else if (!strcmp(argv[i], "--fige")) {
+            s.fige = TRUE;
         } else if (argv[i][0] != '-') {
             s.fichier = argv[i];
         } else {
@@ -423,7 +438,8 @@ int main(int argc, char **argv)
     if (!s.fichier) {
         fprintf(stderr,
             "Usage : sonde-offload <fichier> [--mode=offload|dmabuf|copie|logiciel]\n"
-            "                      [--duree=<secondes>] [--muet] [--plein-ecran]\n");
+            "                      [--duree=<secondes>] [--muet] [--plein-ecran]\n"
+            "                      [--fige]  (temoin : une image, aucun decodage)\n");
         return 2;
     }
 

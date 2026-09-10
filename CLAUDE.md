@@ -407,17 +407,33 @@ manquant ». libmpv aurait tiré 151 paquets contre 40, et sa sortie
 `dmabuf-wayland` ne s'embarque pas dans une fenêtre GTK.
 
 **L'image n'est jamais recopiée** : VA-API → `av_hwframe_map` → dmabuf →
-`GdkDmabufTexture` → `GtkGraphicsOffload`. Mire 1080p30, repos à 2,92 W :
+`GdkDmabufTexture` → `GtkGraphicsOffload`.
 
-| offload | dmabuf | logiciel | **copie** |
-|---|---|---|---|
-| 3,24 W | 3,30 W | 4,08 W | **5,45 W** |
+**Mesuré sur batterie, écran allumé, 10 septembre 2026 au soir.** Repère : la
+même fenêtre en plein écran avec une image figée — 5,99 W. Comparer au bureau
+au repos ne mesurerait pas la lecture mais ce que le plein écran a masqué.
 
-**Le chemin naïf — décodage matériel PUIS `av_hwframe_transfer_data` — coûte
-huit fois le chemin retenu**, et davantage que tout décoder au logiciel.
-Relire une surface tuilée depuis la mémoire du GPU est lent et cher sans
-apparaître comme du temps processeur. C'est le code qu'on écrit sans y
-penser : ne pas le réintroduire.
+| témoin figé | **offload** | dmabuf | logiciel | **copie** |
+|---|---|---|---|---|
+| 5,99 W | **6,44 W** | 6,52 W | 7,68 W | **8,44 W** |
+
+**Lire une vidéo 1080p coûte 0,45 W.** Le décodage logiciel en coûte 3,8 fois
+plus ; le chemin naïf — décodage matériel PUIS `av_hwframe_transfer_data` —
+5,4 fois plus. Relire une surface tuilée depuis la mémoire du GPU est lent et
+cher sans apparaître comme du temps processeur. C'est le code qu'on écrit
+sans y penser : **ne pas le réintroduire.**
+
+**Contre Chromium, trois paires alternées** (il décode aussi en VA-API, et sa
+lecture a été vérifiée au flux PipeWire avant d'être retenue) :
+`claude-os-video` **6,90 W ± 0,09** contre **7,76 W**. Sur 40 Wh utiles :
+**5,8 h de film contre 5,2 h**, soit trente-cinq minutes de plus par charge.
+
+Les essais sont **alternés** parce que la tension d'une batterie baisse en se
+déchargeant : deux blocs successifs avantagent le premier.
+
+Et un résultat qu'on ne cherchait pas : **regarder un film coûte moins cher
+que laisser le bureau affiché** (7,72 W) — le plein écran masque Claude
+Desktop.
 
 **Aucun minuteur périodique.** L'affichage suit le *frame clock* de GTK, donc
 les frame callbacks du compositeur. Fenêtre masquée, plus de battement, plus
@@ -444,10 +460,13 @@ puis plus jamais, sans erreur. Le poser au « map ».
 parcours pause/reprise/sauts et capture le rendu. C'est par là que tout a été
 jugé, la machine s'étant verrouillée pendant la séance.
 
-**RIEN N'A ÉTÉ VU SUR LE VRAI ÉCRAN, ni entendu, et le lecteur N'EST PAS
-INSTALLÉ.** Il est dans `meson.build` et compile sans un avertissement, mais
-`--compiler` réinstalle *tout* le shell. Restent à confirmer sur MADOO : les
-couleurs, le son, la fluidité, et surtout **les gestes au doigt**.
+**LE LECTEUR N'EST PAS INSTALLÉ.** Il est dans `meson.build`, compile sans un
+avertissement, et l'ensemble du shell compile avec lui. `--compiler`
+réinstalle *tout* le shell, ce qui n'a pas été fait pendant qu'une autre
+instance travaillait dans le dépôt.
+
+**Reste à éprouver : les gestes au doigt**, que le banc sans écran ne sait
+pas produire.
 
 ### Ce qui reste ouvert
 
@@ -462,7 +481,7 @@ couleurs, le son, la fluidité, et surtout **les gestes au doigt**.
 | Réglages : durées brutes | Le panneau montre ce qui est écrit, pas ce qui est appliqué après bornage par `shell_energie_delais_mode()`. La Console, elle, dit vrai. |
 | `console.c` non converti | Le rétroéclairage y est encore soudé au widget du curseur, en double de `retroeclairage.c`. |
 | Capot par mode | Le verrou s'ancre sur l'extinction ; le capot reste géré par logind, donc identique pour les trois modes. |
-| **Lecteur vidéo** | Écrit, compilé, éprouvé au banc sans écran — **jamais vu sur la machine, jamais installé**. Les mesures d'énergie en plein écran sont à refaire (la première série a été prise écran éteint), et la campagne d'autonomie exige de débrancher. Vitesse de lecture non faite, délibérément : voir `docs/11`. |
+| **Lecteur vidéo** | Écrit, compilé, mesuré sur batterie — **pas encore installé**, et **les gestes au doigt restent à éprouver**. Vitesse de lecture non faite, délibérément : voir `docs/11`. |
 | Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
 
 ---

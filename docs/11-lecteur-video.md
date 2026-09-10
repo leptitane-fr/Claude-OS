@@ -4,11 +4,13 @@ Un lecteur pour Claude OS, dont le fil rouge est l'économie d'énergie. Cette
 page dit **ce qui a été mesuré**, dans l'ordre où ça l'a été. Ce qui n'est pas
 établi y est écrit comme tel.
 
-État au 10 septembre 2026 : **phases 0 et 1 terminées**. L'architecture est
-validée par la mesure, et le noyau de lecture joue une vidéo complète, en
-son, avec pause et saut précis. **Rien n'a encore été vu sur le vrai écran** :
-la machine s'est verrouillée pendant la séance, et tout ce qui suit a été
-éprouvé sur le banc sans écran.
+État au 10 septembre 2026 : **les cinq phases sont faites**, campagne
+d'énergie sur batterie comprise. Le lecteur joue, se commande, porte pistes
+et sous-titres, et **consomme 0,86 W de moins que Chromium sur le même
+fichier** — soit environ trente-cinq minutes de film de plus par charge.
+
+Ce qui n'a **pas** encore été fait : les gestes au doigt, que le banc ne sait
+pas produire ; et le lecteur n'est pas installé sur la machine.
 
 ---
 
@@ -78,7 +80,7 @@ ce qui rend deux mesures comparables.
 | | |
 |---|---|
 | `package-0` | Le SoC seul. **Seul instrument disponible sur secteur.** Il compare des chemins ; il ne dit pas l'autonomie. |
-| Batterie | `current_now × voltage_now` : toute la plateforme, écran compris. **La seule mesure d'autonomie** — et elle exige de débrancher. |
+| Batterie | `current_now × voltage_now` : toute la plateforme, écran compris. **La seule mesure d'autonomie** — et elle exige de débrancher. **Moyennée sur tous les échantillons**, et non lue deux fois : le courant varie de plus d'un watt d'une seconde à l'autre, et deux instantanés à trente secondes d'écart ont d'abord rendu `dmabuf` moins gourmand que `offload` à la batterie alors qu'il l'était plus au SoC. Deux instruments qui se contredisent, donc au moins un qui ment. |
 | `psys` | **Mesuré inutilisable sur MADOO** le 10 septembre 2026 : le domaine existe, mais `enabled` vaut 0 et le compteur avance de 61 mW pour une plateforme qui en consomme près de sept. Le banc le lit encore, uniquement pour dire qu'il ne compte pas. |
 
 ### En fenêtre — repère de repos : 2,92 W
@@ -98,35 +100,100 @@ surface tuilée depuis la mémoire du GPU est lente et chère, sans pour autant
 apparaître comme du temps processeur. C'est le résultat le plus utile de la
 phase 0 — c'est exactement le code qu'on écrit sans y penser.
 
-### En plein écran — MESURES ANNULÉES
+### En plein écran — une première série annulée, et pourquoi
 
 Une série avait été prise en plein écran et donnait des chiffres plus bas :
-2,23 à 2,40 W pour `offload`, 2,54 pour `dmabuf`. On en avait conclu que le
-balayage direct rapportait 0,2 W.
+2,23 à 2,40 W pour `offload`. On en avait conclu que le balayage direct
+rapportait 0,2 W. **C'était faux, et les mesures avec.**
 
-**Cette conclusion était fausse, et les mesures avec.** À 20:14:12 ce jour-là,
-`claude-os-verrou` s'est monté : la veille progressive avait éteint le
-rétroéclairage, puis verrouillé la session. Sous `ext-session-lock-v1`, le
-compositeur masque **toutes** les fenêtres. Plus un « frame callback », plus
-une image composée, le GPU au repos. Les cinq mesures de 20:13 à 20:15 ne
-portent sur rien de ce qu'elles annoncent — et elles étaient flatteuses, ce
-qui est la pire espèce d'erreur de mesure.
+À 20:14:12 ce jour-là, `claude-os-verrou` s'est monté : la veille progressive
+avait éteint le rétroéclairage, puis verrouillé la session. Sous
+`ext-session-lock-v1`, le compositeur masque **toutes** les fenêtres. Plus un
+« frame callback », plus une image composée, le GPU au repos. Les chiffres
+étaient flatteurs, ce qui est la pire espèce d'erreur de mesure — et
+l'explication qu'on leur avait d'abord donnée (« le plein écran masque Claude
+Desktop ») était une cause plausible pour un phénomène inexistant.
 
-Le premier récit donné de ces chiffres — « le plein écran masque Claude
-Desktop, qui consommait 23 % de processeur » — était une explication
-plausible d'un phénomène qui n'existait pas. C'est exactement ce contre quoi
-la méthode du projet met en garde.
+`tools/mesure-conso.sh` lit désormais le rétroéclairage et cherche le verrou
+**avant** de mesurer, et **refuse** de rendre un chiffre dans cet état.
 
-**Ce qui en a été tiré :** `tools/mesure-conso.sh` lit désormais le
-rétroéclairage et cherche `claude-os-verrou` **avant** de mesurer, et
-**refuse** de rendre un chiffre dans cet état. `--quand-meme` reste possible
-pour qui veut justement mesurer l'écran éteint ; le relevé en porte alors la
-mention.
+## 11.5 La campagne d'énergie — sur batterie, écran allumé
 
-La série en plein écran est **à refaire, écran allumé**, ainsi que toute la
-campagne d'autonomie — qui exige en plus de débrancher.
+Faite le 10 septembre 2026 à 22 h, machine **débranchée**, écran déverrouillé
+au maximum, batterie à 88 %. C'est la seule condition où l'autonomie se
+mesure : sur secteur, `current_now` reste à zéro.
 
-## 11.5 Le noyau de lecture — phase 1
+**Batterie : 40,0 Wh utiles** (47,4 Wh d'origine, 15 % d'usure).
+
+### Le témoin, et pourquoi il a fallu l'inventer
+
+Comparer une lecture en plein écran au bureau au repos ne mesure pas la
+lecture : le plein écran **masque** Claude Desktop et ses 25 % de processeur,
+et l'on mesure surtout ce qu'on a caché. Le repère est donc `--fige` : la
+même fenêtre, le même plein écran, la même occultation — mais une seule
+image, et aucun décodage.
+
+### Ce que coûte le chemin d'affichage (sonde, sans son)
+
+| Chemin | SoC | Batterie | CPU | Coût de la lecture |
+|---|---|---|---|---|
+| **témoin** — une image figée | 1,71 W | **5,99 W** | 3,6 % | — |
+| **`offload`** — dmabuf, sans copie | 2,04 W | **6,44 W** | 7,0 % | **+0,45 W** |
+| `dmabuf` — composé par GTK | 2,09 W | 6,52 W | 8,2 % | +0,53 W |
+| `logiciel` — quatre cœurs | 2,85 W | 7,68 W | 34,5 % | +1,69 W |
+| `copie` — matériel puis recopie | 3,24 W | 8,44 W | 22,6 % | **+2,45 W** |
+
+**Lire une vidéo 1080p coûte 0,45 W à la plateforme par le chemin retenu.**
+Le décodage logiciel en coûte 3,8 fois plus, le chemin naïf 5,4 fois plus.
+
+### Contre Chromium — trois paires alternées
+
+Le seul autre moyen de regarder cette vidéo sur cette machine. La
+comparaison est honnête : **Chromium décode aussi en matériel** — sa ligne de
+commande porte `VaapiVideoDecodeLinuxGL` — et sa lecture a été **vérifiée**,
+flux PipeWire à l'état `running`, avant que le chiffre ne soit retenu. Les
+deux jouent le son.
+
+**Les essais sont alternés, et ce n'est pas un détail :** la tension d'une
+batterie baisse à mesure qu'elle se décharge, donc deux blocs successifs
+avantagent le premier. Chaque paire est mesurée dans la foulée.
+
+| Paire | `claude-os-video` | Chromium | écart |
+|---|---|---|---|
+| 1 | 6,98 W | 7,39 W | 0,41 W |
+| 2 | 6,81 W | 7,68 W | 0,87 W |
+| 3 | 6,90 W | 8,22 W | 1,32 W |
+| **moyenne** | **6,90 W** ± 0,09 | **7,76 W** | **0,86 W** |
+
+**Les trois paires vont dans le même sens, sur les deux instruments.** Le
+lecteur est en outre remarquablement stable — 6,81 à 6,98 W — là où Chromium
+dérive vers le haut d'une mesure à l'autre.
+
+### Ce que cela donne en heures de film
+
+| | puissance | autonomie sur 40 Wh |
+|---|---|---|
+| écran allumé, sans vidéo | 5,99 W | 6,7 h |
+| **`claude-os-video`** | **6,90 W** | **5,8 h** |
+| Chromium, même fichier | 7,76 W | 5,2 h |
+| bureau au repos, Claude Desktop visible | 7,72 W | 5,2 h |
+
+**Environ trente-cinq minutes de film de plus par charge**, à contenu
+identique et décodage matériel des deux côtés. Et un résultat qui n'était pas
+cherché : **regarder un film coûte moins cher que laisser le bureau
+affiché** — le plein écran masque l'application Electron qui tournait
+derrière.
+
+### Ce qui reste non établi
+
+- Une seule vidéo, une seule définition, un seul codec. H.264 1080p30 à
+  5,5 Mbit/s n'est pas tout le monde.
+- Trois paires. C'est assez pour un sens, pas pour une décimale.
+- Le rétroéclairage était **au maximum** : c'est le premier poste de la
+  machine, et il écrase tout le reste dans le chiffre de la batterie. Les
+  écarts mesurés sont donc des écarts **malgré** lui.
+
+## 11.6 Le noyau de lecture — phase 1
 
 `shell/src/video-moteur.c`, `video-audio.c`, `video-image.c`, `video.c`.
 
@@ -185,7 +252,7 @@ comparaison des deux comportements est ce qui a fini par désigner le
 compositeur. **Un lecteur qui s'arrête quand personne ne regarde est un
 lecteur qui marche.**
 
-## 11.6 L'interface — phase 2
+## 11.7 L'interface — phase 2
 
 ```
 +-------------------------------+
@@ -239,7 +306,7 @@ coûté au chemin sans copie** — 451 images sur 451 encore confiées au
 compositeur. Un `GtkGraphicsOffload` cesse d'être pris dès que son contenu est
 rogné ou recouvert ; la capsule est en dessous, pas au-dessus.
 
-## 11.7 Pistes, sous-titres, reprise — phase 3
+## 11.8 Pistes, sous-titres, reprise — phase 3
 
 Un menu dans la capsule liste les **pistes audio** et les **sous-titres**,
 nommés par leur langue ou leur titre — « Piste 2 » à défaut. Changer de piste
@@ -318,7 +385,7 @@ appelle le rappel de fin, lequel peut fermer la fenêtre — donc détruire les
 widgets et le moteur — pendant que le battement continue de s'en servir.
 `gtk_label_set_text: assertion GTK_IS_LABEL failed`, juste après le bilan.
 
-## 11.8 Les huit règles d'énergie du lecteur
+## 11.9 Les huit règles d'énergie du lecteur
 
 1. **Zéro scrutation** — pas un minuteur périodique. L'horloge de l'interface
    est l'image présentée.
@@ -331,7 +398,7 @@ widgets et le moteur — pendant que le battement continue de s'en servir.
 7. Rien de résident : pas de démon, pas de vignettes, pas d'indexation.
 8. **Aucun chiffre annoncé sans mesure.**
 
-## 11.9 Les instruments, et comment s'en servir
+## 11.10 Les instruments, et comment s'en servir
 
 ```sh
 bash shell/essais/construire.sh                 # les deux programmes d'essai
@@ -355,7 +422,7 @@ bash tools/mesure-conso.sh --tableau            # tous les relevés passés
 Les mires vivent dans `~/.local/share/claude-os/mires/` et ne sont pas dans le
 dépôt : elles se refabriquent.
 
-## 11.10 Ce qui reste à faire
+## 11.11 Ce qui reste à faire
 
 | Phase | Objet | État |
 |---|---|---|
@@ -363,7 +430,7 @@ dépôt : elles se refabriquent.
 | 1 | Noyau de lecture : démux, décodage, audio PipeWire, synchro | **fait, éprouvé au banc sans écran** |
 | 2 | L'interface : vidéo sans bordure, capsule, glissière au survol, tactile | **faite, vue en capture** |
 | 3 | Pistes audio, sous-titres texte, reprise à la position | **fait, vu en capture** |
-| 4 | Campagne d'énergie **sur batterie**, réglages, conclusions | à faire |
+| 4 | Campagne d'énergie **sur batterie** | **faite, 10 septembre 2026 au soir** |
 
 Points ouverts, à ne pas oublier :
 
@@ -381,8 +448,8 @@ Points ouverts, à ne pas oublier :
   ```
 - **L'espace colorimétrique YUV de GTK** (§11.3) — non jugé à l'œil, et c'est
   la première chose à regarder quand l'écran sera disponible.
-- **La série en plein écran est à refaire** (§11.4), et la campagne
-  d'autonomie reste entière — elle exige de débrancher.
+- **Les gestes au doigt** n'ont toujours pas été éprouvés : le banc ne sait
+  pas les produire.
 - **La vitesse de lecture n'est pas faite, et c'est délibéré.** La faire
   correctement demande de conserver la hauteur du son — donc `atempo` de
   libavfilter, donc une dépendance de plus. La faire en changeant le taux
