@@ -50,9 +50,13 @@
 
 set -uo pipefail
 
-# awk suit la locale : sans cela le tableau se remplit de virgules
-# decimales, et la colonne cesse d'etre calculable.
-export LC_ALL=C
+# awk suit la locale : sans LC_NUMERIC=C le tableau se remplit de virgules
+# décimales et la colonne cesse d'être calculable.
+#
+# LC_ALL=C, essayé d'abord, réglait bien le point décimal — et abîmait tout
+# le reste : les libellés du tableau ressortaient en « \xc3\xa9 » au lieu des
+# accents. Ne forcer que ce dont on a besoin.
+export LC_NUMERIC=C
 
 DUREE=30
 INTERVALLE=2
