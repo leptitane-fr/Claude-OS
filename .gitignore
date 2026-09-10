@@ -22,3 +22,6 @@ shell/build/
 
 # Relevé des touches produit par tools/probe-keys.sh
 /touches-relevees.txt
+
+# Binaires des essais du lecteur vidéo (voir shell/essais/construire.sh)
+shell/essais/build/
