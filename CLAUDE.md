@@ -6,7 +6,7 @@ Ce fichier est chargé automatiquement à l'ouverture d'une session. Il dit
 
 ---
 
-## Où en est le projet — 9 septembre 2026
+## Où en est le projet — 10 septembre 2026
 
 **L'écran de connexion a été repris le 9 septembre 2026** : il suit enfin le
 thème de la session, accepte un code PIN à six chiffres, et porte deux
@@ -330,6 +330,50 @@ seul `×`, ni réduire ni agrandir. `browser.custom_chrome_frame` est passé à
 réglage de goût, réversible d'un clic droit sur la bande d'onglets
 (« Utiliser la barre de titre et les bordures du système »), au prix d'une
 barre de 34 px au-dessus des onglets.
+
+### La visionneuse d'images
+
+Écrite le 10 septembre 2026 : `claude-os-images`, `shell/src/images*.c`.
+Une image et tout son dossier, par balayage au doigt, flèches du clavier,
+flèches à l'écran, molette ou deux doigts sur le pavé ; plein écran par F11,
+double appui, bouton — ou la touche du Chromebook, que **labwc garde pour
+lui** : la visionneuse suit donc la propriété `fullscreened`, pas la touche.
+Aucune couleur à elle : les jetons du thème, relus à chaud comme Fichiers.
+
+**Décodage réduit par puissance de deux**, mesuré sur MADOO pour une photo
+4032 × 3024 : 85 ms / 35 Mo en pleine résolution, 50 ms / 9 Mo à la moitié —
+mais **112 ms** à 1920 px exactement, car gdk-pixbuf rééchantillonne après
+libjpeg. La pleine résolution n'est décodée qu'au zoom, pour l'image courante.
+
+Le `.desktop` s'appelle `os.claude.shell.images.desktop`, **d'après l'app_id**
+et non d'après le binaire : c'est par l'app_id que le dock retrouve l'icône
+d'une fenêtre ouverte. (Fichiers, lui, a ce défaut : `claude-os-fichiers`
+contre `os.claude.shell.fichiers`.)
+
+**Gestes à deux doigts** (ajoutés le même jour) : pincer et tourner ne font
+qu'un geste — GtkGestureZoom et GtkGestureRotate alimentent le même état, le
+point saisi reste sous les doigts. Zone morte de 12° pour qu'un pincement ne
+fasse pas vaciller la photo ; au lever, calage animé sur le quart de tour le
+plus proche, et retour à l'ajustement si l'on a rétréci en deçà. Le double
+appui passe en plein écran, au doigt comme à la souris — un zoom au double
+appui a été essayé, puis écarté à l'usage.
+
+**Piège payé : les groupes de gestes GTK.** Dans un groupe, ce qu'un geste
+refuse, tous le refusent. Réunis avec la tenue et l'appui — qui ne suivent
+qu'un doigt et refusent le second —, pincer et tourner démarraient puis
+s'arrêtaient dans la même image. Le banc ne pouvait pas le voir : sa souris
+virtuelle n'a qu'un contact. C'est un journal pris sur MADOO (`WAYLAND_DEBUG`
+et une trace par geste) qui l'a montré. Deux groupes désormais : pincer +
+tourner, tenue + appui.
+
+**Vu fonctionner sur MADOO au doigt** le 10 septembre 2026 : balayage, double
+appui, pincement et rotation.
+
+**Vu au banc d'essai** (labwc sans écran, pointeur virtuel, AddressSanitizer) :
+les quatre thèmes et la bascule à chaud, l'orientation EXIF, les GIF animés,
+le glisser, l'élastique au bout de la liste, la molette, le pavé, le zoom et la
+pleine résolution, une rafale de navigation puis la fermeture en plein
+décodage — sans une erreur mémoire. Au doigt, voir le paragraphe précédent.
 
 ### Ce qui reste ouvert
 

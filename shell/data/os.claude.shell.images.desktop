@@ -1,0 +1,24 @@
+[Desktop Entry]
+Type=Application
+Name=Images
+GenericName=Visionneuse d'images
+Comment=Regarder les images d'un dossier, au doigt, au clavier ou à la souris
+Exec=claude-os-images %U
+Icon=image-viewer
+Terminal=false
+Categories=Graphics;Viewer;2DGraphics;RasterGraphics;
+Keywords=images;photos;visionneuse;galerie;image;photo;
+# NOMMÉ D'APRÈS L'IDENTIFIANT DE L'APPLICATION, et non « claude-os-images ».
+#
+# GTK donne à la fenêtre l'app_id « os.claude.shell.images », et c'est par
+# lui que le dock retrouve le .desktop — donc l'icône et le nom — d'une
+# fenêtre ouverte. Nommé comme le binaire, le fichier resterait introuvable :
+# la fenêtre apparaîtrait dans le dock avec une icône générique, et
+# l'épingler depuis le dock écrirait un identifiant qui ne lance rien.
+#
+# Les types sont ceux que gdk-pixbuf sait décoder sur cette machine (voir
+# recenser_types dans images.c). Un chargeur ajouté plus tard — WebP, AVIF —
+# sera lu par la visionneuse, mais son type devra être ajouté ici pour que
+# Fichiers la propose.
+MimeType=image/png;image/jpeg;image/gif;image/bmp;image/x-bmp;image/tiff;image/svg+xml;image/x-icon;image/vnd.microsoft.icon;image/x-tga;image/x-portable-anymap;image/x-portable-bitmap;image/x-portable-graymap;image/x-portable-pixmap;image/x-xbitmap;image/x-xpixmap;image/x-icns;
+StartupNotify=true

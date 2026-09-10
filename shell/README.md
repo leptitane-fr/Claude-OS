@@ -31,6 +31,7 @@ Ce qui a été ajouté ou corrigé au passage :
 | `claude-os-status` | barre d'état en bas à droite, et son panneau | oui |
 | `claude-os-lanceur` | liste des applications | à la demande, puis masqué |
 | `claude-os-fichiers` | gestionnaire de fichiers | non |
+| `claude-os-images` | visionneuse d'images — `src/images*.c` | non |
 | `claude-os-reglages` | apparence, fond d'écran, dock | non |
 | `claude-os-connexion` | écran de connexion, sous greetd | avant la session |
 

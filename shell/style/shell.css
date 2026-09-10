@@ -1116,6 +1116,176 @@ window.fichiers-progres { background-color: @surface; }
 .fichiers-progres-pile  { padding: 18px; }
 
 /* =========================================================================
+   Images — la visionneuse
+
+   La même matière que Fichiers : barre sur la surface, barre d'état sur la
+   surface secondaire, accent réservé à ce qui est actif. Aucune couleur
+   littérale, et donc aucune règle à reprendre quand un thème s'ajoute.
+   ========================================================================= */
+
+window.images { background-color: @surface; }
+
+/* --- la toile ------------------------------------------------------------ */
+
+/* L'image est posée sur « surface-alt », pas sur « surface ». Un blanc pur
+   autour d'une photo l'éblouit dans les thèmes clairs ; surface-alt est la
+   teinte que chaque thème a déjà choisie pour ce qui est en retrait — gris
+   pâle dans Clair, ivoire dans Claude clair, ardoise dans les sombres. La
+   photo se lit alors sur le fond du bureau, et non sur une page blanche. */
+.images-toile { background-color: @surface-alt; }
+
+/* --- barre d'outils ------------------------------------------------------ */
+
+.images-barre {
+  padding: 6px 10px;
+  background-color: @surface;
+  border-bottom: 1px solid @border;
+}
+
+/* Un peu plus grands que ceux de Fichiers (30 px) : cette fenêtre se manie
+   aussi au doigt, capot retourné, et c'est celle qu'on tend à quelqu'un
+   pour lui montrer des photos. */
+.images-outil {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 10px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  color: @text;
+  transition: background-color 120ms ease-out;
+}
+
+.images-outil:hover    { background-color: @surface-alt; }
+.images-outil:active   { background-color: @surface-sunk; }
+.images-outil:disabled { opacity: 0.35; }
+
+.images-titre    { margin: 0 8px; }
+.images-nom      { font-size: 13px; font-weight: 500; color: @text; }
+.images-position { font-size: 12px; color: @text-dim; }
+
+.images-sep {
+  background-color: @border;
+  min-width: 1px;
+  margin: 9px 6px;
+}
+
+/* Le pourcentage est une pastille, comme le fil d'Ariane de Fichiers : il
+   se lit comme une valeur, et se touche comme un bouton. Largeur minimale
+   et chiffres tabulaires pour que la barre ne tremble pas quand le zoom
+   passe de 9 % à 100 % sous les doigts. */
+.images-zoom {
+  background: none;
+  background-color: @surface-alt;
+  border: none;
+  box-shadow: none;
+  border-radius: 999px;
+  min-width: 64px;
+  min-height: 30px;
+  padding: 0 10px;
+  margin: 0 2px;
+  font-size: 12px;
+  font-weight: 500;
+  font-feature-settings: "tnum";
+  color: @text;
+  transition: background-color 120ms ease-out;
+}
+
+.images-zoom:hover    { background-color: @surface-sunk; }
+.images-zoom:disabled { opacity: 0.45; }
+
+/* --- barre d'état -------------------------------------------------------- */
+
+.images-etat {
+  padding: 6px 12px;
+  background-color: @surface-alt;
+  border-top: 1px solid @border;
+}
+
+.images-etat label {
+  font-size: 12px;
+  color: @text-dim;
+  font-feature-settings: "tnum";
+}
+
+/* --- commandes posées sur l'image ----------------------------------------
+
+   Les flèches et la pilule du plein écran reprennent la matière du dock :
+   surface, bordure, double ombre. Elles flottent au-dessus de la photo
+   comme le dock au-dessus des fenêtres. Leur disparition est une
+   transition d'opacité, pas un repli : voir images.c, « reveler ». */
+
+.images-fleche {
+  background: none;
+  background-color: alpha(@surface, 0.94);
+  border: 1px solid @border;
+  box-shadow: 0 6px 20px @shadow,
+              0 1px  4px @shadow-close;
+  border-radius: 999px;
+  /* 48 px : une cible au doigt. Les touches du clavier à l'écran de la
+     connexion en font 46, et en deçà un doigt en vise deux à la fois. */
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0;
+  margin: 0 18px;
+  color: @text;
+  transition: opacity 160ms ease-out, background-color 120ms ease-out;
+}
+
+.images-fleche:hover  { background-color: @surface-alt; }
+/* Au doigt, :hover n'existe pas : c'est :active qui confirme l'appui, et il
+   doit être franc — le doigt cache le bouton qu'il presse. */
+.images-fleche:active { background-color: @accent; border-color: @accent; color: @on-accent; }
+
+.images-pilule {
+  background-color: alpha(@surface, 0.94);
+  border: 1px solid @border;
+  border-radius: 999px;
+  padding: 3px 3px 3px 18px;
+  margin-top: 16px;
+  box-shadow: 0 6px 20px @shadow,
+              0 1px  4px @shadow-close;
+  transition: opacity 160ms ease-out;
+}
+
+.images-pilule-texte {
+  font-size: 13px;
+  color: @text;
+  font-feature-settings: "tnum";
+}
+
+.images-fleche.cachee,
+.images-pilule.cachee { opacity: 0; }
+
+/* --- messages au centre de la toile -------------------------------------- */
+
+.images-message-icone  { color: @text-dim; opacity: 0.6; margin-bottom: 4px; }
+.images-message-titre  { font-size: 15px; font-weight: 500; color: @text; }
+.images-message-detail { font-size: 13px; color: @text-dim; }
+
+.images-attente { color: @text-dim; }
+
+/* L'action principale de l'écran vide : la même pilule d'accent que le
+   bouton « Valider » de l'écran de connexion. */
+.images-ouvrir {
+  background: none;
+  background-color: @accent;
+  border: 1px solid @accent;
+  box-shadow: none;
+  border-radius: 999px;
+  color: @on-accent;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 7px 18px;
+  min-height: 36px;
+  transition: background-color 120ms ease-out;
+}
+
+.images-ouvrir:hover { background-color: @accent-hover; border-color: @accent-hover; }
+
+/* =========================================================================
    Écran de connexion
 
    Il précède le bureau : il doit lui ressembler. Même dégradé de fond —

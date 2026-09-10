@@ -121,7 +121,8 @@ DEPOT="$(cd "$(dirname "$0")/.." && pwd)"
 #  l'instant les fichiers qu'il modifie, et laisse les autres tranquilles :
 #  la comparaison ne se déclenche donc que sur ce qui a vraiment changé.
 SHELL_BINAIRES="claude-os-dock claude-os-status claude-os-fond claude-os-lanceur
-                claude-os-connexion claude-os-fichiers claude-os-reglages"
+                claude-os-connexion claude-os-fichiers claude-os-reglages
+                claude-os-images"
 
 # Rend 0 si le shell installé est antérieur aux sources ; remplit SHELL_RETARD
 # avec les fichiers en cause et SHELL_REF avec le binaire pris pour référence.

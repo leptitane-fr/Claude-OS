@@ -868,7 +868,110 @@ Délais raccourcis, chaque étage à la seconde armée, luminosité
 
 ---
 
-## Ce qui reste à faire — au 9 septembre 2026 au soir
+## 10 septembre 2026 — la visionneuse d'images
+
+Une application de plus dans le shell : `claude-os-images`, écrite en C sur
+GTK4 comme Fichiers, dans `shell/src/images.c` et `shell/src/images-vue.c`.
+Elle ouvre une image et parcourt tout son dossier. Les images s'ouvraient
+jusque-là dans Google Chrome, seul programme de la machine à déclarer leurs
+types ; la visionneuse est désormais l'application par défaut, par
+`~/.config/mimeapps.list`.
+
+### Ce qui a été livré
+
+| Geste | Effet |
+|---|---|
+| balayage d'un doigt, glisser à la souris | image suivante ou précédente ; l'image suit le doigt, sa voisine entre par le bord, élastique au bout du dossier |
+| ← →, Page préc./suiv., Espace, Début, Fin | même chose au clavier, en phase de capture pour passer avant les boutons |
+| molette, deux doigts horizontaux sur le pavé | même chose ; un cran de molette = une image |
+| pincer, tourner à deux doigts | zoom autour des doigts, rotation calée au quart de tour au lever |
+| double appui, doigt ou souris | plein écran, et retour |
+| F11, `f`, bouton, touche du Chromebook | plein écran — la touche est gardée par labwc, la visionneuse suit donc la propriété `fullscreened` |
+
+En plus : zoom et taille réelle, rotation d'affichage (le fichier n'est jamais
+réécrit), orientation EXIF appliquée, GIF animés, « Afficher dans Fichiers »,
+liste suivie en direct si le dossier change, tri naturel identique à celui de
+Fichiers. Aucune couleur propre : les jetons du thème, relus à chaud quand
+`shell.conf` change — vu dans les quatre thèmes, et à la bascule.
+
+### Décoder à la taille de l'écran — et pas exactement
+
+Mesuré sur MADOO, photo de 4032 × 3024 :
+
+```
+pleine résolution            85 ms    35 Mo
+réduite à 1920 px           112 ms     8 Mo
+réduite à la moitié          50 ms     9 Mo
+```
+
+La première version réduisait à 1920 px, la largeur de l'écran. **C'était plus
+lent que ne rien réduire du tout.** libjpeg ne sait réduire que par 2, 4 ou 8
+pendant le décodage ; demander 1920 lui fait produire 2016, puis gdk-pixbuf
+rééchantillonne le reste, et ce rééchantillonnage coûte plus que tout le
+décodage. On réduit désormais par la plus petite puissance de deux qui couvre
+encore l'écran. La pleine résolution n'est décodée qu'au zoom, pour l'image
+courante seule. Mémoire mesurée : 78 Mo à l'ouverture, 121 Mo après une
+rafale de navigation dans tout le dossier.
+
+### Le piège du jour : les groupes de gestes GTK
+
+Pincer et tourner ont été écrits, compilés, éprouvés au banc — et **ne
+marchaient pas au doigt**. Rien d'anormal à l'écran : l'image ne réagissait
+simplement pas.
+
+Un journal pris sur la machine l'a dit en une ligne. Version de diagnostic
+avec une trace par geste, plus `WAYLAND_DEBUG=client` :
+
+```
+wl_touch#42.down(…, 1, 455.13, 540.94)     ← le second doigt
+DIAG on_deux_debut                          pincer démarre
+DIAG on_deux_debut                          tourner démarre
+DIAG on_deux_fin                            … et s'arrête
+DIAG on_deux_fin
+DIAG on_tenue_fin                           le glisser à un doigt aussi
+```
+
+Les deux doigts arrivaient bien — labwc annonce le tactile, `capabilities(7)`,
+et GTK s'y abonne. Mais tous les gestes de la toile avaient été mis dans **un
+seul groupe**, et dans un groupe GTK, ce qu'un geste refuse, tous le
+refusent. La tenue et l'appui ne suivent qu'un doigt et refusent le second :
+ils l'arrachaient au pincement dans l'image même où il se posait. Deux
+groupes désormais — pincer + tourner, tenue + appui — et le journal suivant
+compte 1 574 mises à jour de chaque.
+
+**Le banc d'essai ne pouvait pas le voir.** Faute d'écran tactile simulable,
+les gestes y étaient éprouvés par une souris virtuelle
+(`zwlr_virtual_pointer_v1`, que labwc accepte) — un seul contact, donc
+jamais de second doigt à refuser. La géométrie du geste à deux doigts, elle,
+avait été vérifiée en appelant ses fonctions depuis un programme d'essai,
+et elle était juste. Ce qui était faux était en amont, là où aucun outil du
+banc n'arrive.
+
+**Leçon :** un geste multi-touch ne se valide qu'au doigt. Le banc dit si la
+géométrie est juste, pas si les doigts arrivent jusqu'à elle.
+
+### Deux autres constats
+
+- **Un double appui au doigt qui zoome**, comme sur un téléphone, a été
+  essayé puis retiré à l'usage : sur cette machine, le plein écran s'est
+  révélé plus naturel.
+- **Le dock ne reconnaît pas la fenêtre de Fichiers.** Il rapproche fenêtres
+  et icônes par l'app_id ; celui de Fichiers est `os.claude.shell.fichiers`,
+  son `.desktop` s'appelle `claude-os-fichiers.desktop`, et les deux ne se
+  correspondent pas. La visionneuse évite le défaut en nommant son fichier
+  `os.claude.shell.images.desktop` — vu dans le dock, icône et point
+  « ouverte » justes. Fichiers n'a pas été touché.
+
+### Éprouvé
+
+Au banc, sous AddressSanitizer et UBSan : parcours complet, balayages,
+molette, pavé, flèches, zoom et pleine résolution, dossier, fichier illisible,
+rafale de navigation, fermeture en plein décodage — aucun rapport. **Au doigt
+sur MADOO** : balayage, double appui, pincement et rotation.
+
+---
+
+## Ce qui reste à faire — au 10 septembre 2026
 
 Par ordre d'importance.
 
@@ -915,3 +1018,7 @@ Par ordre d'importance.
    par inactivité déjà faite mais sans capteur de luminosité ambiante —
    celui-ci est **absent de MADOO**, mesuré, la question est close.
 
+8. **Fichiers et le dock.** L'app_id `os.claude.shell.fichiers` ne
+   correspond pas à `claude-os-fichiers.desktop` : l'icône épinglée ne
+   montre jamais Fichiers comme ouvert, et une seconde entrée apparaît. Même
+   défaut probable pour les Réglages. Voir la séance du 10 septembre.

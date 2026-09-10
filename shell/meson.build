@@ -163,6 +163,17 @@ executable('claude-os-fichiers',
   dependencies : [gtk, layershell, giounix, pangocairo, secret],
   install : true)
 
+# La visionneuse d'images. gdk-pixbuf est déjà tiré par GTK 4 ; il est nommé
+# ici parce qu'on s'en sert directement — pour décoder réduit, lire
+# l'orientation EXIF et animer les GIF — et qu'une dépendance qu'on utilise
+# sans la déclarer casse le jour où GTK cesse de l'apporter.
+gdkpixbuf = dependency('gdk-pixbuf-2.0')
+
+executable('claude-os-images',
+  'src/images.c', 'src/images-vue.c', commun,
+  dependencies : [gtk, giounix, pangocairo, gdkpixbuf, m_dep],
+  install : true)
+
 executable('claude-os-reglages',
   'src/settings.c', 'src/reseau.c', commun,
   dependencies : [gtk, layershell, giounix, pangocairo, secret],
@@ -186,7 +197,8 @@ executable('claude-os-verrou',
   install : true)
 
 install_data(['data/claude-os-reglages.desktop',
-              'data/claude-os-fichiers.desktop'],
+              'data/claude-os-fichiers.desktop',
+              'data/os.claude.shell.images.desktop'],
   install_dir : get_option('prefix') / get_option('datadir') / 'applications')
 
 # L'icône de la cloche, livrée avec le shell.
