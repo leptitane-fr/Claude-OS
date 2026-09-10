@@ -97,4 +97,32 @@ gint64       video_moteur_images_vues(VideoMoteur *m);
 double       video_moteur_ecart_moyen(VideoMoteur *m);
 double       video_moteur_ecart_max(VideoMoteur *m);
 
+/* ------------------------------------------------------------ les pistes */
+
+typedef struct {
+    int      index;        /* index du flux dans le fichier                */
+    gchar   *nom;          /* « Français », « Commentaire (anglais) »…     */
+    gboolean active;
+} VideoPiste;
+
+typedef enum { VIDEO_PISTE_AUDIO, VIDEO_PISTE_SOUS_TITRE } VideoTypePiste;
+
+/* Rend la liste des pistes d'un type, a liberer par g_ptr_array_unref.
+ * L'index -1 y figure toujours pour les sous-titres : « aucun ». */
+GPtrArray   *video_moteur_pistes(VideoMoteur *m, VideoTypePiste type);
+
+/* Choisit une piste. Le moteur rouvre le decodeur puis se recale sur la
+ * position courante : changer de langue en cours de film ne doit ni couper
+ * le son plus d'un instant, ni deplacer l'image. */
+void         video_moteur_choisir_piste(VideoMoteur *m, VideoTypePiste type,
+                                        int index);
+
+/* ------------------------------------------------------- les sous-titres */
+
+/* Le texte a afficher MAINTENANT, ou NULL. La chaine appartient au moteur.
+ * « change » dit s'il differe du precedent -- l'interface ne redessine
+ * qu'alors, ce qui evite de reecrire quatre-vingts fois par seconde une
+ * ligne qui reste a l'ecran deux secondes. */
+const char  *video_moteur_sous_titre(VideoMoteur *m, gboolean *change);
+
 #endif

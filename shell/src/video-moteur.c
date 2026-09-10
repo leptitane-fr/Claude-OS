@@ -35,8 +35,8 @@ struct _VideoMoteur {
     AVFormatContext  *fmt;
     AVBufferRef      *materiel;
 
-    int               piste_v, piste_a;
-    AVCodecContext   *dec_v, *dec_a;
+    int               piste_v, piste_a, piste_s;
+    AVCodecContext   *dec_v, *dec_a, *dec_s;
     const char       *nom_codec;
     gboolean          en_materiel;
     int               largeur, hauteur;
@@ -82,12 +82,37 @@ struct _VideoMoteur {
     double            horloge_secours;   /* quand il n'y a pas d'audio     */
     gint64            depart_secours;    /* monotonic, us                  */
 
+    /* LES SOUS-TITRES SONT UNE FILE, PAS UN ETAT.
+     *
+     * Une ligne est decodee bien avant son heure -- le demux avance en
+     * meme temps que la video, et un evenement de sous-titre porte son
+     * debut ET sa fin. On les garde donc en file, et l'affichage y pioche
+     * celui qui couvre l'instant courant. Tenir un simple « texte
+     * courant » aurait affiche chaque ligne des son decodage, donc en
+     * avance de plusieurs secondes. */
+    int               piste_s_dispo; /* une piste existe, meme inactive   */
+    GQueue           *st_file;       /* SousTitre*, ordre chronologique   */
+    gchar            *st_courant;    /* ce qui est affiche en ce moment   */
+    gboolean          st_change;
+
     gint64            sautees, vues;
     double            ecart_somme, ecart_max;   /* synchronisation */
     VideoEtat         etat;
     double            volume;
     gboolean          muet;
 };
+
+typedef struct {
+    double debut, fin;
+    gchar *texte;
+} SousTitre;
+
+static void sous_titre_libre(gpointer p)
+{
+    SousTitre *st = p;
+    g_free(st->texte);
+    g_free(st);
+}
 
 /* ------------------------------------------------------------- utilitaires */
 
@@ -115,6 +140,63 @@ static enum AVPixelFormat choisir_format(AVCodecContext *ctx,
     g_message("video-moteur : %s n'est pas accelere sur cette machine, "
               "decodage logiciel", m ? m->nom_codec : "ce codec");
     return formats[0];
+}
+
+/* ---------------------------------------------------------- sous-titres */
+
+/* FFMPEG REND TOUT SOUS-TITRE TEXTE EN « ASS », MEME UN .srt.
+ *
+ * ET IL Y A DEUX FORMES, ce qui est le piege. L'ancienne portait un en-tete
+ * complet ; celle des versions recentes est « brute » et n'a plus le mot
+ * « Dialogue: » :
+ *
+ *   ancienne :  Dialogue: 0,0,Default,,0,0,0,,{\i1}Bonjour{\i0}\Nvous
+ *   actuelle :  0,0,Default,,0,0,0,,{\i1}Bonjour{\i0}\Nvous
+ *
+ * Neuf virgules avant le texte dans un cas, HUIT dans l'autre. Ne traiter
+ * que la premiere forme -- l'erreur commise ici le 10 septembre 2026 --
+ * affiche « 0,0,Default,,0,0,0,,seconde 3 » a l'ecran : le decodage est
+ * parfait, seule la lecture du format est fausse.
+ *
+ * Restent a retirer les balises entre accolades et a traduire « \N » en
+ * saut de ligne.
+ *
+ * Le texte rendu est echappe pour Pango : un sous-titre contenant « < »
+ * ferait disparaitre la ligne entiere, silencieusement. */
+static gchar *texte_de_ass(const char *ass)
+{
+    if (!ass) return NULL;
+
+    const char *p = ass;
+    int voulues = g_str_has_prefix(p, "Dialogue:") ? 9 : 8;
+    int virgules = 0;
+    const char *depart = p;
+    while (*p && virgules < voulues) { if (*p == ',') virgules++; p++; }
+    /* Moins de virgules que prevu : ce n'est pas de l'ASS, c'est du texte
+     * nu. On le prend tel quel plutot que de rendre une ligne vide. */
+    if (virgules < voulues) p = depart;
+
+    GString *out = g_string_new(NULL);
+    for (; *p; p++) {
+        if (*p == '{') {                       /* balise de style : ignoree */
+            while (*p && *p != '}') p++;
+            if (!*p) break;
+            continue;
+        }
+        if (p[0] == '\\' && (p[1] == 'N' || p[1] == 'n')) {
+            g_string_append_c(out, '\n');
+            p++;
+            continue;
+        }
+        if (p[0] == '\\' && p[1] == 'h') { g_string_append_c(out, ' '); p++; continue; }
+        g_string_append_c(out, *p);
+    }
+
+    gchar *brut = g_strstrip(g_string_free(out, FALSE));
+    if (*brut == '\0') { g_free(brut); return NULL; }
+    gchar *echappe = g_markup_escape_text(brut, -1);
+    g_free(brut);
+    return echappe;
 }
 
 /* ---------------------------------------------------------------- horloge */
@@ -216,10 +298,16 @@ static void executer_saut(VideoMoteur *m, double cible)
 
     if (m->dec_v) avcodec_flush_buffers(m->dec_v);
     if (m->dec_a) avcodec_flush_buffers(m->dec_a);
+    if (m->dec_s) avcodec_flush_buffers(m->dec_s);
     if (m->audio) video_audio_vider(m->audio);
 
     g_mutex_lock(&m->verrou);
     vider_file(m);
+    /* Les sous-titres d'avant le saut n'ont plus de sens : les garder
+     * ferait reapparaitre une replique de la scene precedente. */
+    g_queue_clear_full(m->st_file, sous_titre_libre);
+    g_clear_pointer(&m->st_courant, g_free);
+    m->st_change = TRUE;
     m->demux_fini   = FALSE;
     m->fin_signalee = FALSE;
     m->pts_dernier  = cible;
@@ -265,6 +353,59 @@ static gpointer fil_decodage(gpointer data)
         } else if (r < 0) {
             dire_erreur("av_read_frame", r);
             g_mutex_lock(&m->verrou); m->demux_fini = TRUE; g_mutex_unlock(&m->verrou);
+            continue;
+        }
+
+        if (r != AVERROR_EOF && m->dec_s &&
+            paquet->stream_index == m->piste_s) {
+            /* LE SOUS-TITRE A SA PROPRE API, et elle est synchrone : ni
+             * send_packet ni receive_frame. C'est la seule partie de
+             * libavcodec restee dans l'ancien style, et l'oublier donne un
+             * decodeur qui ne rend jamais rien, sans erreur. */
+            AVSubtitle sub;
+            int fini = 0;
+            AVRational tb = m->fmt->streams[m->piste_s]->time_base;
+            if (avcodec_decode_subtitle2(m->dec_s, &sub, &fini, paquet) >= 0 && fini) {
+                double base = (paquet->pts != AV_NOPTS_VALUE)
+                            ? paquet->pts * av_q2d(tb) : 0.0;
+                double debut = base + sub.start_display_time / 1000.0;
+                double fin   = base + sub.end_display_time   / 1000.0;
+
+                /* LA FIN VIENT DU PAQUET AVANT DE VENIR DU DECODEUR.
+                 *
+                 * end_display_time est souvent nul -- Matroska porte la
+                 * duree dans le paquet, pas dans l'evenement. Tomber sur le
+                 * repli laisse alors chaque replique trois secondes a
+                 * l'ecran : elles se chevauchent, et l'on croit a un
+                 * probleme de synchronisation alors que c'est une lecture
+                 * de duree qui manque. */
+                if (fin <= debut && paquet->duration > 0)
+                    fin = debut + paquet->duration * av_q2d(tb);
+                if (fin <= debut) fin = debut + 3.0;
+
+                GString *tout = g_string_new(NULL);
+                for (unsigned i = 0; i < sub.num_rects; i++) {
+                    const char *a = sub.rects[i]->ass;
+                    gchar *t = texte_de_ass(a ? a : sub.rects[i]->text);
+                    if (t) {
+                        if (tout->len) g_string_append_c(tout, '\n');
+                        g_string_append(tout, t);
+                        g_free(t);
+                    }
+                }
+                if (tout->len) {
+                    SousTitre *st = g_new0(SousTitre, 1);
+                    st->debut = debut; st->fin = fin;
+                    st->texte = g_string_free(tout, FALSE);
+                    g_mutex_lock(&m->verrou);
+                    g_queue_push_tail(m->st_file, st);
+                    g_mutex_unlock(&m->verrou);
+                } else {
+                    g_string_free(tout, TRUE);
+                }
+                avsubtitle_free(&sub);
+            }
+            av_packet_unref(paquet);
             continue;
         }
 
@@ -355,6 +496,35 @@ static gpointer fil_decodage(gpointer data)
 
 /* ------------------------------------------------------------- ouverture */
 
+/* Ouvre le decodeur de sous-titres d'un flux. Rend FALSE sans bruit pour un
+ * format graphique (PGS, VobSub) : ceux-la ne sont pas du texte, et les
+ * afficher demanderait un tout autre chemin. On le DIT, on ne le tait pas. */
+static gboolean ouvrir_sous_titres(VideoMoteur *m, int piste)
+{
+    AVCodecParameters *par = m->fmt->streams[piste]->codecpar;
+    const AVCodec *codec = avcodec_find_decoder(par->codec_id);
+    if (!codec) return FALSE;
+
+    const AVCodecDescriptor *d = avcodec_descriptor_get(par->codec_id);
+    if (d && (d->props & AV_CODEC_PROP_BITMAP_SUB)) {
+        g_message("video-moteur : la piste de sous-titres %d est graphique "
+                  "(%s) -- non affichee", piste, codec->name);
+        return FALSE;
+    }
+
+    AVCodecContext *dec = avcodec_alloc_context3(codec);
+    if (!dec) return FALSE;
+    if (avcodec_parameters_to_context(dec, par) < 0 ||
+        avcodec_open2(dec, codec, NULL) < 0) {
+        avcodec_free_context(&dec);
+        g_message("video-moteur : piste de sous-titres %d illisible", piste);
+        return FALSE;
+    }
+    m->dec_s  = dec;
+    m->piste_s = piste;
+    return TRUE;
+}
+
 static gboolean ouvrir_piste(VideoMoteur *m, int piste, gboolean video,
                              GError **erreur)
 {
@@ -415,6 +585,9 @@ VideoMoteur *video_moteur_ouvrir(const char *chemin,
     m->usager  = u;
     m->piste_v = m->piste_a = -1;
     m->images  = g_queue_new();
+    m->st_file = g_queue_new();
+    m->piste_s = -1;
+    m->piste_s_dispo = -1;
     m->rattrapage = -1.0;
     m->volume  = 1.0;
     m->etat    = VIDEO_ARRETE;
@@ -506,6 +679,15 @@ VideoMoteur *video_moteur_ouvrir(const char *chemin,
         }
     }
 
+    /* Les sous-titres ne sont pas choisis d'office : on ouvre le decodeur
+     * mais la piste reste inactive tant qu'on ne la demande pas. Afficher
+     * d'emblee une langue que personne n'a demandee serait presomptueux. */
+    int st = av_find_best_stream(m->fmt, AVMEDIA_TYPE_SUBTITLE, -1, -1, NULL, 0);
+    if (st >= 0) {
+        m->piste_s_dispo = st;
+        (void)0;
+    }
+
     m->fil = g_thread_new("claude-os-video-decodage", fil_decodage, m);
     return m;
 }
@@ -527,6 +709,9 @@ void video_moteur_fermer(VideoMoteur *m)
     g_free(m->bloc);
 
     if (m->images) { vider_file(m); g_queue_free(m->images); }
+    if (m->st_file) g_queue_free_full(m->st_file, sous_titre_libre);
+    g_free(m->st_courant);
+    avcodec_free_context(&m->dec_s);
 
     avcodec_free_context(&m->dec_v);
     avcodec_free_context(&m->dec_a);
@@ -649,6 +834,146 @@ void video_moteur_sauter(VideoMoteur *m, double secondes)
 void video_moteur_avancer(VideoMoteur *m, double delta)
 {
     if (m) video_moteur_sauter(m, video_moteur_position(m) + delta);
+}
+
+/* ---------------------------------------------------------- sous-titres */
+
+const char *video_moteur_sous_titre(VideoMoteur *m, gboolean *change)
+{
+    if (change) *change = FALSE;
+    if (!m) return NULL;
+
+    double t = video_moteur_position(m);
+    const char *voulu = NULL;
+
+    g_mutex_lock(&m->verrou);
+
+    /* On jette ce qui est perime AVANT de chercher : la file est courte, et
+     * elle ne doit pas enfler sur un film de deux heures. */
+    while (!g_queue_is_empty(m->st_file)) {
+        SousTitre *tete = g_queue_peek_head(m->st_file);
+        if (tete->fin >= t - 0.1) break;
+        sous_titre_libre(g_queue_pop_head(m->st_file));
+    }
+
+    for (GList *l = m->st_file->head; l; l = l->next) {
+        SousTitre *st = l->data;
+        if (st->debut > t) break;          /* la file est chronologique */
+        if (t <= st->fin) { voulu = st->texte; break; }
+    }
+
+    if (g_strcmp0(voulu, m->st_courant) != 0) {
+        g_free(m->st_courant);
+        m->st_courant = g_strdup(voulu);
+        m->st_change  = TRUE;
+    }
+
+    if (change) *change = m->st_change;
+    m->st_change = FALSE;
+    const char *rendu = m->st_courant;
+    g_mutex_unlock(&m->verrou);
+    return rendu;
+}
+
+/* -------------------------------------------------------------- pistes */
+
+/* Le nom d'une piste : la langue si elle est declaree, le titre s'il y en a
+ * un, et le numero a defaut. « Piste 2 » vaut mieux qu'une ligne vide. */
+static gchar *nom_de_piste(AVStream *flux, int rang)
+{
+    AVDictionaryEntry *langue = av_dict_get(flux->metadata, "language", NULL, 0);
+    AVDictionaryEntry *titre  = av_dict_get(flux->metadata, "title", NULL, 0);
+
+    if (titre && langue)
+        return g_strdup_printf("%s (%s)", titre->value, langue->value);
+    if (titre)  return g_strdup(titre->value);
+    if (langue) return g_strdup(langue->value);
+    return g_strdup_printf("Piste %d", rang);
+}
+
+GPtrArray *video_moteur_pistes(VideoMoteur *m, VideoTypePiste type)
+{
+    GPtrArray *liste = g_ptr_array_new_with_free_func(g_free);
+    if (!m) return liste;
+
+    if (type == VIDEO_PISTE_SOUS_TITRE) {
+        VideoPiste *aucun = g_new0(VideoPiste, 1);
+        aucun->index  = -1;
+        aucun->nom    = g_strdup("Aucun");
+        aucun->active = (m->piste_s < 0);
+        g_ptr_array_add(liste, aucun);
+    }
+
+    enum AVMediaType voulu = (type == VIDEO_PISTE_AUDIO)
+                           ? AVMEDIA_TYPE_AUDIO : AVMEDIA_TYPE_SUBTITLE;
+    int rang = 1;
+    for (unsigned i = 0; i < m->fmt->nb_streams; i++) {
+        AVStream *f = m->fmt->streams[i];
+        if (f->codecpar->codec_type != voulu) continue;
+
+        VideoPiste *p = g_new0(VideoPiste, 1);
+        p->index  = (int)i;
+        p->nom    = nom_de_piste(f, rang++);
+        p->active = (type == VIDEO_PISTE_AUDIO) ? ((int)i == m->piste_a)
+                                                : ((int)i == m->piste_s);
+        g_ptr_array_add(liste, p);
+    }
+    return liste;
+}
+
+/* CHANGER DE PISTE, C'EST ROUVRIR PUIS SE RECALER.
+ *
+ * On arrete le fil, on remplace le decodeur, on relance, et on saute a la
+ * position courante. Le saut n'est pas un detail : sans lui, le nouveau
+ * decodeur repart la ou le demux se trouve, c'est-a-dire quelques secondes
+ * plus loin que ce qu'on regarde. */
+void video_moteur_choisir_piste(VideoMoteur *m, VideoTypePiste type, int index)
+{
+    if (!m) return;
+    double ou = video_moteur_position(m);
+    gboolean lisait = (m->etat == VIDEO_LIT);
+
+    if (lisait) video_moteur_pause(m);
+
+    /* Le fil dort forcement : il attend une file pleine ou une demande.
+     * On le reveille apres, une fois le decodeur en place. */
+    g_mutex_lock(&m->verrou);
+
+    if (type == VIDEO_PISTE_SOUS_TITRE) {
+        avcodec_free_context(&m->dec_s);
+        m->piste_s = -1;
+        g_queue_clear_full(m->st_file, sous_titre_libre);
+        g_clear_pointer(&m->st_courant, g_free);
+        m->st_change = TRUE;
+        g_mutex_unlock(&m->verrou);
+        if (index >= 0) ouvrir_sous_titres(m, index);
+    } else {
+        g_mutex_unlock(&m->verrou);
+        if (index == m->piste_a || index < 0) {
+            if (lisait) video_moteur_lire(m);
+            return;
+        }
+        GError *e = NULL;
+        AVCodecContext *ancien = m->dec_a;
+        int ancienne = m->piste_a;
+        m->dec_a = NULL;
+        m->piste_a = index;
+        if (!ouvrir_piste(m, index, FALSE, &e)) {
+            /* On remet ce qui marchait : une piste illisible ne doit pas
+             * laisser le lecteur muet et sans explication. */
+            g_message("video-moteur : piste audio %d inutilisable (%s) -- "
+                      "on garde la precedente", index, e ? e->message : "?");
+            g_clear_error(&e);
+            m->dec_a = ancien;
+            m->piste_a = ancienne;
+        } else {
+            avcodec_free_context(&ancien);
+            if (m->audio) video_audio_vider(m->audio);
+        }
+    }
+
+    video_moteur_sauter(m, ou);
+    if (lisait) video_moteur_lire(m);
 }
 
 /* ------------------------------------------------- l'image due maintenant */

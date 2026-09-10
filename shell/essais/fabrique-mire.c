@@ -26,9 +26,16 @@
  * gratuit. Une mire trop simple se decode pour rien et flatterait nos
  * mesures.
  *
+ * SOUS-TITRES : une ligne par seconde, quand la sortie est un .mkv.
+ * Matroska accepte le SubRip tel quel -- le texte est ecrit dans le paquet,
+ * sans codeur -- et cela donne de quoi verifier que les sous-titres
+ * apparaissent AU BON MOMENT, ce qu'un fichier de film ne permet pas de
+ * juger sans le connaitre par coeur.
+ *
  * Construction :  bash shell/essais/construire.sh
  * Usage        :  ./fabrique-mire mire-h264.mp4 [secondes] [codec]
  *                 codec : h264 (defaut) | hevc | vp9
+ *                 .mkv en sortie => une piste de sous-titres en plus
  */
 
 #include <libavcodec/avcodec.h>
@@ -36,6 +43,7 @@
 #include <libavutil/opt.h>
 #include <libavutil/imgutils.h>
 #include <libavutil/channel_layout.h>
+#include <libavutil/dict.h>
 
 #include <math.h>
 #include <stdio.h>
@@ -47,6 +55,21 @@
 #define CADENCE      30
 #define ECHANT    48000   /* audio, Hz */
 #define BLOC       1024   /* echantillons par trame audio */
+
+/* Ce programme n'utilise pas GLib -- il n'a pas d'interface, et une
+ * dependance de moins est une dependance de moins. Deux ou trois noms
+ * familiers suffisent. */
+typedef int gboolean;
+#define TRUE 1
+#define FALSE 0
+#define gchar char
+#define g_snprintf snprintf
+
+static gboolean g_str_has_suffix_simple(const char *s, const char *fin)
+{
+    size_t ls = strlen(s), lf = strlen(fin);
+    return ls >= lf && strcmp(s + ls - lf, fin) == 0;
+}
 
 /* INVARIANT N.4 DU PROJET : rien ne s'eteint en silence. Toute erreur
  * libav est rendue lisible et arrete le programme. */
@@ -245,6 +268,21 @@ int main(int argc, char **argv)
     if (r < 0) fatal("av_frame_get_buffer (audio)", r);
     a.paquet = av_packet_alloc();
 
+    /* ---- sous-titres, si le conteneur les accepte ---- */
+    Flux st = {0};
+    gboolean avec_st = g_str_has_suffix_simple(sortie, ".mkv");
+    if (avec_st) {
+        st.st = avformat_new_stream(fmt, NULL);
+        if (!st.st) fatal("allocation du flux de sous-titres", 0);
+        /* PAS DE CODEUR : le SubRip est du texte, et Matroska le prend tel
+         * quel. On decrit le flux, on ecrira les paquets a la main. */
+        st.st->codecpar->codec_type = AVMEDIA_TYPE_SUBTITLE;
+        st.st->codecpar->codec_id   = AV_CODEC_ID_SUBRIP;
+        st.st->time_base = (AVRational){1, 1000};
+        av_dict_set(&st.st->metadata, "language", "fra", 0);
+        av_dict_set(&st.st->metadata, "title", "Repères", 0);
+    }
+
     /* ---- ouverture ---- */
     if (!(fmt->oformat->flags & AVFMT_NOFILE)) {
         r = avio_open(&fmt->pb, sortie, AVIO_FLAG_WRITE);
@@ -263,9 +301,36 @@ int main(int argc, char **argv)
      * av_interleaved_write_frame met tout en file et la memoire enfle --
      * 3,7 Gio soudes sur cette machine, une minute de 1080p ne tient pas en
      * file d'attente. */
+    int st_suivant = 0;
+
     while (v.pts < total_img || a.pts < total_ech) {
         double t_v = (double)v.pts / CADENCE;
         double t_a = (double)a.pts / ECHANT;
+
+        /* CHAQUE SOUS-TITRE A SON HEURE, ET PAS EN BLOC A LA FIN.
+         *
+         * Ecrits tous ensemble apres la video, ils se retrouvent
+         * PHYSIQUEMENT a la fin du fichier : un lecteur qui lit
+         * sequentiellement ne les rencontre qu'apres tout le reste, et
+         * l'ecran reste vide sans la moindre erreur. Piege paye le
+         * 10 septembre 2026 -- le decodeur s'ouvrait, la piste etait
+         * annoncee, et rien ne s'affichait. */
+        if (avec_st && st_suivant < secondes &&
+            (double)st_suivant <= (t_v < t_a ? t_v : t_a)) {
+            gchar texte[64];
+            g_snprintf(texte, sizeof texte, "seconde %d", st_suivant);
+            AVPacket *pk = av_packet_alloc();
+            int taille = (int)strlen(texte);
+            if (av_new_packet(pk, taille) < 0) fatal("av_new_packet", 0);
+            memcpy(pk->data, texte, taille);
+            pk->stream_index = st.st->index;
+            pk->pts = pk->dts = (int64_t)st_suivant * 1000;
+            pk->duration = 900;          /* 0,9 s : un blanc avant la suivante */
+            r = av_interleaved_write_frame(fmt, pk);
+            av_packet_free(&pk);
+            if (r < 0) fatal("ecriture d'un sous-titre", r);
+            st_suivant++;
+        }
 
         if (v.pts < total_img && (t_v <= t_a || a.pts >= total_ech)) {
             r = av_frame_make_writable(v.trame);

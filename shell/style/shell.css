@@ -1708,6 +1708,22 @@ window.images { background-color: @surface; }
   color: @text;
   transition: background-color 120ms ease-out;
 }
+/* Un GtkMenuButton dessine un bouton INTERNE : sans cette ligne il garde le
+   cadre du thème et détonne au milieu de boutons plats. */
+.video-bouton > button {
+  background: none;
+  background-color: transparent;
+  border: none;
+  box-shadow: none;
+  border-radius: 22px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  color: @text;
+}
+.video-bouton > button:hover  { background-color: @surface-alt; }
+.video-bouton > button:active { background-color: @surface-sunk; }
+
 .video-bouton:hover    { background-color: @surface-alt; }
 .video-bouton:active   { background-color: @surface-sunk; }
 .video-bouton:disabled { opacity: 0.35; }
@@ -1746,4 +1762,26 @@ window.images { background-color: @surface; }
   font-size: 11px;
   color: @warn;
   padding: 0 6px;
+}
+
+/* Le sous-titre. Blanc sur un fond translucide plutôt que sur un contour :
+   un contour de texte demande à Pango un second rendu de chaque glyphe, et
+   se lit mal sur une image claire. La pastille, elle, reste lisible sur
+   n'importe quoi. */
+.video-sous-titre {
+  font-size: 19px;
+  font-weight: 500;
+  color: #ffffff;
+  background-color: alpha(#000000, 0.62);
+  border-radius: 8px;
+  padding: 4px 12px;
+  margin: 0 40px 28px 40px;
+}
+
+.video-menu       { padding: 4px; min-width: 180px; }
+.video-menu-titre {
+  font-size: 11px;
+  font-weight: 700;
+  color: @text-dim;
+  padding: 6px 4px 2px 4px;
 }

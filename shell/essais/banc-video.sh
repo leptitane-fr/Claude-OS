@@ -34,11 +34,12 @@ BUILD="$ICI/build"
 FICHIER="${1:?fichier vidéo à lire}"
 SECONDES="${2:-10}"
 shift 2 2>/dev/null || shift $#
-SONDE=""; SCENARIO=""; CAPTURE=""; REVELE=""
+SONDE=""; SCENARIO=""; CAPTURE=""; REVELE=""; SOUSTITRES=""
 for arg in "$@"; do
 	[ "$arg" = "--sonde" ] && SONDE=1
 	[ "$arg" = "--scenario" ] && SCENARIO=" --scenario"
 	[ "$arg" = "--revele" ] && REVELE=" --revele"
+	[ "$arg" = "--sous-titres" ] && SOUSTITRES=" --sous-titres"
 	case "$arg" in --capture=*) CAPTURE="${arg#--capture=}" ;; esac
 done
 
@@ -76,7 +77,7 @@ LANCEUR="$CONF/lancer.sh"
 	if [ -n "$SONDE" ]; then
 		echo "exec '$BUILD/sonde-offload' '$FICHIER' --mode=offload --duree=$SECONDES"
 	else
-		echo "exec '$BUILD/claude-os-video' '$FICHIER' --essai=$SECONDES$SCENARIO$REVELE"
+		echo "exec '$BUILD/claude-os-video' '$FICHIER' --essai=$SECONDES$SCENARIO$REVELE$SOUSTITRES"
 	fi
 } > "$LANCEUR"
 chmod +x "$LANCEUR"

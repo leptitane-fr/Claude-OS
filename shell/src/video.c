@@ -72,6 +72,8 @@ typedef struct {
     GtkWidget      *l_position;
     GtkWidget      *l_duree;
     GtkWidget      *l_codec;
+    GtkWidget      *st_texte;      /* le sous-titre, par-dessus l'image   */
+    GtkWidget      *b_pistes;
 
     VideoMoteur    *moteur;
     VideoImage      images;
@@ -87,6 +89,7 @@ typedef struct {
     gboolean        plein;
     gboolean        scenario;
     gboolean        revele;         /* --revele : banc, pour la capture     */
+    gboolean        avec_st;        /* --sous-titres : banc, active la 1re  */
     int             etape;
     gint64          depart;
     gint64          battements;
@@ -137,6 +140,33 @@ static void rafraichir_glissiere(App *a, double position)
                                       NULL, NULL, a);
 }
 
+/* LE SOUS-TITRE COUTE, ET IL FAUT LE SAVOIR.
+ *
+ * Tant qu'aucun texte n'est affiche, l'etiquette est CACHEE -- et non pas
+ * vide. La difference n'est pas cosmetique : un widget vide mais visible
+ * par-dessus l'image suffit a faire renoncer GTK au chemin sans copie,
+ * puisqu'il y a alors quelque chose a composer au-dessus de la
+ * sous-surface. Une video sans sous-titres ne doit rien payer pour ceux
+ * qu'elle n'a pas.
+ *
+ * Et l'etiquette n'est reecrite que lorsque le TEXTE change, pas a chaque
+ * image : une replique reste deux secondes a l'ecran, soit cent soixante
+ * battements pendant lesquels il n'y a rien a faire. */
+static void rafraichir_sous_titre(App *a)
+{
+    gboolean change = FALSE;
+    const char *texte = video_moteur_sous_titre(a->moteur, &change);
+    if (!change) return;
+
+    if (texte && *texte) {
+        gtk_label_set_markup(GTK_LABEL(a->st_texte), texte);
+        gtk_widget_set_visible(a->st_texte, TRUE);
+    } else {
+        gtk_widget_set_visible(a->st_texte, FALSE);
+        gtk_label_set_text(GTK_LABEL(a->st_texte), "");
+    }
+}
+
 static gboolean sur_battement(GtkWidget *w, GdkFrameClock *horloge, gpointer u)
 {
     (void) w; (void) horloge;
@@ -167,6 +197,7 @@ static gboolean sur_battement(GtkWidget *w, GdkFrameClock *horloge, gpointer u)
     double position = video_moteur_position(a->moteur);
     rafraichir_position(a, position);
     rafraichir_glissiere(a, position);
+    rafraichir_sous_titre(a);
     return G_SOURCE_CONTINUE;
 }
 
@@ -389,6 +420,81 @@ static gboolean sur_glissement(GtkRange *r, GtkScrollType t, double valeur, gpoi
     return FALSE;
 }
 
+/* ------------------------------------------------------------- les pistes
+
+   Un menu construit A CHAQUE OUVERTURE, et non une fois pour toutes : les
+   pistes ne changent pas, mais la piste ACTIVE, si -- et un menu qui ne
+   coche pas la bonne ligne est pire que pas de menu. */
+
+typedef struct { App *a; VideoTypePiste type; int index; } Choix;
+
+static void choix_libre(gpointer p, GClosure *c) { (void) c; g_free(p); }
+
+static void sur_choix_piste(GtkCheckButton *b, gpointer u)
+{
+    Choix *c = u;
+    if (!gtk_check_button_get_active(b)) return;
+    video_moteur_choisir_piste(c->a->moteur, c->type, c->index);
+}
+
+static void ajouter_section(App *a, GtkWidget *boite, const char *titre,
+                            VideoTypePiste type)
+{
+    GPtrArray *pistes = video_moteur_pistes(a->moteur, type);
+
+    /* Une seule entree pour l'audio -- le cas courant -- ne merite pas une
+     * section : on n'offre pas un choix qui n'en est pas un. */
+    if (pistes->len <= 1) { g_ptr_array_unref(pistes); return; }
+
+    GtkWidget *t = gtk_label_new(titre);
+    gtk_widget_add_css_class(t, "video-menu-titre");
+    gtk_label_set_xalign(GTK_LABEL(t), 0.0);
+    gtk_box_append(GTK_BOX(boite), t);
+
+    GtkCheckButton *premier = NULL;
+    for (guint i = 0; i < pistes->len; i++) {
+        VideoPiste *p = g_ptr_array_index(pistes, i);
+        GtkWidget *b = gtk_check_button_new_with_label(p->nom);
+        gtk_check_button_set_group(GTK_CHECK_BUTTON(b), premier);
+        if (!premier) premier = GTK_CHECK_BUTTON(b);
+        gtk_check_button_set_active(GTK_CHECK_BUTTON(b), p->active);
+
+        Choix *c = g_new0(Choix, 1);
+        c->a = a; c->type = type; c->index = p->index;
+        g_signal_connect_data(b, "toggled", G_CALLBACK(sur_choix_piste),
+                              c, choix_libre, 0);
+        gtk_box_append(GTK_BOX(boite), b);
+    }
+    g_ptr_array_unref(pistes);
+}
+
+static void sur_menu_pistes(GtkMenuButton *b, GParamSpec *p, gpointer u)
+{
+    (void) p;
+    App *a = u;
+    if (!gtk_menu_button_get_active(b)) return;
+
+    GtkWidget *boite = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_add_css_class(boite, "video-menu");
+    ajouter_section(a, boite, "Piste audio", VIDEO_PISTE_AUDIO);
+    ajouter_section(a, boite, "Sous-titres", VIDEO_PISTE_SOUS_TITRE);
+
+    if (!gtk_widget_get_first_child(boite)) {
+        GtkWidget *rien = gtk_label_new("Ce fichier n'a qu'une piste");
+        gtk_widget_add_css_class(rien, "video-menu-titre");
+        gtk_box_append(GTK_BOX(boite), rien);
+    }
+
+    GtkWidget *pop = gtk_popover_new();
+    gtk_popover_set_child(GTK_POPOVER(pop), boite);
+    /* GTK_POS_TOP : ne PAS laisser GTK retourner le popover. Ne au ras du
+     * bas de l'ecran il s'ouvrirait vers le bas puis serait retourne, et le
+     * retournement annule le decalage -- piege paye par le centre de
+     * notifications, il vaut ici aussi. */
+    gtk_popover_set_position(GTK_POPOVER(pop), GTK_POS_TOP);
+    gtk_menu_button_set_popover(b, pop);
+}
+
 /* -------------------------------------------------------------- clavier */
 
 static gboolean sur_touche(GtkEventControllerKey *c, guint val, guint code,
@@ -529,6 +635,15 @@ static GtkWidget *construire_capsule(App *a)
     a->l_codec = gtk_label_new("");
     gtk_widget_add_css_class(a->l_codec, "video-codec");
 
+    a->b_pistes = gtk_menu_button_new();
+    gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(a->b_pistes),
+                                  "media-view-subtitles-symbolic");
+    gtk_widget_add_css_class(a->b_pistes, "video-bouton");
+    gtk_widget_set_focus_on_click(a->b_pistes, FALSE);
+    gtk_widget_set_tooltip_text(a->b_pistes, "Pistes et sous-titres");
+    g_signal_connect(a->b_pistes, "notify::active",
+                     G_CALLBACK(sur_menu_pistes), a);
+
     GtkWidget *barre = gtk_label_new("/");
     gtk_widget_add_css_class(barre, "video-temps");
 
@@ -545,6 +660,7 @@ static GtkWidget *construire_capsule(App *a)
     gtk_box_append(GTK_BOX(c), a->b_son);
     gtk_box_append(GTK_BOX(c), a->volume);
     gtk_box_append(GTK_BOX(c), a->l_codec);
+    gtk_box_append(GTK_BOX(c), a->b_pistes);
     gtk_box_append(GTK_BOX(c), a->b_plein);
     return c;
 }
@@ -608,9 +724,25 @@ static void construire(App *a)
     gtk_graphics_offload_set_enabled(GTK_GRAPHICS_OFFLOAD(a->offload),
                                      GTK_GRAPHICS_OFFLOAD_ENABLED);
 
+    /* Le sous-titre par-dessus l'image, dans une GtkOverlay. Cache tant
+     * qu'il n'y a rien a dire -- voir rafraichir_sous_titre(). */
+    a->st_texte = gtk_label_new("");
+    gtk_widget_add_css_class(a->st_texte, "video-sous-titre");
+    gtk_label_set_justify(GTK_LABEL(a->st_texte), GTK_JUSTIFY_CENTER);
+    gtk_label_set_wrap(GTK_LABEL(a->st_texte), TRUE);
+    gtk_widget_set_halign(a->st_texte, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(a->st_texte, GTK_ALIGN_END);
+    gtk_widget_set_visible(a->st_texte, FALSE);
+    gtk_widget_set_can_target(a->st_texte, FALSE);   /* il ne vole pas l'appui */
+
+    GtkWidget *sur_image = gtk_overlay_new();
+    gtk_overlay_set_child(GTK_OVERLAY(sur_image), a->offload);
+    gtk_overlay_add_overlay(GTK_OVERLAY(sur_image), a->st_texte);
+    gtk_widget_set_vexpand(sur_image, TRUE);
+
     GtkWidget *pile = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class(pile, "video-pile");
-    gtk_box_append(GTK_BOX(pile), a->offload);
+    gtk_box_append(GTK_BOX(pile), sur_image);
     gtk_box_append(GTK_BOX(pile), construire_zone(a));
     a->capsule = construire_capsule(a);
     gtk_box_append(GTK_BOX(pile), a->capsule);
@@ -674,6 +806,9 @@ static void ouvrir_fichier(App *a, const char *chemin)
             "la lecture consomme davantage.");
     }
 
+    /* Les sous-titres ne s'activent pas d'office : afficher une langue que
+     * personne n'a demandee serait presomptueux, et cela couterait le chemin
+     * sans copie a qui n'en veut pas. Le bouton, lui, est la. */
     if (!video_moteur_a_audio(a->moteur)) {
         gtk_widget_set_sensitive(a->b_son, FALSE);
         gtk_widget_set_sensitive(a->volume, FALSE);
@@ -684,6 +819,21 @@ static void ouvrir_fichier(App *a, const char *chemin)
     video_moteur_lire(a->moteur);
     rafraichir_bouton_lecture(a);
 
+    if (a->avec_st) {
+        /* Mode de banc : sans pointeur on ne peut pas ouvrir le menu, et
+         * c'est pourtant le seul moyen d'eprouver le rendu des sous-titres
+         * et ce qu'ils coutent au chemin sans copie. */
+        GPtrArray *st = video_moteur_pistes(a->moteur, VIDEO_PISTE_SOUS_TITRE);
+        for (guint i = 0; i < st->len; i++) {
+            VideoPiste *p = g_ptr_array_index(st, i);
+            if (p->index >= 0) {
+                video_moteur_choisir_piste(a->moteur, VIDEO_PISTE_SOUS_TITRE,
+                                           p->index);
+                break;
+            }
+        }
+        g_ptr_array_unref(st);
+    }
     if (a->revele)   reveler(a, TRUE, FALSE);
     if (a->scenario) g_timeout_add_seconds(3, sur_scenario, a);
 }
@@ -728,6 +878,8 @@ int main(int argc, char **argv)
             a.plein = TRUE;
         } else if (!strcmp(argv[i], "--scenario")) {
             a.scenario = TRUE;
+        } else if (!strcmp(argv[i], "--sous-titres")) {
+            a.avec_st = TRUE;
         } else if (!strcmp(argv[i], "--revele")) {
             /* Mode de banc : sans pointeur, le survol ne peut pas etre
              * joue ; on montre la glissiere pour pouvoir la regarder. */
