@@ -1668,6 +1668,16 @@ window.images { background-color: @surface; }
   background-color: transparent;
 }
 
+/* EN PLEIN ÉCRAN, DU NOIR. Une vidéo au format 2.39:1 laisserait sinon voir
+   le bureau au-dessus et au-dessous d'elle : cela éclaire la pièce et
+   détruit le contraste de l'image. */
+.video-fenetre.plein-ecran,
+.video-fenetre.plein-ecran .video-pile {
+  background-color: #000000;
+}
+/* PAS la zone vide : elle flotte PAR-DESSUS l'image en plein écran, et la
+   peindre en noir traçait une bande noire en travers du film. */
+
 /* L'ESPACE VIDE, entre la vidéo et la capsule. Il ne se voit pas — c'est le
    propos — mais il reçoit le survol et le toucher. */
 .video-zone {

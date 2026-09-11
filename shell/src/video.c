@@ -113,6 +113,8 @@ typedef struct {
                                      * double appui                       */
 
     gboolean        plein_ecran;
+    double          souris_x, souris_y;   /* pour ignorer les faux mouvements */
+    gboolean        souris_connue;
     gboolean        commandes_vues; /* en plein ecran seulement           */
 
     /* LA LISTE DE LECTURE : les videos du dossier, triees comme Fichiers.
@@ -534,7 +536,10 @@ static void sur_entree_zone(GtkEventControllerMotion *c, double x, double y, gpo
     (void) c; (void) x; (void) y;
     App *a = u;
     a->survol = TRUE;
-    commandes_montrer(a, FALSE);
+    /* En plein ecran, les commandes flottent SUR l'image : entrer dans leur
+     * zone parce qu'elles viennent d'apparaitre sous le pointeur ne doit pas
+     * les figer la pour toujours. Le minuteur reste arme. */
+    commandes_montrer(a, a->plein_ecran);
 }
 
 static void sur_sortie_zone(GtkEventControllerMotion *c, gpointer u)
@@ -573,10 +578,29 @@ static void croix_montrer(App *a)
     a->retrait_fermer = g_timeout_add_seconds(RETRAIT_S, retirer_croix, a);
 }
 
+/* UN MOUVEMENT QUI N'EN EST PAS UN.
+ *
+ * Montrer ou cacher les commandes DEPLACE les widgets sous le pointeur, et
+ * GTK signale ce deplacement comme un mouvement de souris. En plein ecran,
+ * cela boucle : les commandes se retirent au bout de quatre secondes, le
+ * retrait deplace ce qui est sous le pointeur, le « mouvement » les rappelle
+ * aussitot. Elles ne disparaissaient donc jamais -- alors que personne
+ * n'avait touche a la souris.
+ *
+ * On compare la position : en deca de deux pixels, ce n'est pas la main de
+ * l'utilisateur, c'est notre propre mise en page. */
 static void sur_mouvement(GtkEventControllerMotion *c, double x, double y, gpointer u)
 {
-    (void) c; (void) x; (void) y;
+    (void) c;
     App *a = u;
+
+    if (a->souris_connue &&
+        ABS(x - a->souris_x) < 2.0 && ABS(y - a->souris_y) < 2.0)
+        return;
+
+    a->souris_x = x;
+    a->souris_y = y;
+    a->souris_connue = TRUE;
 
     /* La croix apparait dans les deux modes : c'est une sortie de secours,
      * elle ne doit pas dependre du mode ou l'on se trouve. */
@@ -921,6 +945,15 @@ static void sur_plein_change(GObject *o, GParamSpec *p, gpointer u)
                                 plein ? "Quitter le plein écran" : "Plein écran");
 
     a->plein_ecran = plein;
+
+    /* DES BANDES NOIRES, ET NON LE FOND D'ECRAN.
+     *
+     * En fenetre, le fond transparent est ce qu'on veut : il ne reste que
+     * l'image et la capsule. En plein ecran, une video au format 2.39:1
+     * laisserait voir le bureau au-dessus et au-dessous d'elle -- ce qui
+     * eclaire la piece et detruit le contraste de l'image. */
+    if (plein) gtk_widget_add_css_class(GTK_WIDGET(a->fenetre), "plein-ecran");
+    else       gtk_widget_remove_css_class(GTK_WIDGET(a->fenetre), "plein-ecran");
 
     /* EN ENTRANT, TOUT S'EFFACE ; EN SORTANT, LA CAPSULE REVIENT.
      *
