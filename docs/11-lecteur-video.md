@@ -337,6 +337,33 @@ signal déjà passé — la boîte d'ouverture n'arrivait jamais, et l'applicati
 restait sur une fenêtre vide. Trouvé à la capture d'écran, pas au
 raisonnement.
 
+### Cinq ajustements de plus, le 11 septembre
+
+| Constat | Ce qui a été fait |
+|---|---|
+| La glissière fait la largeur de la **fenêtre**, pas celle de l'image | L'overlay place ses flottants lui-même (`get-child-position`) d'après la géométrie réelle de l'image, calculée du format de la vidéo. Plus 8 px de marge négative : `GtkScale` réserve la moitié de sa poignée à chaque bout |
+| Aucun moyen de fermer à la souris | Une **croix** dans le coin haut droit **de l'image**, révélée au mouvement de pointeur, dans les deux modes |
+| Pas de moyen d'ouvrir une autre vidéo | Un bouton **Ouvrir** dans la capsule, en plus de Ctrl-O |
+| Le bouton Lecture bascule **deux fois** | Le geste d'appui était posé sur la racine : il recevait aussi les clics déjà traités par les boutons. Le bouton basculait, puis l'appui retardé rebasculait 300 ms plus tard. Le geste est désormais sur l'**image**, et sur elle seule |
+| Lancée sans vidéo, l'application s'**enferme** | Voir ci-dessous |
+
+**L'ENFERMEMENT, ET C'EST LE PLUS INSTRUCTIF.** Lancée sans fichier, la boîte
+d'ouverture s'ouvrait *modale* sur une fenêtre qui n'était pas au premier
+plan : elle se glissait derrière une autre application, son « Annuler »
+passait hors de l'écran visible, et la fenêtre dessous — modale, donc inerte,
+et désormais **sans barre de titre** — n'offrait plus rien à cliquer.
+L'application n'était pas plantée : son fil principal tournait normalement.
+Elle était prise au piège.
+
+Trois choses en sortent, et elles valent au-delà de ce lecteur :
+
+- **Une fenêtre sans décoration doit porter sa propre sortie.** La croix n'est
+  pas un ornement.
+- **Une boîte modale se pose sur une fenêtre au premier plan**, jamais sur
+  une fenêtre quelconque : `gtk_window_present()` sur le parent d'abord.
+- **« Le processus tourne » ne veut pas dire « l'application répond ».** Le
+  diagnostic est venu d'une capture d'écran, pas de `ps`.
+
 ## 11.8 Pistes, sous-titres, reprise — phase 3
 
 Un menu dans la capsule liste les **pistes audio** et les **sous-titres**,

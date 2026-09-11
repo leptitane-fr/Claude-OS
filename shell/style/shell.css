@@ -1646,11 +1646,22 @@ window.images { background-color: @surface; }
    propos — mais il reçoit le survol et le toucher. */
 .video-zone {
   background-color: transparent;
-  padding: 0 24px;
+  /* AUCUNE MARGE INTÉRIEURE : la glissière doit faire EXACTEMENT la largeur
+     de l'image, et c'est l'overlay qui lui donne cette largeur (voir
+     sur_position_flottant). Vingt-quatre pixels de padding la rentraient
+     visiblement en deçà du bord de la vidéo. */
+  padding: 0;
 }
 
 /* La glissière : fine au repos, et jamais encombrante. Elle n'existe que
    révélée, donc elle peut se permettre d'être discrète. */
+/* HUIT PIXELS DE MARGE NÉGATIVE, de chaque côté.
+   GtkScale réserve la moitié de sa poignée à chaque bout pour que celle-ci
+   puisse atteindre les extrêmes : la piste est donc rentrée de 8 px, et la
+   barre paraissait plus étroite que l'image alors que le widget, lui, avait
+   la bonne largeur. */
+.video-glissiere { margin-left: -8px; margin-right: -8px; }
+
 .video-glissiere trough {
   min-height: 5px;
   border-radius: 3px;
@@ -1727,6 +1738,19 @@ window.images { background-color: @surface; }
 .video-bouton:hover    { background-color: @surface-alt; }
 .video-bouton:active   { background-color: @surface-sunk; }
 .video-bouton:disabled { opacity: 0.35; }
+
+/* LA CROIX DE FERMETURE, dans le coin de l'image.
+   Sans barre de titre, c'est la seule sortie à la souris : elle doit se voir
+   sur n'importe quelle image, donc son propre fond, et non la transparence. */
+.video-croix {
+  background-color: alpha(#000000, 0.55);
+  color: #ffffff;
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 20px;
+}
+.video-croix:hover  { background-color: @danger; color: #ffffff; }
+.video-croix:active { background-color: shade(@danger, 0.85); }
 
 /* Le bouton lecture est le seul qu'on vise sans regarder. */
 .video-bouton-grand {

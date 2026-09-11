@@ -84,11 +84,15 @@ typedef struct {
     GtkWidget      *capsule;
     GtkWidget      *rev_capsule;   /* la capsule s'efface en plein ecran  */
     GtkWidget      *commandes;     /* zone + capsule, flottant au bas     */
+    GtkWidget      *racine;        /* la GtkOverlay qui porte tout        */
+    GtkWidget      *rev_fermer;    /* la croix, au survol de l'image      */
+    guint           retrait_fermer;
 
     GtkWidget      *b_lecture;
     GtkWidget      *b_prec;
     GtkWidget      *b_suiv;
     GtkWidget      *b_plein;
+    GtkWidget      *b_ouvrir;
     GtkWidget      *b_son;
     GtkWidget      *volume;
     GtkWidget      *l_position;
@@ -135,6 +139,7 @@ static void bilan(App *a, const char *quand);
 static void act_sourdine(GtkButton *b, gpointer u);
 static void ouvrir_fichier(App *a, const char *chemin);
 static void demander_fichier(App *a);
+static void reprise_ecrire(const char *fichier, double position, double duree);
 static void reveler(App *a, gboolean visible, gboolean momentane);
 
 /* ---------------------------------------------------- reprendre ou l'on en
@@ -361,6 +366,15 @@ static void appliquer_visibilite(App *a)
     gboolean capsule = !a->plein_ecran || a->commandes_vues;
     gtk_revealer_set_reveal_child(GTK_REVEALER(a->rev_capsule), capsule);
 
+    /* EN PLEIN ECRAN, CACHEES, LES COMMANDES NE SONT PLUS UNE CIBLE.
+     *
+     * Elles flottent par-dessus l'image ; l'espace vide continuerait a
+     * recevoir les appuis d'une bande de cinquante pixels au bas de l'ecran,
+     * ou il ne se passerait rien. */
+    if (a->commandes)
+        gtk_widget_set_can_target(a->commandes,
+                                  !a->plein_ecran || a->commandes_vues);
+
     /* La glissiere suit la capsule en plein ecran ; en fenetre elle garde
      * sa propre vie, revelee au survol de l'espace vide. */
     if (a->plein_ecran)
@@ -435,13 +449,46 @@ static void sur_sortie_zone(GtkEventControllerMotion *c, gpointer u)
  * Il rappelle tout, puis tout se retire seul. En fenetre il ne fait rien :
  * la capsule y est deja la, et faire clignoter la glissiere au moindre
  * deplacement de souris serait insupportable. */
+/* LA CROIX DE FERMETURE, au survol de l'image.
+ *
+ * Elle n'est pas decorative : SANS BARRE DE TITRE, c'est le seul moyen de
+ * fermer l'application a la souris. Son absence a enferme l'utilisateur le
+ * 10 septembre 2026 -- une boite d'ouverture modale s'etait glissee derriere
+ * une autre fenetre, son « Annuler » etait hors d'atteinte, et la fenetre
+ * dessous n'avait rien a cliquer. */
+static gboolean retirer_croix(gpointer u)
+{
+    App *a = u;
+    a->retrait_fermer = 0;
+    gtk_revealer_set_reveal_child(GTK_REVEALER(a->rev_fermer), FALSE);
+    return G_SOURCE_REMOVE;
+}
+
+static void croix_montrer(App *a)
+{
+    gtk_revealer_set_reveal_child(GTK_REVEALER(a->rev_fermer), TRUE);
+    if (a->retrait_fermer) g_source_remove(a->retrait_fermer);
+    a->retrait_fermer = g_timeout_add_seconds(RETRAIT_S, retirer_croix, a);
+}
+
 static void sur_mouvement(GtkEventControllerMotion *c, double x, double y, gpointer u)
 {
     (void) c; (void) x; (void) y;
     App *a = u;
+
+    /* La croix apparait dans les deux modes : c'est une sortie de secours,
+     * elle ne doit pas dependre du mode ou l'on se trouve. */
+    croix_montrer(a);
+
     if (!a->plein_ecran) return;
     if (a->commandes_vues && a->retrait) return;   /* deja montre, minuteur armé */
     commandes_montrer(a, TRUE);
+}
+
+static void act_fermer(GtkButton *b, gpointer u)
+{
+    (void) b;
+    gtk_window_close(GTK_WINDOW(((App *)u)->fenetre));
 }
 
 /* ------------------------------------------------------- la liste de lecture
@@ -619,6 +666,7 @@ static void sur_appui(GtkGestureClick *g, int n, double x, double y, gpointer u)
     }
 
     commandes_montrer(a, TRUE);          /* retour visuel immediat */
+    croix_montrer(a);
     if (a->appui_simple) g_source_remove(a->appui_simple);
     a->appui_simple = g_timeout_add(delai_double_appui(a), appui_simple_expire, a);
 }
@@ -723,6 +771,18 @@ static void basculer_plein(App *a)
 }
 
 static void act_plein(GtkButton *b, gpointer u) { (void) b; basculer_plein((App *)u); }
+
+/* Ouvrir une autre video sans fermer l'application. Ctrl-O fait de meme ;
+ * un bouton se voit, un raccourci se devine. */
+static void act_ouvrir(GtkButton *b, gpointer u)
+{
+    (void) b;
+    App *a = u;
+    if (a->moteur && a->fichier)
+        reprise_ecrire(a->fichier, video_moteur_position(a->moteur),
+                       video_moteur_duree(a->moteur));
+    demander_fichier(a);
+}
 
 /* LE PLEIN ECRAN SE LIT SUR LA FENETRE, PAS SUR LE BOUTON.
  *
@@ -1042,6 +1102,10 @@ static GtkWidget *construire_capsule(App *a)
     a->l_codec = gtk_label_new("");
     gtk_widget_add_css_class(a->l_codec, "video-codec");
 
+    a->b_ouvrir = bouton("document-open-symbolic", NULL,
+                         G_CALLBACK(act_ouvrir), a);
+    gtk_widget_set_tooltip_text(a->b_ouvrir, "Ouvrir une vidéo…");
+
     a->b_pistes = gtk_menu_button_new();
     gtk_menu_button_set_icon_name(GTK_MENU_BUTTON(a->b_pistes),
                                   "media-view-subtitles-symbolic");
@@ -1063,6 +1127,7 @@ static GtkWidget *construire_capsule(App *a)
     gtk_box_append(GTK_BOX(c), a->b_son);
     gtk_box_append(GTK_BOX(c), a->volume);
     gtk_box_append(GTK_BOX(c), a->l_codec);
+    gtk_box_append(GTK_BOX(c), a->b_ouvrir);
     gtk_box_append(GTK_BOX(c), a->b_pistes);
     gtk_box_append(GTK_BOX(c), a->b_plein);
     return c;
@@ -1103,6 +1168,31 @@ static GtkWidget *construire_zone(App *a)
     return a->zone;
 }
 
+/* OU EST L'IMAGE, EXACTEMENT.
+ *
+ * GtkPicture en mode CONTAIN centre la video et la borde de vide : sa
+ * largeur affichee n'est PAS celle du widget des que les proportions
+ * different. Or la glissiere doit faire la largeur de l'image -- pas celle
+ * de la fenetre -- et la croix se poser dans le coin de l'image. Les deux
+ * ont donc besoin de ce calcul, et personne d'autre ne le connait. */
+static void geometrie_image(App *a, int cadre_l, int cadre_h,
+                            int *large, int *haut)
+{
+    int vl = video_moteur_largeur(a->moteur);
+    int vh = video_moteur_hauteur(a->moteur);
+
+    if (vl <= 0 || vh <= 0 || cadre_l <= 0 || cadre_h <= 0) {
+        *large = MAX(cadre_l, 0);
+        *haut  = MAX(cadre_h, 0);
+        return;
+    }
+
+    double r = (double)vl / (double)vh;
+    int l = (int)(cadre_h * r + 0.5);
+    if (l <= cadre_l) { *large = l; *haut = cadre_h; }
+    else              { *large = cadre_l; *haut = (int)(cadre_l / r + 0.5); }
+}
+
 /* LA MARGE QUI TIENT LES DEUX MISES EN PAGE.
  *
  * Les commandes flottent TOUJOURS dans une GtkOverlay, au bas de l'image.
@@ -1129,6 +1219,53 @@ static void ajuster_marge(App *a)
         marge = nat;
     }
     if (a->offload) gtk_widget_set_margin_bottom(a->offload, marge);
+}
+
+/* LE PLACEMENT DES DEUX FLOTTANTS, calcule plutot que confie a des
+ * alignements : la glissiere doit faire la largeur de l'IMAGE, et la croix
+ * se poser dans le coin haut droit de l'IMAGE. Ni l'une ni l'autre ne
+ * s'exprime en termes de fenetre. */
+static gboolean sur_position_flottant(GtkOverlay *o, GtkWidget *enfant,
+                                      GdkRectangle *alloc, gpointer u)
+{
+    App *a = u;
+    int W = gtk_widget_get_width(GTK_WIDGET(o));
+    int H = gtk_widget_get_height(GTK_WIDGET(o));
+    if (W <= 0 || H <= 0) return FALSE;
+
+    int min = 0, nat_h = 0, nat_l = 0;
+    gtk_widget_measure(a->commandes, GTK_ORIENTATION_VERTICAL, -1,
+                       &min, &nat_h, NULL, NULL);
+
+    /* Le cadre reellement donne a l'image : la fenetre, moins la place
+     * reservee aux commandes en mode fenetre. */
+    int cadre_h = H - (a->plein_ecran ? 0 : nat_h);
+    int large = 0, haut = 0;
+    geometrie_image(a, W, cadre_h, &large, &haut);
+
+    if (enfant == a->commandes) {
+        alloc->x      = (W - large) / 2;
+        alloc->width  = large;
+        alloc->y      = H - nat_h;
+        alloc->height = nat_h;
+        return TRUE;
+    }
+
+    if (enfant == a->rev_fermer) {
+        gtk_widget_measure(a->rev_fermer, GTK_ORIENTATION_HORIZONTAL, -1,
+                           &min, &nat_l, NULL, NULL);
+        gtk_widget_measure(a->rev_fermer, GTK_ORIENTATION_VERTICAL, -1,
+                           &min, &nat_h, NULL, NULL);
+        /* Dans le coin de l'IMAGE, pas de la fenetre : sur une video au
+         * format different, le coin de la fenetre est du vide. */
+        int haut_image = (cadre_h - haut) / 2;
+        alloc->x      = (W + large) / 2 - nat_l - 8;
+        alloc->y      = haut_image + 8;
+        alloc->width  = nat_l;
+        alloc->height = nat_h;
+        return TRUE;
+    }
+    return FALSE;
 }
 
 static void sur_commandes_affichees(GtkWidget *w, gpointer u)
@@ -1201,27 +1338,48 @@ static void construire(App *a)
     gtk_widget_set_valign(a->commandes, GTK_ALIGN_END);
     g_signal_connect(a->commandes, "map", G_CALLBACK(sur_commandes_affichees), a);
 
-    GtkWidget *racine = gtk_overlay_new();
-    gtk_widget_add_css_class(racine, "video-pile");
-    gtk_overlay_set_child(GTK_OVERLAY(racine), a->offload);
-    gtk_overlay_add_overlay(GTK_OVERLAY(racine), a->st_texte);
-    gtk_overlay_add_overlay(GTK_OVERLAY(racine), a->commandes);
+    /* LA CROIX, dans le coin haut droit de l'image. Sans barre de titre,
+     * c'est la seule sortie a la souris -- voir croix_montrer(). */
+    GtkWidget *croix = bouton("window-close-symbolic", "video-croix",
+                              G_CALLBACK(act_fermer), a);
+    gtk_widget_set_tooltip_text(croix, "Fermer");
 
+    a->rev_fermer = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(a->rev_fermer),
+                                     GTK_REVEALER_TRANSITION_TYPE_CROSSFADE);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(a->rev_fermer), 140);
+    gtk_revealer_set_child(GTK_REVEALER(a->rev_fermer), croix);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(a->rev_fermer), FALSE);
+
+    a->racine = gtk_overlay_new();
+    gtk_widget_add_css_class(a->racine, "video-pile");
+    gtk_overlay_set_child(GTK_OVERLAY(a->racine), a->offload);
+    gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->st_texte);
+    gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->commandes);
+    gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->rev_fermer);
+    g_signal_connect(a->racine, "get-child-position",
+                     G_CALLBACK(sur_position_flottant), a);
+
+    GtkWidget *racine = a->racine;
     gtk_window_set_child(GTK_WINDOW(a->fenetre), racine);
 
     GtkEventController *clavier = gtk_event_controller_key_new();
     g_signal_connect(clavier, "key-pressed", G_CALLBACK(sur_touche), a);
     gtk_widget_add_controller(a->fenetre, clavier);
 
-    /* L'APPUI EST POSE SUR LA RACINE, ET NON SUR L'IMAGE.
+    /* L'APPUI EST POSE SUR L'IMAGE, ET SUR ELLE SEULE.
      *
-     * En plein ecran les commandes flottent par-dessus l'image : un appui
-     * dans leur bande n'atteindrait jamais l'image. Sur la racine, il
-     * atteint tout ce qui ne l'a pas deja pris -- les boutons, eux, gardent
-     * leurs clics. */
+     * Pose sur la racine -- ce qu'on avait fait d'abord --, il recevait AUSSI
+     * les clics deja traites par les boutons de la capsule : le bouton
+     * lecture basculait, puis l'appui retarde rebasculait 300 ms plus tard.
+     * « Play/Pause instantanement », exactement ce que l'utilisateur a vu.
+     *
+     * Sur l'image, un clic de bouton ne nous parvient plus. En plein ecran,
+     * la bande des commandes cachees cesse d'etre une cible (voir
+     * appliquer_visibilite) pour que l'appui y atteigne l'image. */
     GtkGesture *appui = gtk_gesture_click_new();
     g_signal_connect(appui, "pressed", G_CALLBACK(sur_appui), a);
-    gtk_widget_add_controller(racine, GTK_EVENT_CONTROLLER(appui));
+    gtk_widget_add_controller(a->image, GTK_EVENT_CONTROLLER(appui));
 
     /* Le mouvement de pointeur rappelle les commandes, en plein ecran. */
     GtkEventController *mouvement = gtk_event_controller_motion_new();
@@ -1302,6 +1460,11 @@ static void ouvrir_fichier(App *a, const char *chemin)
         g_message("video : reprise à %.0f s", reprise);
     }
 
+    /* Les proportions de la video viennent de changer : la glissiere et la
+     * croix se placent d'apres elles, il faut refaire le calcul. */
+    if (a->racine) gtk_widget_queue_allocate(a->racine);
+    ajuster_marge(a);
+
     /* Le dossier est relu a chaque ouverture : on peut avoir change de
      * dossier par le selecteur, et le contenu a pu bouger entre-temps. */
     if (g_file_test(chemin, G_FILE_TEST_EXISTS)) dossier_charger(a, chemin);
@@ -1326,7 +1489,12 @@ static void ouvrir_fichier(App *a, const char *chemin)
         }
         g_ptr_array_unref(st);
     }
-    if (a->revele)   reveler(a, TRUE, FALSE);
+    if (a->revele) {
+        reveler(a, TRUE, FALSE);
+        /* Mode de banc : la croix ne se montre qu'au pointeur, que le banc
+         * sans ecran n'a pas. */
+        gtk_revealer_set_reveal_child(GTK_REVEALER(a->rev_fermer), TRUE);
+    }
     if (a->scenario) g_timeout_add_seconds(3, sur_scenario, a);
 }
 
@@ -1438,6 +1606,14 @@ static void demander_fichier(App *a)
     }
     G_GNUC_END_IGNORE_DEPRECATIONS
 
+    /* LA FENETRE PARENTE D'ABORD. Une boite modale posee sur une fenetre
+     * qui n'est pas au premier plan se glisse DERRIERE ses voisines : son
+     * « Annuler » devient alors hors d'atteinte, et comme la fenetre dessous
+     * est modale elle aussi, plus rien ne repond. C'est l'enfermement
+     * constate le 10 septembre 2026. */
+    gtk_window_present(GTK_WINDOW(a->fenetre));
+
+    gtk_window_set_default_size(GTK_WINDOW(d), 900, 600);
     gtk_window_set_modal(GTK_WINDOW(d), TRUE);
     gtk_window_set_transient_for(GTK_WINDOW(d), GTK_WINDOW(a->fenetre));
     gtk_window_set_destroy_with_parent(GTK_WINDOW(d), TRUE);
