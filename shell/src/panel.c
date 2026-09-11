@@ -16,10 +16,10 @@
  *
  * ETAT DES BASCULES
  *
- * Un clic ne bascule pas l'affichage : il demande le changement, et
- * l'affichage suit le signal renvoye par le service. Si polkit refuse, ou
- * si le materiel est bloque par un interrupteur physique, la bascule reste
- * visiblement dans son etat reel au lieu de mentir.
+ * Un geste sur l'interrupteur ne bascule pas l'affichage : il demande le
+ * changement, et l'affichage suit le signal renvoye par le service. Si
+ * polkit refuse, ou si le materiel est bloque par un interrupteur physique,
+ * la bascule reste visiblement dans son etat reel au lieu de mentir.
  * ========================================================================= */
 
 #include "panel.h"
@@ -73,21 +73,26 @@
 
 /* ------------------------------------------------------------------------- */
 
+typedef struct _Panel Panel;
+
 typedef struct {
-    GtkWidget  *button;
-    GtkWidget  *chevron;
+    GtkWidget  *button;         /* ouvre le volet de detail                  */
     GtkWidget  *icon;
+    GtkWidget  *interrupteur;   /* GtkSwitch : allume et eteint le module    */
     const char *nom;            /* « Wi-Fi » — pour l'infobulle et l'a11y    */
+    const char *page;           /* nom de sa page dans la pile               */
     const char *icon_on;
     const char *icon_off;
     gboolean    on;
+    gboolean    pose_en_cours;  /* l'interrupteur bouge par programme        */
+    Panel      *panel;
 
     GDBusProxy *proxy;          /* NULL si le service est absent             */
     const char *iface;          /* interface portant la propriete            */
     const char *prop;
 } Tile;
 
-typedef struct {
+struct _Panel {
     GtkStack  *pile;
     GtkWidget *page_wifi;
     GtkWidget *page_bt;
@@ -113,7 +118,7 @@ typedef struct {
     gpointer         geo_data;
     int              hauteur_dite;  /* dernieres valeurs annoncees           */
     int              largeur_dite;
-} Panel;
+};
 
 /* -------------------------------------------------------------------------
  * Hauteur annoncee au centre de notifications
@@ -161,38 +166,40 @@ panel_observer_geometrie (GtkWidget *popover, PanelGeometrieFn fn, gpointer data
 /* -------------------------------------------------------------------------
  * Bascules
  * ------------------------------------------------------------------------- */
+static void replier_si_ouverte (Panel *p, const char *page);
+
 static void
 tile_apply (Tile *t, gboolean on, gboolean available)
 {
     t->on = on;
     gtk_image_set_from_icon_name (GTK_IMAGE (t->icon), on ? t->icon_on : t->icon_off);
 
-    if (on) {
-        gtk_widget_add_css_class (t->button, "on");
-        /* Le chevron n'est plus DANS le bouton mais POSE DESSUS : il n'est
-         * plus son descendant, et « .qs-tile.on .qs-chevron » ne l'atteint
-         * pas. On lui pose donc sa propre classe, pour qu'il passe en
-         * couleur de contraste avec le fond d'accent. */
-        gtk_widget_add_css_class (t->chevron, "sur-accent");
-    } else {
-        gtk_widget_remove_css_class (t->button, "on");
-        gtk_widget_remove_css_class (t->chevron, "sur-accent");
-    }
+    /* L'INTERRUPTEUR SUIT LE SERVICE, PAS LE DOIGT. « state » est ce que le
+     * service a confirme, « active » ce que le doigt a demande : les poser
+     * ensemble ici, a chaque signal, remet l'interrupteur d'accord avec la
+     * realite -- y compris quand polkit a refuse. */
+    t->pose_en_cours = TRUE;
+    gtk_switch_set_active (GTK_SWITCH (t->interrupteur), on);
+    gtk_switch_set_state (GTK_SWITCH (t->interrupteur), on);
+    t->pose_en_cours = FALSE;
+    gtk_widget_set_sensitive (t->interrupteur, available);
 
-    /* L'ETAT SE LIT A LA COULEUR, ET SE DIT A L'INFOBULLE.
-     *
-     * Les libelles « Wi-Fi / Activé » ont disparu de la pastille : l'icone
-     * dit la fonction, l'accent dit l'etat, et deux lignes de texte pour
-     * cela encombraient la Console. Mais un bouton reduit a une icone n'a
-     * plus de nom accessible, et « indisponible » ne se distingue d'
-     * « eteint » que par une opacite. L'infobulle porte donc les deux, ce
-     * qui sert aussi de nom au lecteur d'ecran. */
+    /* ETEINT, LE BOUTON EST GRISE ET INOPERANT, comme demande le 11 septembre
+     * 2026 : ouvrir la liste des reseaux d'une radio coupee ne montrerait
+     * rien, et laisserait croire a une panne. Si son volet etait ouvert, il
+     * se replie. */
+    gtk_widget_set_sensitive (t->button, on && available);
+    if (!on && t->panel != NULL)
+        replier_si_ouverte (t->panel, t->page);
+
+    /* L'infobulle porte le nom ET l'etat : c'est aussi le nom que lit le
+     * lecteur d'ecran, et « indisponible » ne se distingue d'« eteint » que
+     * par la sensibilite de l'interrupteur. */
     g_autofree char *bulle = g_strdup_printf (
         "%s — %s", t->nom,
         !available ? "indisponible" : on ? "activé" : "désactivé");
     gtk_widget_set_tooltip_text (t->button, bulle);
-
-    gtk_widget_set_sensitive (t->button, available);
+    gtk_widget_set_tooltip_text (t->interrupteur, bulle);
 }
 
 /* Ecrit la propriete via org.freedesktop.DBus.Properties.Set.
@@ -203,78 +210,100 @@ tile_apply (Tile *t, gboolean on, gboolean available)
 static void
 on_set_done (GObject *src, GAsyncResult *res, gpointer data)
 {
+    Tile *t = data;
     g_autoptr(GError) error = NULL;
     g_autoptr(GVariant) reply = g_dbus_proxy_call_finish (G_DBUS_PROXY (src), res, &error);
-    if (reply == NULL)
-        g_message ("bascule refusee : %s", error->message);
-    (void) data;
+    if (reply == NULL) {
+        g_message ("%s : bascule refusee : %s", t->nom, error->message);
+        /* Refuse : aucun signal ne viendra. On remet l'interrupteur sur
+         * l'etat reel nous-memes, sinon il resterait sur la demande. */
+        tile_apply (t, t->on, gtk_widget_get_sensitive (t->interrupteur));
+    }
 }
 
-static void
-on_tile_clicked (GtkButton *button, gpointer data)
+/* « state-set » plutot que « notify::active » : il permet de NE PAS changer
+ * l'etat tout de suite (on rend TRUE), et d'attendre que le service le
+ * confirme. L'interrupteur montre la demande, l'etat suit la realite. */
+static gboolean
+on_interrupteur (GtkSwitch *sw, gboolean voulu, gpointer data)
 {
     Tile *t = data;
-    (void) button;
+    (void) sw;
 
-    if (t->proxy == NULL)
-        return;
+    if (t->pose_en_cours)
+        return FALSE;               /* c'est nous : laisser GTK poser l'etat */
+    if (t->proxy == NULL || voulu == t->on)
+        return TRUE;
 
     g_dbus_proxy_call (t->proxy,
                        "org.freedesktop.DBus.Properties.Set",
                        g_variant_new ("(ssv)", t->iface, t->prop,
-                                      g_variant_new_boolean (!t->on)),
+                                      g_variant_new_boolean (voulu)),
                        G_DBUS_CALL_FLAGS_NONE, -1, NULL,
-                       on_set_done, NULL);
-    /* Volontairement, on ne change rien a l'ecran ici : c'est le signal de
-     * changement de propriete qui fera foi. */
+                       on_set_done, t);
+    return TRUE;
 }
 
+/* UNE PASTILLE, DEUX OBJETS SUPERPOSES.
+ *
+ * Le 11 septembre 2026, l'utilisateur a juge l'ancienne pastille peu
+ * pratique : tout son corps allumait et eteignait, et le volet de detail
+ * s'ouvrait par un chevron de 24 px pose dans un coin -- trop petit, mal
+ * place, et le geste le plus frequent (choisir un reseau) etait le plus dur
+ * a viser. Les roles sont donc inverses :
+ *
+ *   - le BOUTON, grand, ouvre le volet ;
+ *   - l'INTERRUPTEUR, en dessous, allume et eteint le module.
+ *
+ * Deux objets distincts plutot qu'un bouton qui ferait deux choses selon
+ * l'endroit du clic : chacun se voit, chacun se vise. */
 static GtkWidget *
-tile_build (Tile *t, const char *name, const char *icon_on, const char *icon_off)
+tile_build (Tile *t, Panel *p, const char *name, const char *page,
+            const char *icon_on, const char *icon_off)
 {
     t->icon_on  = icon_on;
     t->icon_off = icon_off;
     t->nom      = name;
+    t->page     = page;
+    t->panel    = p;
 
     t->icon = gtk_image_new_from_icon_name (icon_off);
-    gtk_image_set_pixel_size (GTK_IMAGE (t->icon), 22);
+    gtk_image_set_pixel_size (GTK_IMAGE (t->icon), 20);
     gtk_widget_add_css_class (t->icon, "qs-tile-icon");
 
+    GtkWidget *nom = gtk_label_new (name);
+    gtk_widget_add_css_class (nom, "qs-tile-name");
+    gtk_widget_set_hexpand (nom, TRUE);
+    gtk_widget_set_halign (nom, GTK_ALIGN_START);
+
+    /* LA FLECHE POINTE VERS OU LE VOLET S'OUVRE : a gauche de la Console.
+     * Elle n'est plus un bouton, seulement une indication dans le bouton. */
+    GtkWidget *fleche = gtk_image_new_from_icon_name ("go-previous-symbolic");
+    gtk_image_set_pixel_size (GTK_IMAGE (fleche), 14);
+    gtk_widget_add_css_class (fleche, "qs-tile-state");
+
+    GtkWidget *ligne = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append (GTK_BOX (ligne), fleche);
+    gtk_box_append (GTK_BOX (ligne), t->icon);
+    gtk_box_append (GTK_BOX (ligne), nom);
+
     t->button = gtk_button_new ();
-    gtk_button_set_child (GTK_BUTTON (t->button), t->icon);
+    gtk_button_set_child (GTK_BUTTON (t->button), ligne);
     gtk_widget_add_css_class (t->button, "qs-tile");
     gtk_widget_set_hexpand (t->button, TRUE);
     gtk_widget_set_sensitive (t->button, FALSE);
-    g_signal_connect (t->button, "clicked", G_CALLBACK (on_tile_clicked), t);
 
-    /* Deux gestes distincts sur une meme pastille, comme sur ChromeOS : le
-     * corps allume et eteint, le chevron ouvre la liste. Un seul bouton qui
-     * ferait les deux obligerait a choisir entre les deux usages.
-     *
-     * LA FLECHE POINTE VERS OU LA COLONNE S'OUVRE. Elle allait vers la
-     * droite du temps ou la page remplacait la Console ; la page se deplie
-     * maintenant a GAUCHE, et une fleche qui designe le cote oppose au
-     * mouvement se lit comme une erreur.
-     *
-     * Elle est POSEE SUR la pastille par un GtkOverlay, et non a cote dans
-     * une boite. Deux raisons : la pastille recupere toute la largeur, ce
-     * qui agrandit la cible du doigt pour le geste le plus courant — allumer
-     * et eteindre ; et GTK n'admet pas un bouton dans un bouton, ce qu'une
-     * fleche « a l'interieur » demanderait autrement. L'enfant d'un overlay
-     * recoit le clic avant ce qu'il recouvre : les deux gestes restent
-     * distincts sans code d'arbitrage. */
-    t->chevron = gtk_button_new_from_icon_name ("go-previous-symbolic");
-    gtk_widget_add_css_class (t->chevron, "qs-chevron");
-    gtk_widget_set_halign (t->chevron, GTK_ALIGN_START);
-    gtk_widget_set_valign (t->chevron, GTK_ALIGN_CENTER);
-    gtk_widget_set_tooltip_text (t->chevron, name);
+    t->interrupteur = gtk_switch_new ();
+    gtk_widget_add_css_class (t->interrupteur, "qs-interrupteur");
+    gtk_widget_set_halign (t->interrupteur, GTK_ALIGN_CENTER);
+    gtk_widget_set_sensitive (t->interrupteur, FALSE);   /* service pas encore joint */
+    g_signal_connect (t->interrupteur, "state-set", G_CALLBACK (on_interrupteur), t);
 
-    GtkWidget *paire = gtk_overlay_new ();
-    gtk_widget_add_css_class (paire, "qs-tile-paire");
-    gtk_widget_set_hexpand (paire, TRUE);
-    gtk_overlay_set_child (GTK_OVERLAY (paire), t->button);
-    gtk_overlay_add_overlay (GTK_OVERLAY (paire), t->chevron);
-    return paire;
+    GtkWidget *colonne = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_hexpand (colonne, TRUE);
+    gtk_box_append (GTK_BOX (colonne), t->button);
+    gtk_box_append (GTK_BOX (colonne), t->interrupteur);
+    return colonne;
 }
 
 /* Lit une propriete booleenne du cache du proxy. */
@@ -632,19 +661,19 @@ reglages_build (Panel *p)
  * Cycle de vie du panneau : la minuterie ne vit qu'entre l'ouverture et la
  * fermeture. C'est tout l'interet de n'afficher ces valeurs qu'au clic.
  * ------------------------------------------------------------------------- */
-/* Le chevron sait quelle page ouvrir a la pastille qui le porte.
+/* Le bouton sait quelle page ouvrir a la pastille qui le porte.
  *
  * La page ne remplace plus la Console : elle se deplie a sa gauche. Passer
- * d'un chevron a l'autre alors que la colonne est deja ouverte ne fait donc
+ * d'un bouton a l'autre alors que la colonne est deja ouverte ne fait donc
  * que changer la page a l'interieur, sans replier ni deplier. */
 static void
 on_ouvrir_page (GtkButton *b, gpointer data)
 {
     Panel *p = data;
-    const char *voulue   = GTK_WIDGET (b) == p->wifi.chevron ? "wifi" : "bluetooth";
+    const char *voulue   = GTK_WIDGET (b) == p->wifi.button ? "wifi" : "bluetooth";
     const char *courante = gtk_stack_get_visible_child_name (p->pile);
 
-    /* Le meme chevron ouvre ET referme. Un bouton qui se contentait d'ouvrir
+    /* Le meme bouton ouvre ET referme. Un bouton qui se contentait d'ouvrir
      * laissait la fleche « retour » comme unique sortie : on cliquait a
      * nouveau la ou l'on venait de cliquer, il ne se passait rien, et le
      * geste evident semblait cassé. On repasse par « vide » plutot que de
@@ -658,6 +687,17 @@ on_ouvrir_page (GtkButton *b, gpointer data)
 
     gtk_stack_set_visible_child_name (p->pile, voulue);
     gtk_revealer_set_reveal_child (GTK_REVEALER (p->reveleur), TRUE);
+}
+
+/* Un module qu'on eteint alors que son volet est ouvert : le volet se
+ * replie, il n'aurait plus rien a montrer. */
+static void
+replier_si_ouverte (Panel *p, const char *page)
+{
+    if (p->pile == NULL)
+        return;
+    if (g_strcmp0 (gtk_stack_get_visible_child_name (p->pile), page) == 0)
+        gtk_stack_set_visible_child_name (p->pile, "vide");
 }
 
 /* Ce qui tourne ne tourne QUE sur la page visible : balayage Wi-Fi a
@@ -799,12 +839,13 @@ panel_new (gboolean apercu)
 
     /* --- bascules, cote a cote --- */
     GtkWidget *tiles = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_set_homogeneous (GTK_BOX (tiles), TRUE);
     gtk_box_append (GTK_BOX (tiles),
-                    tile_build (&p->wifi, "Wi-Fi",
+                    tile_build (&p->wifi, p, "Wi-Fi", "wifi",
                                 "network-wireless-signal-excellent-symbolic",
                                 "network-wireless-offline-symbolic"));
     gtk_box_append (GTK_BOX (tiles),
-                    tile_build (&p->bluetooth, "Bluetooth",
+                    tile_build (&p->bluetooth, p, "Bluetooth", "bluetooth",
                                 "bluetooth-active-symbolic",
                                 "bluetooth-disabled-symbolic"));
     gtk_box_append (GTK_BOX (box), tiles);
@@ -918,9 +959,9 @@ panel_new (gboolean apercu)
     gtk_widget_set_valign (box, GTK_ALIGN_START);
     gtk_widget_set_valign (p->reveleur, GTK_ALIGN_START);
 
-    g_signal_connect (p->wifi.chevron, "clicked",
+    g_signal_connect (p->wifi.button, "clicked",
                       G_CALLBACK (on_ouvrir_page), p);
-    g_signal_connect (p->bluetooth.chevron, "clicked",
+    g_signal_connect (p->bluetooth.button, "clicked",
                       G_CALLBACK (on_ouvrir_page), p);
     g_signal_connect (pile, "notify::visible-child-name",
                       G_CALLBACK (on_page_changee), p);

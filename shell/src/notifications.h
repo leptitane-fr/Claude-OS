@@ -59,12 +59,36 @@ void notifs_suivre_console (Notifs *n, GtkWidget *console);
  *
  * Un popover qui se cache tout seul prend une saisie du pointeur, et deux
  * saisies ne coexistent pas : la Console se refermerait en ouvrant le centre,
- * et l'inverse aussi. Le centre reste donc sans saisie, et c'est la fenetre
- * de la barre d'etat qui, le temps que le centre soit ouvert, s'etend a tout
- * l'ecran pour recueillir le clic exterieur. Elle est transparente et ne
- * dessine rien : seule sa zone d'entree change.
+ * et l'inverse aussi. Le centre reste donc sans saisie, et une surface
+ * plein ecran, presque transparente, recueille le clic exterieur le temps
+ * qu'il est ouvert.
  *
- * C'est la technique des environnements de bureau pour leurs panneaux, et
- * elle a l'avantage de ne rien retirer a l'empilement : la Console garde sa
- * propre saisie, les deux surfaces restent ouvertes ensemble. */
+ * `fenetre` est celle de la barre d'etat : la nappe laisse son coin dehors,
+ * pour que la pilule et la cloche restent cliquables a travers elle. La
+ * barre elle-meme n'est JAMAIS etiree -- voir notifications.c, « La nappe »,
+ * pour ce que cela a coute. */
 void notifs_nappe (Notifs *n, GtkWidget *fenetre);
+
+/* LA BARRE PEUT ETRE HORS DE L'ECRAN.
+ *
+ * Depuis le 11 septembre 2026, la barre sort de l'ecran des qu'on travaille
+ * dans une application. Or la banniere, le centre et la Console sont
+ * accroches a elle : barre partie, une notification arriverait sans que
+ * rien ne s'affiche.
+ *
+ * La barre s'inscrit donc ici. Le rappel est appele chaque fois que le
+ * centre a besoin d'elle ou n'en a plus besoin -- banniere a montrer,
+ * banniere effacee, centre ouvert ou ferme --, et rend TRUE si elle est deja
+ * a sa place. Sinon la banniere attend : la barre remonte, puis appelle
+ * notifs_barre_en_place(). Une banniere accrochee a une barre encore en
+ * mouvement serait placee une fois pour toutes la ou la barre se trouvait. */
+typedef gboolean (*NotifsBarreFunc) (gpointer user_data);
+void notifs_suivre_barre (Notifs *n, NotifsBarreFunc f, gpointer user_data);
+void notifs_barre_en_place (Notifs *n);
+
+/* Le centre retient-il la barre a l'ecran : banniere affichee ou en
+ * attente, ou centre ouvert ? */
+gboolean notifs_occupe (Notifs *n);
+
+/* Ferme le centre s'il est ouvert. La banniere, elle, va a son terme. */
+void notifs_fermer_centre (Notifs *n);

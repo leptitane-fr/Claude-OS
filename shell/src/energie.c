@@ -161,6 +161,19 @@ verrouiller_ecran (void)
     g_message ("energie : verrou d'ecran lance");
 }
 
+/* A la demande, depuis la Console. Le MEME lanceur que l'etage de veille,
+ * pour la meme garde : un second verrou pendant que le premier tient
+ * ferait echouer le protocole (ext-session-lock n'en admet qu'un). */
+void
+shell_energie_verrouiller (void)
+{
+    if (E.verrou != 0) {
+        g_message ("energie : verrou deja en place, rien a faire");
+        return;
+    }
+    verrouiller_ecran ();
+}
+
 static void
 suspendre_la_machine (void)
 {

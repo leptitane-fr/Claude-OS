@@ -12,6 +12,7 @@
 #include <gio/gio.h>
 #include <glib/gstdio.h>   /* g_access */
 #include <fcntl.h>
+#include <signal.h>        /* kill : la deconnexion */
 #include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -608,14 +609,30 @@ console_lumiere_new (gboolean apercu)
 }
 
 /* =========================================================================
- *  ALIMENTATION
+ *  ALIMENTATION ET SESSION
+ *
+ * Cinq boutons, icones seules depuis le 11 septembre 2026 : les libelles
+ * « Eteindre », « Redemarrer », « Veille » ont ete retires a la demande de
+ * l'utilisateur, les icones suffisant. La place gagnee accueille les deux
+ * gestes qui manquaient : fermer la session, et verrouiller l'ecran sans la
+ * fermer. Le nom de chaque bouton reste dans son infobulle -- c'est aussi
+ * lui que lit le lecteur d'ecran.
  * ========================================================================= */
+
+typedef enum {
+    ACTION_LOGIND,          /* PowerOff, Reboot, Suspend sur le Manager      */
+    ACTION_DECONNEXION,     /* ferme la session : labwc s'arrete             */
+    ACTION_VERROU,          /* l'ecran de verrouillage, session intacte      */
+} ActionType;
 
 typedef struct {
     GtkWidget  *bouton;
-    GtkWidget  *etiquette;
-    const char *libelle;        /* « Éteindre »                              */
-    const char *methode;        /* « PowerOff »                              */
+    GtkWidget  *icone;
+    const char *libelle;        /* « Éteindre » : infobulle et lecteur d'ecran */
+    const char *icone_nom;
+    const char *methode;        /* « PowerOff » — pour ACTION_LOGIND           */
+    ActionType  type;
+    gboolean    confirmer;      /* deux temps, ou tout de suite ?              */
     GtkWidget  *popover;
     gboolean    arme;
     guint       desarmement;
@@ -630,7 +647,8 @@ action_desarmer (Action *a)
         g_source_remove (a->desarmement);
         a->desarmement = 0;
     }
-    gtk_label_set_text (GTK_LABEL (a->etiquette), a->libelle);
+    gtk_image_set_from_icon_name (GTK_IMAGE (a->icone), a->icone_nom);
+    gtk_widget_set_tooltip_text (a->bouton, a->libelle);
     gtk_widget_remove_css_class (a->bouton, "arme");
 }
 
@@ -643,6 +661,61 @@ on_desarmer (gpointer data)
     return G_SOURCE_REMOVE;
 }
 
+/* Les appels a logind lisent leur reponse. Ils partaient avec un rappel
+ * NULL, et un refus -- de polkit, d'un inhibiteur -- se perdait sans un
+ * mot : on cliquait « Eteindre » deux fois, et il ne se passait rien. */
+static void
+on_logind_action (GObject *src, GAsyncResult *res, gpointer data)
+{
+    const char *quoi = data;
+    g_autoptr(GError) err = NULL;
+    g_autoptr(GVariant) r =
+        g_dbus_connection_call_finish (G_DBUS_CONNECTION (src), res, &err);
+    if (r == NULL)
+        g_message ("alimentation : « %s » refuse par logind — %s", quoi, err->message);
+}
+
+/* FERMER LA SESSION, C'EST ARRETER LE COMPOSITEUR.
+ *
+ * C'est ce que fait « labwc --exit » : un SIGTERM au processus que designe
+ * LABWC_PID, variable que labwc pose dans l'environnement de tout ce qu'il
+ * lance -- la barre en fait partie, par l'autostart. labwc s'arrete
+ * proprement, claude-os-session consigne son code de retour, greetd rend
+ * l'ecran de connexion.
+ *
+ * On verifie que ce numero designe bien labwc avant de tirer : une variable
+ * heritee d'une session precedente designerait n'importe qui.
+ *
+ * Sans LABWC_PID -- barre lancee a la main --, repli sur logind, qui termine
+ * la session de l'appelant. */
+static void
+fermer_la_session (GDBusConnection *bus)
+{
+    const char *texte = g_getenv ("LABWC_PID");
+    int pid = texte ? atoi (texte) : 0;
+
+    if (pid > 1) {
+        g_autofree char *chemin = g_strdup_printf ("/proc/%d/comm", pid);
+        g_autofree char *nom = NULL;
+        if (g_file_get_contents (chemin, &nom, NULL, NULL)
+            && g_str_has_prefix (g_strstrip (nom), "labwc")) {
+            if (kill (pid, SIGTERM) == 0)
+                return;
+            g_message ("deconnexion : SIGTERM a labwc (%d) refuse — %s",
+                       pid, g_strerror (errno));
+        } else {
+            g_message ("deconnexion : LABWC_PID=%s ne designe pas labwc", texte);
+        }
+    }
+
+    g_message ("deconnexion : repli sur logind (Session.Terminate)");
+    g_dbus_connection_call (bus, "org.freedesktop.login1",
+                            "/org/freedesktop/login1/session/self",
+                            "org.freedesktop.login1.Session", "Terminate",
+                            NULL, NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL,
+                            on_logind_action, (gpointer) "Terminate");
+}
+
 static void
 on_action (GtkButton *b, gpointer data)
 {
@@ -651,13 +724,20 @@ on_action (GtkButton *b, gpointer data)
 
     /* PREMIER CLIC : ON ARME, ON N'AGIT PAS.
      *
-     * Ces trois boutons sont a deux centimetres du reglage du volume, dans
-     * un panneau qu'on ouvre plusieurs fois par jour. Un clic malheureux ne
-     * doit pas fermer une session de travail. Le second clic, lui, agit
-     * immediatement — pas de fenetre modale a chasser. */
-    if (!a->arme) {
+     * Ces boutons sont a deux centimetres du reglage du volume, dans un
+     * panneau qu'on ouvre plusieurs fois par jour. Un clic malheureux ne doit
+     * pas fermer une session de travail. Arme, le bouton passe au rouge et
+     * son icone devient une coche : « encore une fois pour confirmer », sans
+     * texte -- il n'y a plus de libelle a remplacer par « Confirmer ? ». Le
+     * second clic agit immediatement, pas de fenetre modale a chasser.
+     *
+     * Verrouiller ne demande rien : c'est reversible par definition. */
+    if (a->confirmer && !a->arme) {
         a->arme = TRUE;
-        gtk_label_set_text (GTK_LABEL (a->etiquette), "Confirmer ?");
+        gtk_image_set_from_icon_name (GTK_IMAGE (a->icone), "object-select-symbolic");
+        g_autofree char *bulle = g_strdup_printf ("%s : toucher à nouveau pour confirmer",
+                                                  a->libelle);
+        gtk_widget_set_tooltip_text (a->bouton, bulle);
         gtk_widget_add_css_class (a->bouton, "arme");
         a->desarmement = g_timeout_add (CONFIRMATION_MS, on_desarmer, a);
         return;
@@ -668,9 +748,15 @@ on_action (GtkButton *b, gpointer data)
         return;
 
     /* La Console est une surface layer-shell posee par-dessus tout : la
-     * laisser ouverte pendant l'extinction fige l'ecran sur le panneau. */
+     * laisser ouverte pendant l'extinction fige l'ecran sur le panneau, et
+     * elle passerait devant l'ecran de verrouillage le temps qu'il monte. */
     if (a->popover != NULL)
         gtk_popover_popdown (GTK_POPOVER (a->popover));
+
+    if (a->type == ACTION_VERROU) {
+        shell_energie_verrouiller ();
+        return;
+    }
 
     g_autoptr(GError) err = NULL;
     g_autoptr(GDBusConnection) bus = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, &err);
@@ -678,6 +764,12 @@ on_action (GtkButton *b, gpointer data)
         g_warning ("bus systeme injoignable : %s", err->message);
         return;
     }
+
+    if (a->type == ACTION_DECONNEXION) {
+        fermer_la_session (bus);
+        return;
+    }
+
     /* « false » : ne pas demander de politesse aux applications. logind
      * s'occupe d'inhiber si un programme l'a demande. */
     g_dbus_connection_call (bus,
@@ -686,33 +778,35 @@ on_action (GtkButton *b, gpointer data)
                             "org.freedesktop.login1.Manager",
                             a->methode,
                             g_variant_new ("(b)", FALSE),
-                            NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
+                            NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL,
+                            on_logind_action, (gpointer) a->methode);
 }
 
 static GtkWidget *
 action_new (Action *a, const char *libelle, const char *icone_nom,
-            const char *methode, GtkWidget *popover, gboolean apercu)
+            ActionType type, const char *methode, gboolean confirmer,
+            GtkWidget *popover, gboolean apercu)
 {
-    a->libelle = libelle;
-    a->methode = methode;
-    a->popover = popover;
-    a->apercu  = apercu;
+    a->libelle   = libelle;
+    a->icone_nom = icone_nom;
+    a->type      = type;
+    a->methode   = methode;
+    a->confirmer = confirmer;
+    a->popover   = popover;
+    a->apercu    = apercu;
 
-    GtkWidget *icone = gtk_image_new_from_icon_name (icone_nom);
-    gtk_image_set_pixel_size (GTK_IMAGE (icone), 16);
-
-    a->etiquette = gtk_label_new (libelle);
-    gtk_widget_add_css_class (a->etiquette, "qs-alim-nom");
-
-    GtkWidget *contenu = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 7);
-    gtk_widget_set_halign (contenu, GTK_ALIGN_CENTER);
-    gtk_box_append (GTK_BOX (contenu), icone);
-    gtk_box_append (GTK_BOX (contenu), a->etiquette);
+    a->icone = gtk_image_new_from_icon_name (icone_nom);
+    gtk_image_set_pixel_size (GTK_IMAGE (a->icone), 18);
 
     a->bouton = gtk_button_new ();
-    gtk_button_set_child (GTK_BUTTON (a->bouton), contenu);
+    gtk_button_set_child (GTK_BUTTON (a->bouton), a->icone);
     gtk_widget_add_css_class (a->bouton, "qs-alim");
+    gtk_widget_add_css_class (a->bouton, "qs-alim-icone");
     gtk_widget_set_hexpand (a->bouton, TRUE);
+    gtk_widget_set_tooltip_text (a->bouton, libelle);
+    /* Le nom accessible, puisqu'il n'y a plus de texte visible. */
+    gtk_accessible_update_property (GTK_ACCESSIBLE (a->bouton),
+                                    GTK_ACCESSIBLE_PROPERTY_LABEL, libelle, -1);
     g_signal_connect (a->bouton, "clicked", G_CALLBACK (on_action), a);
     return a->bouton;
 }
@@ -816,18 +910,6 @@ energie_poser (GtkToggleButton *b, gpointer data)
         g_message ("energie : shell.conf non ecrit — %s", err->message);
 }
 
-static void
-energie_ouvrir_reglages (GtkButton *b, gpointer data)
-{
-    (void) b; (void) data;
-    /* Directement sur la bonne section : proposer un reglage puis obliger a
-     * le chercher dans une liste est une facon sure de le rendre
-     * introuvable. */
-    g_autoptr(GError) err = NULL;
-    if (!g_spawn_command_line_async ("claude-os-reglages --volet=energie", &err))
-        g_message ("energie : reglages indisponibles — %s", err->message);
-}
-
 void
 console_energie_relire (GtkWidget *rangee)
 {
@@ -859,30 +941,35 @@ console_energie_new (gboolean apercu)
     Energie *en = g_new0 (Energie, 1);
     en->apercu = apercu;
 
-    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 8);
+    /* PLUS D'EN-TETE. Le titre « Veille de l'écran » et sa roue crantee ont
+     * ete retires le 11 septembre 2026 : la roue ouvrait les Reglages, que
+     * le bouton « Réglages » juste au-dessus ouvre deja. Deux portes vers la
+     * meme piece, a trois centimetres l'une de l'autre. Les icones des modes
+     * disent desormais ce que la rangee regle. */
+    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class (boite, "qs-rangee");
-
-    GtkWidget *entete = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
-    GtkWidget *titre = gtk_label_new ("Veille de l'écran");
-    gtk_widget_add_css_class (titre, "qs-alim-nom");
-    gtk_widget_set_halign (titre, GTK_ALIGN_START);
-    gtk_widget_set_hexpand (titre, TRUE);
-    gtk_box_append (GTK_BOX (entete), titre);
-
-    GtkWidget *regler = gtk_button_new_from_icon_name ("emblem-system-symbolic");
-    gtk_widget_add_css_class (regler, "qs-reglages");
-    gtk_widget_set_tooltip_text (regler, "Régler les durées");
-    g_signal_connect (regler, "clicked",
-                      G_CALLBACK (energie_ouvrir_reglages), NULL);
-    gtk_box_append (GTK_BOX (entete), regler);
-    gtk_box_append (GTK_BOX (boite), entete);
 
     GtkWidget *rangee = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
     gtk_box_set_homogeneous (GTK_BOX (rangee), TRUE);
 
     const ShellModeEnergie *modes = shell_energie_modes ();
     for (int i = 0; modes[i].id != NULL && i < (int) G_N_ELEMENTS (en->btn); i++) {
-        en->btn[i] = gtk_toggle_button_new_with_label (modes[i].nom);
+        /* L'icone au-dessus du nom : trois boutons cote a cote dans la
+         * largeur de la Console, et « Automatique » ne laisserait pas la
+         * place a une icone a cote de lui. Deux lignes font aussi une cible
+         * plus haute pour le doigt. */
+        g_autoptr(GIcon) gicone = shell_energie_mode_icone (&modes[i]);
+        GtkWidget *icone = gtk_image_new_from_gicon (gicone);
+        gtk_image_set_pixel_size (GTK_IMAGE (icone), 20);
+        GtkWidget *nom = gtk_label_new (modes[i].nom);
+        gtk_widget_add_css_class (nom, "qs-alim-nom");
+        GtkWidget *contenu = gtk_box_new (GTK_ORIENTATION_VERTICAL, 3);
+        gtk_widget_set_halign (contenu, GTK_ALIGN_CENTER);
+        gtk_box_append (GTK_BOX (contenu), icone);
+        gtk_box_append (GTK_BOX (contenu), nom);
+
+        en->btn[i] = gtk_toggle_button_new ();
+        gtk_button_set_child (GTK_BUTTON (en->btn[i]), contenu);
         /* « qs-alim » donne la forme, « qs-mode » l'etat coche. Deux classes
          * plutot qu'une : les boutons de la rangee Alimentation partagent la
          * forme mais sont des ACTIONS, jamais cochees. Styler leur classe
@@ -907,23 +994,32 @@ console_energie_new (gboolean apercu)
 GtkWidget *
 console_alimentation_new (GtkWidget *popover, gboolean apercu)
 {
-    /* Les trois etats vivent aussi longtemps que la rangee ; ils sont
-     * liberes avec elle par g_object_set_data_full. */
-    Action *actions = g_new0 (Action, 3);
+    /* Les etats vivent aussi longtemps que la rangee ; ils sont liberes
+     * avec elle par g_object_set_data_full. */
+    Action *actions = g_new0 (Action, 5);
 
-    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_add_css_class (boite, "qs-alim-rangee");
     gtk_box_set_homogeneous (GTK_BOX (boite), TRUE);
 
+    /* DU PLUS BENIN AU PLUS DEFINITIF, de gauche a droite. Eteindre au bout
+     * de la rangee, la ou le pouce n'arrive pas par hasard ; Verrouiller en
+     * premier, le seul qui ne demande pas de confirmation. */
     gtk_box_append (GTK_BOX (boite),
-        action_new (&actions[0], "Éteindre", "system-shutdown-symbolic",
-                    "PowerOff", popover, apercu));
+        action_new (&actions[0], "Verrouiller", "system-lock-screen-symbolic",
+                    ACTION_VERROU, NULL, FALSE, popover, apercu));
     gtk_box_append (GTK_BOX (boite),
-        action_new (&actions[1], "Redémarrer", "system-reboot-symbolic",
-                    "Reboot", popover, apercu));
+        action_new (&actions[1], "Fermer la session", "system-log-out-symbolic",
+                    ACTION_DECONNEXION, NULL, TRUE, popover, apercu));
     gtk_box_append (GTK_BOX (boite),
         action_new (&actions[2], "Veille", "weather-clear-night-symbolic",
-                    "Suspend", popover, apercu));
+                    ACTION_LOGIND, "Suspend", TRUE, popover, apercu));
+    gtk_box_append (GTK_BOX (boite),
+        action_new (&actions[3], "Redémarrer", "system-reboot-symbolic",
+                    ACTION_LOGIND, "Reboot", TRUE, popover, apercu));
+    gtk_box_append (GTK_BOX (boite),
+        action_new (&actions[4], "Éteindre", "system-shutdown-symbolic",
+                    ACTION_LOGIND, "PowerOff", TRUE, popover, apercu));
 
     g_object_set_data_full (G_OBJECT (boite), "actions", actions, g_free);
     return boite;

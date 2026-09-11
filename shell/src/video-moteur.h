@@ -94,6 +94,13 @@ gint64       video_moteur_images_vues(VideoMoteur *m);
  * mesure objective de ce que l'oreille appelle « le son est decale ». Une
  * moyenne sous 10 ms et un maximum sous 40 ms -- une image a 25 im/s -- sont
  * ce qu'on vise ; au-dela, cela se voit sur des levres qui parlent. */
+/* Combien de fois l'affichage a demande une image sans en trouver. C'est LE
+ * symptome d'une lecture saccadee ; video_moteur_temps() dit ensuite si la
+ * faute en revient au fichier ou au decodeur. */
+gint64       video_moteur_famines(VideoMoteur *m);
+void         video_moteur_temps(VideoMoteur *m, double *lecture_ms,
+                                double *lecture_max_ms, double *decodage_ms);
+
 double       video_moteur_ecart_moyen(VideoMoteur *m);
 double       video_moteur_ecart_max(VideoMoteur *m);
 

@@ -15,14 +15,20 @@
  *    La batterie n'a pas besoin d'etre plus fraiche que cela.
  *  - le reseau ne consulte rien : il reagit aux signaux D-Bus de
  *    NetworkManager, donc uniquement quand l'etat change reellement.
- *  - aucune animation, aucun rafraichissement au repos.
+ *  - aucune animation au repos. La seule est la sortie par le bas, qui ne
+ *    dure que le temps du mouvement (glissiere.c).
+ *
+ * A L'ECRAN OU NON, CE N'EST PAS LA BARRE QUI EN DECIDE : c'est le dock, qui
+ * suit les fenetres (voir visibility.h). La barre recoit « afficher » ou
+ * « masquer » sur le bus, et n'y deroge que pour ce qu'elle porte elle-meme :
+ * une banniere a montrer, la Console ou le centre ouverts.
  * ========================================================================= */
 
 #include <gtk/gtk.h>
 #include <gtk4-layer-shell.h>
 
 #include "config.h"
-#include "visibility.h"
+#include "glissiere.h"
 #include "notifications.h"
 #include "energie.h"
 #include "preavis.h"
@@ -36,8 +42,15 @@
 typedef struct {
     Notifs    *notifs;
     gboolean   ouvrir_centre;
+    ShellGlissiere *glissiere;
+    GtkWidget *console;     /* le popover de la pilule                     */
+    gboolean   voulue;      /* ce que le dock demande                      */
     GtkWidget *pilule;      /* le bouton de la barre : donne sa hauteur   */
+    int        hauteur_calee;  /* hauteur deja donnee a la cloche          */
+    guint      calage;         /* recalage differe en attente              */
     GtkWidget *clock;
+    GtkWidget *date;        /* au-dessus de l'heure                        */
+    GtkWidget *mode_icon;   /* le mode de veille en vigueur                */
     GtkWidget *bat_icon;
     GtkWidget *bat_level;
     GtkWidget *net_icon;
@@ -85,12 +98,36 @@ battery_update (Status *st)
 /* -------------------------------------------------------------------------
  * Horloge — minuterie alignee sur la minute
  * ------------------------------------------------------------------------- */
+/* LA DATE AU-DESSUS DE L'HEURE, demandee le 11 septembre 2026 : elle se
+ * lit sans ouvrir quoi que ce soit, et ses deux lignes donnent a la pilule
+ * la hauteur d'une cible qu'on touche au doigt sans viser.
+ *
+ * « ven. 11 sept. » : la forme abregee de la locale. « %-d » plutot que
+ * « %e », qui pose une espace de chiffre devant les jours a un chiffre. Le
+ * meme reveil que l'heure la met a jour -- minuit est une minute comme une
+ * autre. */
 static void
 clock_update (Status *st)
 {
     g_autoptr(GDateTime) now = g_date_time_new_now_local ();
     g_autofree char *text = g_date_time_format (now, "%H:%M");
+    g_autofree char *jour = g_date_time_format (now, "%a %-d %b");
     gtk_label_set_text (GTK_LABEL (st->clock), text);
+    gtk_label_set_text (GTK_LABEL (st->date), jour);
+}
+
+/* Le mode de veille en vigueur, lu dans la configuration. Appele au
+ * demarrage et a chaque relecture de shell.conf -- c'est la que la Console
+ * ecrit le mode choisi : l'icone suit sans qu'on ait rien a lui dire. */
+static void
+mode_update (Status *st, const ShellConfig *cfg)
+{
+    const ShellModeEnergie *m = shell_energie_mode_actif (cfg);
+    g_autoptr(GIcon) ic = shell_energie_mode_icone (m);
+    gtk_image_set_from_gicon (GTK_IMAGE (st->mode_icon), ic);
+    g_autofree char *bulle = g_strdup_printf ("Veille : mode %s", m->nom);
+    gtk_widget_set_tooltip_text (st->mode_icon, bulle);
+    gtk_widget_set_visible (st->mode_icon, cfg->energie_active);
 }
 
 static gboolean on_minute (gpointer data);
@@ -201,34 +238,147 @@ icon (const char *name, int size)
 }
 
 /* -------------------------------------------------------------------------
- * Bascule manuelle de la visibilite
+ * A l'ecran ou non
  *
- * La bascule est exposee comme action GTK : chaque composant la publie sur
- * le bus de session sous son identifiant d'application, et le raccourci
- * clavier du compositeur l'appelle par « gapplication action ». Aucun
- * demon, aucune socket a nous, aucune chasse au numero de processus.
+ * Le dock decide ; la barre suit, sauf quand elle porte quelque chose :
+ *
+ *   - une banniere a montrer. Barre partie, une notification arriverait
+ *     sans rien afficher : la barre remonte le temps de la banniere, puis
+ *     repart. La banniere n'est posee qu'une fois la barre immobile (voir
+ *     notifications.h).
+ *   - la Console ou le centre ouverts. On les a ouverts pour s'en servir ;
+ *     la barre ne part pas de sous eux. Ils se ferment au clic a cote, et
+ *     la barre repart alors d'elle-meme.
+ *
+ * Ce dernier point ne vaut pas contre un ordre du dock : « masquer » arrive
+ * quand une application passe au premier plan, et ferme la Console et le
+ * centre avec lui. La banniere, elle, va toujours a son terme.
  * ------------------------------------------------------------------------- */
-static void
-on_visibilite (gboolean visible, gpointer window)
+static gboolean
+barre_retenue (Status *st)
 {
-    /* Demasquer et masquer la surface, plutot que l'animer : deplacer une
-     * surface layer-shell demanderait un reveil par image, pour un
-     * mouvement de quelques dixiemes de seconde. Sur une machine dont
-     * l'autonomie est la raison d'etre, l'apparition instantanee est le bon
-     * compromis. */
-    gtk_widget_set_visible (GTK_WIDGET (window), visible);
+    return st->voulue
+        || notifs_occupe (st->notifs)
+        || (st->console != NULL && gtk_widget_get_visible (st->console));
 }
 
 static void
-on_action_basculer (GSimpleAction *action, GVariant *param, gpointer data)
+barre_evaluer (Status *st)
 {
-    (void) action; (void) param; (void) data;
-    shell_visibility_toggle ();
+    if (barre_retenue (st))
+        shell_glissiere_montrer (st->glissiere);
+    else
+        shell_glissiere_cacher (st->glissiere);
+}
+
+/* Le centre de notifications a besoin de la barre, ou n'en a plus besoin. */
+static gboolean
+on_notifs_barre (gpointer data)
+{
+    Status *st = data;
+    barre_evaluer (st);
+    return shell_glissiere_en_place (st->glissiere);
+}
+
+/* Fin d'un mouvement. Remontee : une banniere attendait peut-etre. */
+static void
+on_glissiere_fin (gboolean visible, gpointer data)
+{
+    Status *st = data;
+    if (visible)
+        notifs_barre_en_place (st->notifs);
+}
+
+/* La Console s'ouvre ou se ferme. Fermee par un clic a cote alors que le
+ * dock ne veut plus de la barre : c'est le moment de partir. */
+static void
+on_console_visible (GObject *o, GParamSpec *p, gpointer data)
+{
+    (void) o; (void) p;
+    barre_evaluer (data);
+}
+
+static void
+barre_vouloir (Status *st, gboolean voulue)
+{
+    st->voulue = voulue;
+    if (!voulue) {
+        gtk_menu_button_popdown (GTK_MENU_BUTTON (st->pilule));
+        notifs_fermer_centre (st->notifs);
+    }
+    barre_evaluer (st);
+}
+
+/* Les actions publiees sous os.claude.shell.status.
+ *
+ *   afficher, masquer   les ordres du dock ;
+ *   basculer            la touche Loupe quand le dock ne repond pas --
+ *                       claude-os-shell-basculer se rabat alors sur la
+ *                       barre, qui bascule seule plutot que de rester
+ *                       coincee dehors. */
+static void
+on_action_afficher (GSimpleAction *a, GVariant *p, gpointer data)
+{
+    (void) a; (void) p;
+    barre_vouloir (data, TRUE);
+}
+
+static void
+on_action_masquer (GSimpleAction *a, GVariant *p, gpointer data)
+{
+    (void) a; (void) p;
+    barre_vouloir (data, FALSE);
+}
+
+static void
+on_action_basculer (GSimpleAction *a, GVariant *p, gpointer data)
+{
+    Status *st = data;
+    (void) a; (void) p;
+    barre_vouloir (st, !st->voulue);
 }
 
 static const GActionEntry actions[] = {
+    { "afficher", on_action_afficher, NULL, NULL, NULL, { 0 } },
+    { "masquer",  on_action_masquer,  NULL, NULL, NULL, { 0 } },
     { "basculer", on_action_basculer, NULL, NULL, NULL, { 0 } },
 };
+
+/* Au demarrage, demander au dock ou il en est.
+ *
+ * A l'ouverture de session les deux s'accordent d'eux-memes : il n'y a pas
+ * encore de fenetre, le dock est affiche, la barre aussi. Mais une barre
+ * relancee seule pendant qu'on travaille s'afficherait par-dessus
+ * l'application, et y resterait jusqu'au prochain changement de fenetre.
+ * Le dock repond en redisant son dernier ordre.
+ *
+ * Qu'il ne reponde pas n'a rien d'anormal a l'ouverture de session -- les
+ * deux demarrent ensemble --, et la barre reste alors affichee, ce qui est
+ * juste. Le journal le dit quand meme. */
+static void
+on_dock_repond (GObject *src, GAsyncResult *res, gpointer data)
+{
+    g_autoptr(GError) err = NULL;
+    g_autoptr(GVariant) r =
+        g_dbus_connection_call_finish (G_DBUS_CONNECTION (src), res, &err);
+    (void) data;
+    if (r == NULL)
+        g_message ("dock injoignable au demarrage, la barre reste affichee : %s",
+                   err->message);
+}
+
+static void
+demander_au_dock (GApplication *app)
+{
+    GDBusConnection *bus = g_application_get_dbus_connection (app);
+    if (bus == NULL)
+        return;
+    g_dbus_connection_call (bus, "os.claude.shell.dock", "/os/claude/shell/dock",
+                            "org.gtk.Actions", "Activate",
+                            g_variant_new ("(sava{sv})", "annoncer", NULL, NULL),
+                            NULL, G_DBUS_CALL_FLAGS_NO_AUTO_START, 2000, NULL,
+                            on_dock_repond, NULL);
+}
 
 typedef struct {
     ShellConfig *cfg;   /* police, theme d'icones, clair ou sombre           */
@@ -247,10 +397,11 @@ open_panel_once (gpointer button)
 }
 
 static void
-on_config_reloaded (ShellConfig *cfg, gpointer window)
+on_config_reloaded (ShellConfig *cfg, gpointer data)
 {
-    (void) window;
+    Status *st = data;
     shell_styles_load (cfg->theme);
+    mode_update (st, cfg);      /* la Console vient peut-etre d'en changer */
     shell_config_apply (cfg);
     /* Avant de liberer : le panneau de reglages ecrit shell.conf, et les
      * delais de veille doivent suivre sans qu'on relance quoi que ce soit. */
@@ -279,14 +430,53 @@ ouvrir_centre_une_fois (gpointer data)
     return G_SOURCE_REMOVE;
 }
 
+/* LA HAUTEUR PEINTE, bordure comprise : c'est elle que l'oeil compare.
+ * gtk_widget_get_height() rend la boite de contenu, sans la bordure de la
+ * pilule -- deux pixels de moins, mesures au banc (42 contre 44). */
+static int
+hauteur_peinte (GtkWidget *w)
+{
+    graphene_rect_t r;
+    if (!gtk_widget_compute_bounds (w, w, &r))
+        return 0;
+    return (int) (r.size.height + 0.5);
+}
+
 static gboolean
 cloche_caler (gpointer data)
 {
     Status *st = data;
-    int h = gtk_widget_get_height (st->pilule);
-    if (h > 0)
+    st->calage = 0;
+    int h = hauteur_peinte (st->pilule);
+    if (h > 0 && h != st->hauteur_calee) {
+        st->hauteur_calee = h;
         gtk_widget_set_size_request (notifs_cloche (st->notifs), h, h);
+    }
     return G_SOURCE_REMOVE;
+}
+
+/* A CHAQUE MISE EN PAGE, ET PAS UNE FOIS AU DEMARRAGE.
+ *
+ * ET SUR UNE CLOCHE SANS MARGE. Sous GTK 4, la taille demandee englobe les
+ * marges CSS : la cloche demandait 42 x 42, ses marges (10 a droite, 12 en
+ * bas) et sa bordure etaient prises dessus, et elle se peignait en 30 x 28
+ * -- mesure au banc. Les marges sont donc portees par un socle
+ * (« .cloche-socle »), et la cloche, sans marge, prend exactement ce qu'on
+ * lui demande.
+ *
+ * La mesure unique, faite a la premiere image, tombait avant que la date ne
+ * soit ecrite : la pilule passait ensuite de 30 a 42 px, et la cloche
+ * restait a 32 -- vu au banc le 11 septembre 2026, le jour ou la date est
+ * arrivee. La glissiere previent a chaque allocation ; on ne recale que si
+ * la hauteur a change, et en differe : changer une taille demandee pendant
+ * une allocation relancerait la mise en page au milieu d'elle-meme. */
+static void
+on_barre_allouee (int largeur, int hauteur, gpointer data)
+{
+    Status *st = data;
+    (void) largeur; (void) hauteur;
+    if (st->calage == 0 && hauteur_peinte (st->pilule) != st->hauteur_calee)
+        st->calage = g_idle_add (cloche_caler, st);
 }
 
 static void
@@ -304,7 +494,10 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_widget_add_css_class (window, "shell");
 
     gtk_layer_init_for_window (GTK_WINDOW (window));
-    gtk_layer_set_layer (GTK_WINDOW (window), GTK_LAYER_SHELL_LAYER_TOP);
+    /* OVERLAY, comme le dock : en TOP, labwc l'eteindrait sous une fenetre
+     * plein ecran, et la touche Loupe ne la ferait plus paraitre pendant une
+     * video. Voir « A l'ecran ou non » dans dock.c. */
+    gtk_layer_set_layer (GTK_WINDOW (window), GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_anchor (GTK_WINDOW (window), GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
     gtk_layer_set_anchor (GTK_WINDOW (window), GTK_LAYER_SHELL_EDGE_RIGHT,  TRUE);
     gtk_layer_set_namespace (GTK_WINDOW (window), "claude-os-status");
@@ -328,23 +521,39 @@ on_activate (GtkApplication *app, gpointer user_data)
                                  GTK_LAYER_SHELL_KEYBOARD_MODE_ON_DEMAND);
 
     GtkWidget *bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    /* Centree verticalement : la pilule prend la hauteur des deux lignes
+     * date et heure, les icones se posent au milieu. */
+    gtk_widget_set_valign (bar, GTK_ALIGN_CENTER);
 
-    st->net_icon  = icon ("network-offline-symbolic", 16);
-    st->bat_icon  = icon ("battery-level-100-symbolic", 16);
+    /* 18 px et non plus 16 : la pilule a grandi avec la date, des icones
+     * restees a l'ancienne taille y paraissaient perdues. */
+    st->mode_icon = icon ("power-profile-balanced-symbolic", 18);
+    gtk_widget_add_css_class (st->mode_icon, "status-mode");
+    st->net_icon  = icon ("network-offline-symbolic", 18);
+    st->bat_icon  = icon ("battery-level-100-symbolic", 18);
     st->bat_level = gtk_label_new ("--%");
     gtk_widget_add_css_class (st->bat_level, "status-battery-level");
-    st->clock     = gtk_label_new ("--:--");
-    gtk_widget_add_css_class (st->clock, "status-item");
+
+    st->date  = gtk_label_new ("");
+    gtk_widget_add_css_class (st->date, "status-date");
+    st->clock = gtk_label_new ("--:--");
     gtk_widget_add_css_class (st->clock, "status-clock");
+
+    GtkWidget *temps = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class (temps, "status-temps");
+    gtk_widget_set_valign (temps, GTK_ALIGN_CENTER);
+    gtk_box_append (GTK_BOX (temps), st->date);
+    gtk_box_append (GTK_BOX (temps), st->clock);
 
     GtkWidget *sep = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_add_css_class (sep, "status-sep");
 
+    gtk_box_append (GTK_BOX (bar), st->mode_icon);
     gtk_box_append (GTK_BOX (bar), st->net_icon);
     gtk_box_append (GTK_BOX (bar), st->bat_icon);
     gtk_box_append (GTK_BOX (bar), st->bat_level);
     gtk_box_append (GTK_BOX (bar), sep);
-    gtk_box_append (GTK_BOX (bar), st->clock);
+    gtk_box_append (GTK_BOX (bar), temps);
 
     /* Toute la pilule est un bouton : c'est elle qu'on vise, pas une
      * poignee dediee. Le cadre par defaut de GtkMenuButton est retire, la
@@ -380,17 +589,43 @@ on_activate (GtkApplication *app, gpointer user_data)
     GtkWidget *rangee = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_halign (rangee, GTK_ALIGN_END);
     gtk_widget_set_valign (rangee, GTK_ALIGN_END);
-    gtk_box_append (GTK_BOX (rangee), notifs_cloche (st->notifs));
+    GtkWidget *socle = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_add_css_class (socle, "cloche-socle");
+    gtk_widget_set_valign (socle, GTK_ALIGN_END);
+    gtk_box_append (GTK_BOX (socle), notifs_cloche (st->notifs));
+    gtk_box_append (GTK_BOX (rangee), socle);
     gtk_box_append (GTK_BOX (rangee), button);
 
-    gtk_window_set_child (GTK_WINDOW (window), rangee);
+    /* La glissiere entre la fenetre et la rangee : c'est elle qui fait
+     * sortir la barre par le bas, et retire la fenetre une fois en bas. */
+    GtkWidget *glissiere = shell_glissiere_new (rangee);
+    st->glissiere = SHELL_GLISSIERE (glissiere);
+    st->console   = console;
+    st->voulue    = TRUE;        /* ouverture de session : le dock l'est aussi */
+    shell_glissiere_sur_fin (st->glissiere, on_glissiere_fin, st);
+    shell_glissiere_sur_allocation (st->glissiere, on_barre_allouee, st);
+    notifs_suivre_barre (st->notifs, on_notifs_barre, st);
+    g_signal_connect (console, "notify::visible",
+                      G_CALLBACK (on_console_visible), st);
+
+    gtk_window_set_child (GTK_WINDOW (window), glissiere);
+    /* Date, heure et mode AVANT la premiere image : la pilule se pose
+     * directement a sa hauteur, sans grandir sous les yeux une image plus
+     * tard. */
+    clock_update (st);
+    mode_update (st, opt->cfg);
+
     gtk_window_present (GTK_WINDOW (window));
 
     g_action_map_add_action_entries (G_ACTION_MAP (app), actions,
-                                     G_N_ELEMENTS (actions), NULL);
+                                     G_N_ELEMENTS (actions), st);
+    /* La fenetre de la barre se retire quand elle sort de l'ecran : sans
+     * cela, GApplication sortirait de sa boucle avec elle, et les
+     * notifications et la veille de l'ecran s'arreteraient. */
     g_application_hold (G_APPLICATION (app));
-    shell_visibility_init (on_visibilite, window);
-    shell_config_watch (on_config_reloaded, window);
+    if (!opt->apercu)
+        demander_au_dock (G_APPLICATION (app));
+    shell_config_watch (on_config_reloaded, st);
 
     /* Le cadran du preavis prend la largeur de la pilule -- la barre sans
      * sa cloche. C'est ici, et nulle part ailleurs, qu'on sait quel widget
@@ -404,10 +639,6 @@ on_activate (GtkApplication *app, gpointer user_data)
     if (opt->centre)
         g_idle_add (ouvrir_centre_une_fois, st->notifs);
 
-    /* Apres presentation : la pilule n'a d'allocation qu'une fois posee. */
-    g_idle_add (cloche_caler, st);
-
-    clock_update (st);
     battery_update (st);
     network_setup (st);
     schedule_next_minute (st);

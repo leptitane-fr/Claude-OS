@@ -8,6 +8,10 @@
  * Principe d'energie : aucune minuterie, aucune boucle. Le dock ne fait rien
  * tant que l'utilisateur ne le touche pas ; les transitions sont portees par
  * le moteur CSS de GTK et ne s'executent que pendant le survol.
+ *
+ * Le dock sort de l'ecran quand on travaille dans une application, et c'est
+ * lui qui en decide pour la barre d'etat aussi : voir visibility.h pour la
+ * regle, et « A l'ecran ou non » plus bas pour la mecanique.
  * ========================================================================= */
 
 #include <gtk/gtk.h>
@@ -15,7 +19,10 @@
 /* GDesktopAppInfo vit dans gio-unix, pas dans gio tout court. */
 #include <gio/gdesktopappinfo.h>
 
+#include <math.h>
+
 #include "config.h"
+#include "glissiere.h"
 #include "toplevels.h"
 #include "visibility.h"
 
@@ -25,10 +32,16 @@
 
 /* Etat du dock. Un seul par processus : il n'y a qu'un dock. */
 static struct {
-    ShellConfig *cfg;
-    GtkWidget   *box;          /* conteneur des icones                      */
-    GtkWidget   *menu;         /* menu du clic droit, parente a box         */
-    char        *signature;    /* etat des fenetres deja affiche            */
+    ShellConfig    *cfg;
+    GtkApplication *app;
+    GtkWidget      *fenetre;      /* la surface du dock                     */
+    ShellGlissiere *glissiere;    /* ce qui la fait sortir par le bas       */
+    GtkWidget      *box;          /* conteneur des icones                   */
+    GtkWidget      *menu;         /* menu du clic droit, parente a box      */
+    char           *signature;    /* etat des fenetres deja affiche         */
+    gboolean        nappe;        /* fenetre tendue a tout l'ecran          */
+    gboolean        declenche;    /* le glisser en cours a deja rappele     */
+    int             barre_vue;    /* dernier ordre donne a la barre, -1 aucun */
 } D;
 
 /* -------------------------------------------------------------------------
@@ -75,6 +88,10 @@ on_item_clicked (GtkButton *button, gpointer user_data)
     const ShellWindow *win = first_window_of (app_id);
     if (win != NULL) {
         shell_toplevel_activate (win);
+        /* Si c'etait deja la fenetre active, le compositeur ne signale rien
+         * -- rien n'a change pour lui. Le dock rappele resterait alors en
+         * travers : on le congedie nous-memes. */
+        shell_visibility_congedier ();
         return;
     }
 
@@ -167,6 +184,7 @@ on_window_row_clicked (GtkButton *button, gpointer user_data)
 {
     (void) button;
     shell_toplevel_activate (user_data);
+    shell_visibility_congedier ();      /* meme raison que on_item_clicked */
 }
 
 /* Remplit le panneau avec les fenetres de cette application.
@@ -248,6 +266,11 @@ on_hover_enter (GtkEventControllerMotion *c, double x, double y, gpointer data)
     (void) c; (void) x; (void) y;
 
     hover_cancel_close (h);
+
+    /* Le dock est en train de descendre : le pointeur qui le traverse ne
+     * doit pas ouvrir une liste accrochee a une icone qui s'en va. */
+    if (shell_visibility_etat () == SHELL_VIS_CACHE)
+        return;
 
     /* Deja ouvert : ne rien relancer. Sans ce garde-fou, entrer dans le
      * panneau reprogrammait l'ouverture, qui en reconstruisait le contenu
@@ -843,7 +866,7 @@ on_config_reloaded (ShellConfig *cfg, gpointer window)
     shell_config_apply (cfg);
 
     gtk_layer_set_exclusive_zone (GTK_WINDOW (window),
-                                  cfg->reserve_space ? 86 : 0);
+                                  (cfg->reserve_space && !D.nappe) ? 86 : 0);
     dock_rebuild ();
 }
 
@@ -851,6 +874,10 @@ static void
 on_windows_changed (gpointer user_data)
 {
     (void) user_data;
+
+    /* Avant la signature, et a chaque lot : c'est ici que le dock apprend
+     * qu'une application vient de passer au premier plan. */
+    shell_visibility_fenetre_active (shell_toplevels_serie_active ());
 
     g_autofree char *sig = windows_signature ();
     if (g_strcmp0 (sig, D.signature) == 0)
@@ -862,33 +889,401 @@ on_windows_changed (gpointer user_data)
 }
 
 /* -------------------------------------------------------------------------
- * Bascule manuelle de la visibilite
+ * A l'ecran ou non
  *
- * La bascule est exposee comme action GTK : chaque composant la publie sur
- * le bus de session sous son identifiant d'application, et le raccourci
- * clavier du compositeur l'appelle par « gapplication action ». Aucun
- * demon, aucune socket a nous, aucune chasse au numero de processus.
+ * La regle est dans visibility.h. Ici, ce qu'il faut pour l'appliquer :
+ * trois surfaces et un relais.
+ *
+ *   - LA FENETRE DU DOCK, qui glisse (glissiere.c) et qui, rappelee
+ *     par-dessus une application, se tend a tout l'ecran pour recevoir le
+ *     clic « a cote » : la nappe.
+ *   - LA BANDE DU BORD, dix pixels au ras du bas de l'ecran, qui guette le
+ *     doigt.
+ *   - LA BARRE D'ETAT, un autre processus, a qui l'on dit « afficher » ou
+ *     « masquer » sur le bus.
+ *
+ * TOUT EST EN COUCHE OVERLAY, ET C'EST MESURE. labwc 0.8.3 eteint la couche
+ * TOP entiere des qu'une fenetre plein ecran n'a rien au-dessus d'elle
+ * (desktop_update_top_layer_visibility) : constate au banc le 11 septembre
+ * 2026, un dock en TOP disparait sous un « foot --fullscreen ». En TOP, ni
+ * la touche Loupe ni le doigt ne pourraient rappeler le dock pendant une
+ * video. OVERLAY passe au-dessus du plein ecran ; seuls le verrou, le
+ * selecteur de fenetres et les menus du compositeur passent encore devant.
+ *
+ * L'EMPILEMENT. Dans une meme couche, labwc empile dans l'ordre de
+ * creation des surfaces -- et gtk4-layer-shell en recree une a CHAQUE
+ * reapparition d'une fenetre (lu dans la trace Wayland : trois
+ * get_layer_surface « claude-os-dock » pour trois apparitions). Ce qui
+ * reparait passe donc devant. Consequences :
+ *
+ *   - la bande, jamais retiree, reste au fond : le dock et la barre
+ *     passent toujours devant elle ;
+ *   - la barre, prevenue par le bus apres que le dock a reparu, passe en
+ *     general devant lui. Mais pas toujours : deja affichee pour une
+ *     banniere, elle ne reparait pas, et le dock rappele passe devant elle.
+ *     C'est pourquoi la nappe ne reclame pas la bande du bas (nappe_zone).
  * ------------------------------------------------------------------------- */
+
+/* La bande du bord.
+ *
+ * POURQUOI UNE SURFACE. labwc 0.8.3 ne connait aucun geste de bord : un
+ * client ne recoit que les contacts poses sur ses propres surfaces. Pour
+ * voir un doigt qui entre par le bas, il faut donc etre sous ce doigt au
+ * moment ou il touche l'ecran.
+ *
+ * CE QU'ELLE COUTE. Dock cache, elle prend les appuis des dix derniers
+ * pixels de l'ecran -- 1,6 mm sur cette dalle, qui fait 310 mm pour
+ * 1920 px d'apres son EDID. Ils n'atteignent plus l'application dessous.
+ * Plus haute, elle en volerait davantage ; plus basse, un doigt venu du
+ * cadre risquerait de la manquer : le premier contact rapporte par la dalle
+ * n'est pas forcement au dernier pixel. A ajuster a l'usage.
+ *
+ * GLISSER_PX : un trajet court, comme demande -- 5 mm. Le contact reste a
+ * la bande pendant tout le geste, meme hors de ses dix pixels (le
+ * compositeur reserve la suite d'un contact a la surface qui l'a recu) :
+ * c'est ce qui permet de mesurer un trajet qui la quitte aussitot. */
+#define BORD_PX    10
+#define GLISSER_PX 32
+
 static void
-on_visibilite (gboolean visible, gpointer window)
+on_bord_debut (GtkGestureDrag *g, double x, double y, gpointer data)
 {
-    /* Demasquer et masquer la surface, plutot que l'animer : deplacer une
-     * surface layer-shell demanderait un reveil par image, pour un
-     * mouvement de quelques dixiemes de seconde. Sur une machine dont
-     * l'autonomie est la raison d'etre, l'apparition instantanee est le bon
-     * compromis. */
-    gtk_widget_set_visible (GTK_WIDGET (window), visible);
+    (void) g; (void) x; (void) y; (void) data;
+    D.declenche = FALSE;
 }
 
 static void
-on_action_basculer (GSimpleAction *action, GVariant *param, gpointer data)
+on_bord_glisse (GtkGestureDrag *g, double dx, double dy, gpointer data)
 {
-    (void) action; (void) param; (void) data;
-    shell_visibility_toggle ();
+    (void) g; (void) data;
+
+    /* Des le seuil franchi, sans attendre qu'on leve le doigt : le dock
+     * doit monter pendant que le geste se fait, pas apres. Plus vertical
+     * qu'horizontal, pour qu'un doigt qui longe le bord ne le rappelle pas. */
+    if (D.declenche || -dy < GLISSER_PX || -dy < fabs (dx))
+        return;
+    D.declenche = TRUE;
+    shell_visibility_convoquer ();
+}
+
+static GtkWidget *
+bord_creer (GtkApplication *app)
+{
+    GtkWidget *bord = gtk_application_window_new (app);
+
+    /* PRESQUE TRANSPARENTE, ET SURTOUT PAS TOUT A FAIT.
+     *
+     * Une fenetre GTK entierement transparente et vide ne recoit AUCUN
+     * appui : le compositeur ne lui envoie rien, sans une erreur nulle part.
+     * Mesure au banc le 11 septembre 2026 (GTK 4.18.6, labwc 0.8.3), sur
+     * une bande isolee : fond « transparent », pas un evenement ; fond a 1 %,
+     * l'appui et tout le glisser arrivent. La bande a d'abord ete ecrite avec
+     * la classe « shell » des autres surfaces, et le geste ne marchait pas.
+     *
+     * Rien a voir avec la nappe du dock ou celle de la barre : elles portent
+     * un contenu, GTK dessine donc une vraie image, transparente autour.
+     *
+     * 1 % de noir sur dix pixels au ras du cadre ne se voit pas. La regle
+     * est ecrite ici et non dans shell.css : ce n'est pas une couleur, c'est
+     * une condition de fonctionnement, et un « transparent » pose un jour
+     * par souci d'harmonie casserait le geste en silence. */
+    static GtkCssProvider *presque = NULL;
+    if (presque == NULL) {
+        presque = gtk_css_provider_new ();
+        gtk_css_provider_load_from_string (presque,
+            "window.claude-os-bord { background-color: rgba(0, 0, 0, 0.01); }");
+        gtk_style_context_add_provider_for_display (gdk_display_get_default (),
+            GTK_STYLE_PROVIDER (presque), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+    gtk_widget_add_css_class (bord, "claude-os-bord");
+
+    gtk_layer_init_for_window (GTK_WINDOW (bord));
+    gtk_layer_set_layer (GTK_WINDOW (bord), GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_namespace (GTK_WINDOW (bord), "claude-os-bord");
+    gtk_layer_set_anchor (GTK_WINDOW (bord), GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
+    gtk_layer_set_anchor (GTK_WINDOW (bord), GTK_LAYER_SHELL_EDGE_LEFT,   TRUE);
+    gtk_layer_set_anchor (GTK_WINDOW (bord), GTK_LAYER_SHELL_EDGE_RIGHT,  TRUE);
+    /* -1 : au vrai bord de l'ecran, quoi que les autres surfaces reservent,
+     * et sans rien reserver elle-meme. */
+    gtk_layer_set_exclusive_zone (GTK_WINDOW (bord), -1);
+    gtk_layer_set_keyboard_mode (GTK_WINDOW (bord),
+                                 GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+
+    GtkWidget *plage = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_size_request (plage, -1, BORD_PX);
+    gtk_window_set_child (GTK_WINDOW (bord), plage);
+
+    /* Doigt et pointeur : un glisser a la souris depuis le bord marche
+     * aussi, et c'est ce qui permet de l'eprouver au banc, ou il n'y a pas
+     * d'ecran tactile. */
+    GtkGesture *g = gtk_gesture_drag_new ();
+    g_signal_connect (g, "drag-begin",  G_CALLBACK (on_bord_debut),  NULL);
+    g_signal_connect (g, "drag-update", G_CALLBACK (on_bord_glisse), NULL);
+    gtk_widget_add_controller (bord, GTK_EVENT_CONTROLLER (g));
+
+    /* Toujours affichee. Dock visible, elle est dessous et ne gene rien :
+     * la pilule se tient a 12 px du bord, au-dessus de ses 10. L'afficher
+     * et la retirer a chaque mouvement du dock ne gagnerait rien. */
+    gtk_window_present (GTK_WINDOW (bord));
+    return bord;
+}
+
+/* La nappe.
+ *
+ * Rappele par-dessus une application, le dock doit partir au premier clic
+ * a cote. Or un clic sur une autre fenetre ne dit rien au dock : si c'est
+ * la fenetre qui etait deja active, le compositeur n'a meme rien a signaler
+ * -- labwc ne desactive pas une fenetre quand le clavier passe a une surface
+ * layer-shell (focus_change_notify dans seat.c de labwc 0.8.3 : « Prevent
+ * focus switch to non-view surface ... from updating view state »). Cliquer
+ * la Console puis revenir a l'application ne produit donc aucun evenement.
+ *
+ * La fenetre du dock se tend donc a tout l'ecran, transparente, et recoit
+ * le clic. C'est le geste classique du panneau qu'on ferme en cliquant a
+ * cote -- et comme lui, ce clic-la ne va pas plus loin : il renvoie le dock,
+ * il n'atteint pas l'application. Meme mecanique que la nappe du centre de
+ * notifications (notifications.c).
+ *
+ * Tendue a la demande seulement : une surface plein ecran, meme vide, est
+ * composee a chaque image de ce qui bouge dessous. */
+static void
+nappe_tendre (gboolean tendre)
+{
+    if (D.nappe == tendre)
+        return;
+    D.nappe = tendre;
+
+    gtk_layer_set_anchor (GTK_WINDOW (D.fenetre), GTK_LAYER_SHELL_EDGE_LEFT,  tendre);
+    gtk_layer_set_anchor (GTK_WINDOW (D.fenetre), GTK_LAYER_SHELL_EDGE_RIGHT, tendre);
+    gtk_layer_set_anchor (GTK_WINDOW (D.fenetre), GTK_LAYER_SHELL_EDGE_TOP,   tendre);
+    /* Tendue, elle ne reserve rien : elle couvre tout. Rendue a sa pilule,
+     * elle reprend le reglage de shell.conf. */
+    gtk_layer_set_exclusive_zone (GTK_WINDOW (D.fenetre),
+                                  (!tendre && D.cfg->reserve_space) ? 86 : 0);
+}
+
+/* LA NAPPE NE RECLAME PAS LA BANDE DU BAS -- sauf la pilule du dock.
+ *
+ * La barre d'etat vit dans cette bande, et c'est un autre processus : selon
+ * qui des deux atteint le compositeur le premier a l'ouverture de session,
+ * elle est empilee au-dessus du dock ou en dessous. Dessous, une nappe
+ * pleine la recouvrirait, et la toucher renverrait tout au lieu d'ouvrir la
+ * Console. En rendant la bande a ce qui est dessous, la barre reste
+ * atteignable quel que soit l'ordre.
+ *
+ * Contrepartie : un clic sur l'application dans ces quelque 86 pixels du
+ * bas ne renvoie pas le dock, il atteint l'application. C'est un moindre
+ * mal qu'une barre qu'on ne peut plus toucher.
+ *
+ * Recalculee a chaque allocation : la pilule bouge pendant qu'elle monte,
+ * et change de largeur quand une application s'ouvre. */
+static void
+nappe_zone (int largeur, int hauteur, gpointer data)
+{
+    (void) data;
+
+    GdkSurface *surface = gtk_native_get_surface (GTK_NATIVE (D.fenetre));
+    if (surface == NULL)
+        return;
+
+    cairo_rectangle_int_t tout = { 0, 0, largeur, hauteur };
+    cairo_region_t *zone;
+
+    if (!D.nappe) {
+        zone = cairo_region_create_rectangle (&tout);
+    } else {
+        int bande = 0;
+        gtk_widget_measure (D.box, GTK_ORIENTATION_VERTICAL, largeur,
+                            NULL, &bande, NULL, NULL);
+        cairo_rectangle_int_t haut = { 0, 0, largeur, MAX (0, hauteur - bande) };
+        zone = cairo_region_create_rectangle (&haut);
+
+        graphene_rect_t r;
+        if (gtk_widget_compute_bounds (D.box, D.fenetre, &r)) {
+            cairo_rectangle_int_t pilule = {
+                (int) floorf (r.origin.x), (int) floorf (r.origin.y),
+                (int) ceilf (r.size.width), (int) ceilf (r.size.height),
+            };
+            cairo_region_union_rectangle (zone, &pilule);
+        }
+    }
+    gdk_surface_set_input_region (surface, zone);
+    cairo_region_destroy (zone);
+}
+
+/* Un appui recu par la fenetre elle-meme tombe a cote de tout ce qui se
+ * clique : les icones revendiquent leurs appuis avant qu'ils ne remontent
+ * jusqu'a elle. Reste le fond de la pilule, entre deux icones -- ce n'est
+ * pas « a cote », on l'ecarte. */
+static void
+on_nappe_appui (GtkGestureClick *g, int n, double x, double y, gpointer data)
+{
+    (void) g; (void) n; (void) data;
+
+    if (shell_visibility_etat () != SHELL_VIS_CONVOQUE)
+        return;
+
+    graphene_rect_t r;
+    if (gtk_widget_compute_bounds (D.box, D.fenetre, &r)
+        && graphene_rect_contains_point (&r, &GRAPHENE_POINT_INIT ((float) x, (float) y)))
+        return;
+
+    shell_visibility_congedier ();
+}
+
+/* Les listes au survol et le menu du clic droit sont des surfaces a part :
+ * elles resteraient en l'air pendant que le dock descend. */
+static void
+dock_fermer_surfaces (void)
+{
+    gtk_popover_popdown (GTK_POPOVER (D.menu));
+
+    for (GtkWidget *e = gtk_widget_get_first_child (D.box); e != NULL;
+         e = gtk_widget_get_next_sibling (e)) {
+        GtkWidget *bouton = gtk_widget_get_first_child (e);
+        Hover *h = bouton ? g_object_get_data (G_OBJECT (bouton), "hover") : NULL;
+        if (h == NULL)
+            continue;
+        if (h->open_timer != 0) {
+            g_source_remove (h->open_timer);
+            h->open_timer = 0;
+        }
+        hover_cancel_close (h);
+        if (h->popover != NULL)
+            gtk_popover_popdown (GTK_POPOVER (h->popover));
+    }
+}
+
+/* Le relais vers la barre d'etat.
+ *
+ * Par l'interface d'actions que GApplication publie deja -- celle-la meme
+ * qu'emprunte « gapplication action ». Un ordre explicite, jamais une
+ * bascule : la barre ne tient aucun etat qu'on devrait deviner.
+ *
+ * Asynchrone, AVEC un rappel qui lit l'erreur. Un appel sans rappel perd
+ * ses erreurs sans un mot ; c'est ce qui a coute une seance au module de
+ * veille le 9 septembre 2026. Si la barre ne tourne pas, le journal le dit
+ * a chaque mouvement du dock -- c'est la verite, et elle est rare. */
+static void
+on_barre_repond (GObject *src, GAsyncResult *res, gpointer data)
+{
+    g_autofree char *action = data;
+    g_autoptr(GError) err = NULL;
+    g_autoptr(GVariant) r =
+        g_dbus_connection_call_finish (G_DBUS_CONNECTION (src), res, &err);
+    if (r == NULL)
+        g_message ("barre d'etat : « %s » non transmis : %s", action, err->message);
+}
+
+static void
+barre_suivre (gboolean visible, gboolean redire)
+{
+    if (!redire && D.barre_vue == (visible ? 1 : 0))
+        return;
+    D.barre_vue = visible ? 1 : 0;
+
+    GDBusConnection *bus = g_application_get_dbus_connection (G_APPLICATION (D.app));
+    if (bus == NULL) {
+        g_message ("barre d'etat : pas de bus de session, elle ne suivra pas le dock");
+        return;
+    }
+
+    const char *action = visible ? "afficher" : "masquer";
+    /* NULL pour un tableau : GVariant en fait un tableau vide. */
+    g_dbus_connection_call (bus, "os.claude.shell.status", "/os/claude/shell/status",
+                            "org.gtk.Actions", "Activate",
+                            g_variant_new ("(sava{sv})", action, NULL, NULL),
+                            NULL, G_DBUS_CALL_FLAGS_NO_AUTO_START, 2000, NULL,
+                            on_barre_repond, g_strdup (action));
+}
+
+static const char *
+nom_etat (ShellVisEtat etat)
+{
+    switch (etat) {
+    case SHELL_VIS_CACHE:    return "cache";
+    case SHELL_VIS_BUREAU:   return "bureau";
+    case SHELL_VIS_CONVOQUE: return "convoque";
+    }
+    return "?";
+}
+
+static void
+on_etat (ShellVisEtat etat, gpointer data)
+{
+    (void) data;
+    /* En debogage seulement (G_MESSAGES_DEBUG=all) : un message par Alt-Tab
+     * remplirait shell.log en une journee. */
+    g_debug ("visibilite : %s", nom_etat (etat));
+
+    switch (etat) {
+    case SHELL_VIS_CACHE:
+        dock_fermer_surfaces ();
+        /* Repliee tout de suite, pas a la fin de la descente : la pilule
+         * est au meme endroit dans les deux formes, rien ne saute, et un
+         * clic donne pendant la descente atteint deja l'application. */
+        nappe_tendre (FALSE);
+        shell_glissiere_cacher (D.glissiere);
+        break;
+    case SHELL_VIS_BUREAU:
+        /* Replier la nappe REDIMENSIONNE la fenetre, affichee : une liste au
+         * survol ou le menu du clic droit ouverts partiraient hors de
+         * l'ecran -- labwc recalcule leur place depuis l'ancienne origine de
+         * la surface (vu au banc sur le centre de notifications, voir
+         * notifications.c, « La nappe »). On les ferme d'abord. */
+        if (D.nappe)
+            dock_fermer_surfaces ();
+        nappe_tendre (FALSE);
+        shell_glissiere_montrer (D.glissiere);
+        break;
+    case SHELL_VIS_CONVOQUE:
+        nappe_tendre (TRUE);
+        shell_glissiere_montrer (D.glissiere);
+        break;
+    }
+    barre_suivre (etat != SHELL_VIS_CACHE, FALSE);
+}
+
+/* Les actions publiees sur le bus de session, sous os.claude.shell.dock.
+ *
+ *   basculer   la touche Loupe (claude-os-shell-basculer)
+ *   afficher   rappelle, comme le doigt
+ *   masquer    renvoie, quel que soit l'etat
+ *   annoncer   redit son etat a la barre -- elle le demande en demarrant,
+ *              pour le cas ou elle aurait ete relancee seule */
+static void
+on_action_basculer (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    shell_visibility_basculer ();
+}
+
+static void
+on_action_afficher (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    shell_visibility_convoquer ();
+}
+
+static void
+on_action_masquer (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    shell_visibility_cacher ();
+}
+
+static void
+on_action_annoncer (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    barre_suivre (shell_visibility_etat () != SHELL_VIS_CACHE, TRUE);
 }
 
 static const GActionEntry actions[] = {
     { "basculer", on_action_basculer, NULL, NULL, NULL, { 0 } },
+    { "afficher", on_action_afficher, NULL, NULL, NULL, { 0 } },
+    { "masquer",  on_action_masquer,  NULL, NULL, NULL, { 0 } },
+    { "annoncer", on_action_annoncer, NULL, NULL, NULL, { 0 } },
 };
 
 /* -------------------------------------------------------------------------
@@ -901,14 +1296,24 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     shell_config_apply (cfg);
 
+    D.app       = app;
+    D.cfg       = cfg;
+    D.barre_vue = -1;
+
+    /* La bande du bord AVANT le dock : meme couche, et labwc empile dans
+     * l'ordre de creation. Creee apres, elle passerait devant la pilule. */
+    bord_creer (app);
+
     GtkWidget *window = gtk_application_window_new (app);
     gtk_widget_add_css_class (window, "shell");
+    D.fenetre = window;
 
     /* --- Ancrage layer-shell ---------------------------------------------
      * Sans cela, le dock serait une fenetre ordinaire : elle passerait
-     * derriere les autres et apparaitrait dans la liste des fenetres. */
+     * derriere les autres et apparaitrait dans la liste des fenetres.
+     * OVERLAY et non TOP : voir « A l'ecran ou non ». */
     gtk_layer_init_for_window (GTK_WINDOW (window));
-    gtk_layer_set_layer (GTK_WINDOW (window), GTK_LAYER_SHELL_LAYER_TOP);
+    gtk_layer_set_layer (GTK_WINDOW (window), GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_anchor (GTK_WINDOW (window), GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
     gtk_layer_set_namespace (GTK_WINDOW (window), "claude-os-dock");
 
@@ -930,7 +1335,9 @@ on_activate (GtkApplication *app, gpointer user_data)
      * dans les deux cas.
      *
      * reserve_space=true dans shell.conf retablit l'ancien comportement pour
-     * qui prefere que rien ne passe sous le dock. */
+     * qui prefere que rien ne passe sous le dock. Depuis que le dock sort de
+     * l'ecran des qu'on travaille, c'est un choix peu utile : la place ne
+     * serait reservee que pendant qu'il est rappele. */
     gtk_layer_set_exclusive_zone (GTK_WINDOW (window),
                                   cfg->reserve_space ? 86 : 0);
 
@@ -944,7 +1351,6 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_widget_set_halign (dock, GTK_ALIGN_CENTER);
     gtk_widget_set_valign (dock, GTK_ALIGN_END);
 
-    D.cfg = cfg;
     D.box = dock;
 
     /* Un seul menu, parente au conteneur et repositionne a chaque clic
@@ -966,7 +1372,25 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     dock_rebuild ();
 
-    gtk_window_set_child (GTK_WINDOW (window), dock);
+    /* La glissiere entre la fenetre et la pilule : c'est elle qui la fait
+     * descendre hors de l'ecran, et qui retire la fenetre une fois en bas. */
+    GtkWidget *glissiere = shell_glissiere_new (dock);
+    D.glissiere = SHELL_GLISSIERE (glissiere);
+    shell_glissiere_sur_allocation (D.glissiere, nappe_zone, NULL);
+    gtk_window_set_child (GTK_WINDOW (window), glissiere);
+
+    /* Le clic « a cote », quand la nappe est tendue. */
+    GtkGesture *nappe = gtk_gesture_click_new ();
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (nappe), 0);   /* tout bouton */
+    g_signal_connect (nappe, "pressed", G_CALLBACK (on_nappe_appui), NULL);
+    gtk_widget_add_controller (window, GTK_EVENT_CONTROLLER (nappe));
+
+    /* Affiche au demarrage, dans l'etat BUREAU : a l'ouverture de session il
+     * n'y a encore aucune fenetre. Et affiche de toute facon, meme si le dock
+     * est relance au milieu d'une session : c'est la premiere presentation
+     * qui fixe sa place dans la pile, et elle doit avoir lieu maintenant --
+     * apres la bande, et si possible avant la barre. S'il y a deja une
+     * application active, le premier lot du compositeur le renverra. */
     gtk_window_present (GTK_WINDOW (window));
 
     g_action_map_add_action_entries (G_ACTION_MAP (app), actions,
@@ -982,11 +1406,13 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_widget_insert_action_group (window, "dock", G_ACTION_GROUP (groupe));
     g_object_unref (groupe);
 
-    /* Sans cela, masquer la seule fenetre ferait sortir GApplication de sa
-     * boucle : le dock disparaitrait pour de bon au lieu de se cacher. */
+    /* Le dock doit survivre a sa fenetre retiree. La bande du bord suffit
+     * aujourd'hui a garder GApplication en vie, mais le jour ou elle ne
+     * serait plus la, le dock disparaitrait pour de bon au lieu de se
+     * cacher -- sans rien dire. */
     g_application_hold (G_APPLICATION (app));
 
-    shell_visibility_init (on_visibilite, window);
+    shell_visibility_init (on_etat, NULL);
     shell_toplevels_init (on_windows_changed, NULL);
     shell_config_watch (on_config_reloaded, window);
 }

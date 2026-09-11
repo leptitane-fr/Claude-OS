@@ -15,14 +15,17 @@
  * ========================================================================= */
 #include "energie.h"
 
+/* LES ICONES, choisies le 11 septembre 2026 pour la Console et la barre
+ * d'etat : la famille « power-profile » que GNOME emploie pour ses profils
+ * d'energie. Voir shell_energie_mode_icone() pour le theme ou on les prend. */
 static const ShellModeEnergie MODES[] = {
-    { "travail", "Travail", "document-edit-symbolic",
+    { "travail", "Travail", "power-profile-performance-symbolic",
       "L'ordinateur ne dort jamais et le réseau reste actif. L'écran "
       "s'atténue puis s'éteint, précédé d'un compte à rebours.", FALSE },
-    { "automatique", "Automatique", "preferences-system-symbolic",
+    { "automatique", "Automatique", "power-profile-balanced-symbolic",
       "L'équilibre. L'écran s'atténue, s'éteint, puis l'ordinateur se met "
       "en veille.", TRUE },
-    { "nomade", "Nomade", "battery-low-symbolic",
+    { "nomade", "Nomade", "power-profile-power-saver-symbolic",
       "Le plus économe. Délais courts et veille rapide.", TRUE },
     { NULL, NULL, NULL, NULL, FALSE },
 };
@@ -99,4 +102,29 @@ shell_energie_delais_mode (const ShellConfig *cfg, const ShellModeEnergie *m,
     /* Un mode qui ne dort pas ne dort pas, quelle que soit la valeur ecrite
      * dans le fichier. C'est ce qui rend un mode indenaturable. */
     if (suspendre) *suspendre = m->veille_ordi ? sus : 0;
+}
+
+/* L'ICONE D'UN MODE, PRISE CHEZ ADWAITA MEME SOUS PAPIRUS.
+ *
+ * Papirus dessine les trois profils comme trois cadrans identiques dont
+ * seule l'aiguille change d'orientation : a 18 px dans la barre d'etat,
+ * rien ne les distingue. Adwaita dessine un compteur, une balance et une
+ * feuille -- trois objets, qui disent ce que decrivent les resumes. Compare
+ * au rendu le 11 septembre 2026.
+ *
+ * On prend donc le fichier d'Adwaita, qui est une dependance de GTK et
+ * toujours installe. Son nom finit en « -symbolic.svg » : GTK le recolore
+ * comme n'importe quelle icone symbolique, il suit donc le theme clair ou
+ * sombre. S'il manque -- autre version d'Adwaita, autre arborescence --,
+ * repli sur le nom, que le theme d'icones en vigueur resoudra. */
+GIcon *
+shell_energie_mode_icone (const ShellModeEnergie *m)
+{
+    g_autofree char *fichier = g_strdup_printf (
+        "/usr/share/icons/Adwaita/symbolic/status/%s.svg", m->icone);
+    if (g_file_test (fichier, G_FILE_TEST_EXISTS)) {
+        g_autoptr(GFile) f = g_file_new_for_path (fichier);
+        return g_file_icon_new (f);
+    }
+    return g_themed_icon_new (m->icone);
 }

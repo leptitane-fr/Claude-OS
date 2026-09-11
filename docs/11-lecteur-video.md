@@ -364,6 +364,83 @@ Trois choses en sortent, et elles valent au-delà de ce lecteur :
 - **« Le processus tourne » ne veut pas dire « l'application répond ».** Le
   diagnostic est venu d'une capture d'écran, pas de `ps`.
 
+### La saccade sur partage réseau — 11 septembre
+
+Un film 4K de 8,3 Gio sur un partage SMB saccadait, « alors que le débit est
+plus que suffisant ». Il l'était : c'est le lecteur qui était en cause, et
+deux fois plutôt qu'une.
+
+**Mesuré avant de supposer**, sur `Ready Player One.mkv` (HEVC 3840 × 1604,
+2 h 20) :
+
+| | |
+|---|---|
+| débit du partage, lectures de 1 Mio | 13,8 Mo/s |
+| débit du partage, lectures de 64 Kio | 6,5 Mo/s |
+| débit **nécessaire** au film | ~1 Mo/s |
+| **décodage seul** (la sonde, qui ne joue pas le son) | **8,07 ms/image** |
+| le lecteur complet | **61,3 ms/image**, 345 images sautées sur 707 |
+
+Le matériel décodait donc quatre fois plus vite que le temps réel, et le
+réseau avait dix fois le débit nécessaire. **Les deux causes étaient dans le
+lecteur.**
+
+**PREMIÈRE : le tampon audio bloquait le décodage vidéo.** Le fil de décodage
+attendait jusqu'à 100 ms chaque fois que le tampon de sortie audio (200 ms)
+était plein — et pendant cette attente il ne décodait plus une seule image.
+En 1080p, où une image coûte 0,8 ms, cela ne se voyait pas ; en 4K, où la
+file de trois images ne représente que 125 ms d'avance, la file se vidait.
+
+**DEUXIÈME : lecture et décodage partageaient un fil.** Une lecture SMB prend
+1,6 ms en moyenne — et **259 ms au pire**, mesurées ; 5 011 ms ont même été
+observées une fois. Pendant ce temps, le fil unique ne décodait rien.
+
+Agrandir le tampon de lecture **empire** le pire cas : à 1 Mio par lecture, un
+seul aller-retour malheureux bloque une seconde entière. Aucun réglage ne
+pouvait suffire — il fallait **séparer**.
+
+```
+fil de LECTURE     ne fait qu'av_read_frame, et empile des paquets
+      ↓  file de paquets COMPRESSÉS : 24 Mo, ~20 s de film
+fil de DÉCODAGE    ne fait que décoder, n'attend jamais le fichier
+```
+
+24 Mo de paquets compressés rendent une lecture d'une seconde invisible ; la
+même avance en images décodées en coûterait mille trois cents.
+
+**Le rendez-vous.** Deux moments exigent que les fils ne travaillent pas
+ensemble : un saut, qui déplace le démux sous le décodeur, et un changement
+de piste, qui remplace un décodeur pendant qu'on s'en sert. Le fil de lecture
+demande alors au fil de décodage de lâcher prise, attend sa confirmation,
+agit, puis le relâche. C'est la seule façon de ne pas partager un
+`AVFormatContext`, qui n'est pas fait pour ça.
+
+**La profondeur de la file d'images se calcule** désormais : un budget de
+112 Mo de surfaces, borné entre 3 et 16 images. En 1080p cela donne 16 images
+(530 ms d'avance) ; en 4K, où une surface P010 pèse 18,5 Mo, cela en donne 6.
+Et `extra_hw_frames` suit — creuser la file sans creuser la réserve de
+surfaces VA-API échangerait une saccade contre un blocage.
+
+### Résultat
+
+| | avant | après |
+|---|---|---|
+| images affichées / sautées | 362 / **345** | 595 / **3** |
+| famines | 1467 | 3 |
+| écart de synchronisation | 111,7 ms | **7,5 ms** |
+
+**Et deux fautes que la refonte a révélées, toutes deux invisibles avant :**
+
+- **« Fin du fichier » au bout de six secondes.** `demux_fini` ne voulait plus
+  dire « plus rien à jouer » : le fil de lecture avale un fichier de 22 Mo en
+  une seconde. La fin, c'est **trois files vides**, pas une.
+- **Quinze images sautées à chaque ouverture.** La règle « la première image
+  s'affiche sans attendre » s'appliquait à tout le tour de boucle, pas à la
+  première image : au premier battement, toute la file devenait due d'un coup.
+  Avec trois images d'avance cela passait inaperçu ; avec seize, c'était
+  quinze images jetées et 450 ms d'écart de synchronisation. Une lecture
+  locale ordinaire est passée de 15 images sautées à **1**.
+
 ## 11.8 Pistes, sous-titres, reprise — phase 3
 
 Un menu dans la capsule liste les **pistes audio** et les **sous-titres**,

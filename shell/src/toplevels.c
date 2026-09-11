@@ -19,6 +19,7 @@ static struct {
     gpointer            data;
     struct wl_seat     *seat;
     gboolean            available;
+    guint64             prochaine_serie;
 } T;
 
 /* -------------------------------------------------------------------------
@@ -215,6 +216,7 @@ on_toplevel (void *data, struct zwlr_foreign_toplevel_manager_v1 *manager,
 
     ShellWindow *w = g_new0 (ShellWindow, 1);
     w->handle = handle;
+    w->serie  = ++T.prochaine_serie;
     g_ptr_array_add (T.windows, w);
 
     zwlr_foreign_toplevel_handle_v1_add_listener (handle, &handle_listener, NULL);
@@ -296,6 +298,17 @@ const GPtrArray *
 shell_toplevels_get (void)
 {
     return T.windows;
+}
+
+guint64
+shell_toplevels_serie_active (void)
+{
+    for (guint i = 0; T.windows != NULL && i < T.windows->len; i++) {
+        ShellWindow *w = g_ptr_array_index (T.windows, i);
+        if (w->activated)
+            return w->serie;
+    }
+    return 0;
 }
 
 void

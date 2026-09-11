@@ -13,15 +13,30 @@
 
 #include <math.h>
 
-/* TROIS IMAGES D'AVANCE, ET PAS TRENTE.
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+/* LA PROFONDEUR DE LA FILE SE CALCULE, ELLE NE SE DECRETE PAS.
  *
- * Chaque image 1080p en NV12 occupe une surface VA-API de 3 Mo. Sur une
- * machine a 3,7 Gio soudes, une file profonde se paie en memoire pour un
- * benefice nul : le decodage materiel prend 0,83 ms par image, il n'a aucun
- * besoin d'avance. Trois images suffisent a absorber un hoquet du systeme de
- * fichiers, et le decodeur VA-API a lui-meme besoin de garder quelques
- * surfaces libres pour travailler. */
-#define FILE_IMAGES 3
+ * Trois images ont longtemps suffi : en 1080p elles pesent 9 Mo et
+ * representent 125 ms d'avance, assez pour absorber un hoquet du systeme de
+ * fichiers. En 4K sur un partage reseau, les memes trois images pesent
+ * 55 Mo et representent toujours 125 ms -- or une lecture SMB peut prendre
+ * 239 ms, mesurees. La file se vide, l'affichage n'a rien, et la lecture
+ * saccade.
+ *
+ * On raisonne donc en MEMOIRE et en TEMPS, pas en nombre :
+ *
+ *   -- au plus BUDGET_IMAGES octets de surfaces retenues ;
+ *   -- au moins TROIS images, parce que le decodeur en a besoin ;
+ *   -- au plus SEIZE, au-dela desquelles on ne gagne plus rien.
+ *
+ * 112 Mo sur une machine qui en a 3 700 et qui affiche un film : c'est
+ * cher pour une mire, raisonnable pour de la 4K. */
+#define BUDGET_IMAGES (112 * 1024 * 1024)
+#define FILE_MIN 3
+#define FILE_MAX 16
 
 /* Le bloc audio decode, en images. Au-dela, on rend la main : le tampon de
  * sortie ne fait que 200 ms. */
@@ -35,6 +50,11 @@ struct _VideoMoteur {
     AVFormatContext  *fmt;
     AVBufferRef      *materiel;
 
+    /* NOTRE PROPRE ENTREE-SORTIE, avec un gros tampon -- voir plus bas. */
+    int               fd;
+    AVIOContext      *pb;
+
+    int               file_images;   /* profondeur calculee a l'ouverture */
     int               piste_v, piste_a, piste_s;
     AVCodecContext   *dec_v, *dec_a, *dec_s;
     const char       *nom_codec;
@@ -50,9 +70,17 @@ struct _VideoMoteur {
     int               taux_audio, canaux_audio;
 
     /* --- partage entre le fil principal et celui du decodage --- */
-    GThread          *fil;
+    GThread          *fil;           /* decodage                           */
+    GThread          *fil_lec;       /* lecture du fichier                 */
     GMutex            verrou;
     GCond             cond;          /* reveille le decodeur               */
+    GCond             cond_lec;      /* reveille le lecteur                */
+    GCond             cond_repos;    /* confirme l'arret du decodeur       */
+
+    GQueue           *paquets;       /* AVPacket*, compresses              */
+    gint64            paquets_octets;
+    int               generation;    /* incremente a chaque saut           */
+    gboolean          repos_demande, au_repos;
 
     GQueue           *images;        /* AVFrame*, au plus FILE_IMAGES      */
     gboolean          quitte;
@@ -113,6 +141,21 @@ struct _VideoMoteur {
     gchar            *st_courant;    /* ce qui est affiche en ce moment   */
     gboolean          st_change;
 
+    /* OU PASSE LE TEMPS, ET C'EST LA SEULE FACON DE LE SAVOIR.
+     *
+     * Une lecture saccadee a trois causes possibles -- le reseau, le
+     * decodeur, l'affichage -- et elles se ressemblent toutes a l'oeil. Ces
+     * compteurs les separent :
+     *
+     *   us_lecture   temps passe DANS av_read_frame : le fichier
+     *   us_decodage  temps passe dans le decodeur
+     *   famines      fois ou l'affichage a demande une image et n'a rien
+     *                trouve -- c'est le symptome, les deux autres disent
+     *                lequel des deux l'a cause */
+    gint64            us_lecture, lectures, us_lecture_max;
+    gint64            us_decodage;
+    gint64            famines;
+
     gint64            sautees, vues;
     double            ecart_somme, ecart_max;   /* synchronisation */
     VideoEtat         etat;
@@ -130,6 +173,46 @@ static void sous_titre_libre(gpointer p)
     SousTitre *st = p;
     g_free(st->texte);
     g_free(st);
+}
+
+/* UN TAMPON D'UN MEGAOCTET, ET C'EST MESURE.
+ *
+ * FFmpeg lit par blocs de 32 Kio. Sur un partage SMB, la taille des lectures
+ * change tout -- releve sur le NAS de la maison, le 11 septembre 2026 :
+ *
+ *     lectures de 1 Mio    13,8 Mo/s
+ *     lectures de 64 Kio    6,5 Mo/s
+ *
+ * Ce n'est pas le debit qui manque a un film 4K a 8 Mbit/s : c'est la
+ * LATENCE. Trente-deux fois moins d'allers-retours, c'est trente-deux fois
+ * moins d'occasions de rester bloque 250 ms sur un aller-retour malheureux --
+ * et une lecture bloquee, c'est une file d'images qui se vide.
+ *
+ * avio_open2() n'expose pas la taille de son tampon ; il faut donc fournir
+ * son propre AVIOContext. Trente lignes pour doubler le debit utile. */
+#define TAMPON_IO (1024 * 1024)
+
+static int io_lire(void *opaque, uint8_t *buf, int taille)
+{
+    VideoMoteur *m = opaque;
+    ssize_t n = read(m->fd, buf, (size_t)taille);
+    if (n < 0) return AVERROR(errno);
+    if (n == 0) return AVERROR_EOF;
+    return (int)n;
+}
+
+static int64_t io_chercher(void *opaque, int64_t ou, int quoi)
+{
+    VideoMoteur *m = opaque;
+
+    if (quoi == AVSEEK_SIZE) {
+        struct stat st;
+        if (fstat(m->fd, &st) < 0) return AVERROR(errno);
+        return st.st_size;
+    }
+    /* AVSEEK_FORCE peut accompagner le mode ; il ne nous concerne pas. */
+    off_t r = lseek(m->fd, (off_t)ou, quoi & ~AVSEEK_FORCE);
+    return r < 0 ? AVERROR(errno) : (int64_t)r;
 }
 
 /* ------------------------------------------------------------- utilitaires */
@@ -297,6 +380,8 @@ static gboolean configurer_reech(VideoMoteur *m)
     return TRUE;
 }
 
+static void vider_paquets(VideoMoteur *m);
+
 static void vider_file(VideoMoteur *m)
 {
     AVFrame *f;
@@ -334,17 +419,86 @@ static gboolean pousser_audio(VideoMoteur *m, AVFrame *trame, double pts)
              * reveils par seconde au lieu de deux cents, pour exactement le
              * meme resultat. */
             g_mutex_lock(&m->verrou);
-            if (!m->quitte && !m->saut_demande) {
+            if (!m->quitte && !m->saut_demande && !m->repos_demande) {
                 gint64 fin = g_get_monotonic_time() + 100 * G_TIME_SPAN_MILLISECOND;
                 g_cond_wait_until(&m->cond, &m->verrou, fin);
             }
-            gboolean stop = m->quitte || m->saut_demande;
+            /* Le rendez-vous compte autant qu'un arret : le fil de lecture
+             * attend notre confirmation, et il l'attendrait en vain. */
+            gboolean stop = m->quitte || m->saut_demande || m->repos_demande;
             g_mutex_unlock(&m->verrou);
             if (stop) return FALSE;
         }
     }
     return TRUE;
 }
+
+/* ============================================================ DEUX FILS
+
+   POURQUOI DEUX, ET NON UN.
+
+   Un seul fil lisait le fichier PUIS decodait. Sur un disque local, la
+   lecture coute 0,1 ms et personne ne s'en apercoit. Sur un partage SMB,
+   mesure le 11 septembre 2026 sur un film 4K :
+
+       lecture moyenne        1,6 ms
+       lecture la PIRE      259 ms   (et 1002 ms avec un tampon d'un Mio)
+
+   Pendant ces 259 ms, le fil unique ne decodait rien. La file d'images se
+   vidait -- six images en 4K, soit 250 ms d'avance -- et l'affichage n'avait
+   plus rien a montrer. La saccade ne venait ni du reseau, qui avait dix fois
+   le debit necessaire, ni du decodeur, qui fait 8 ms par image : elle venait
+   de ce que les deux etaient dans le meme fil.
+
+   Aucun reglage de tampon n'y pouvait quoi que ce soit -- l'essayer a
+   d'ailleurs EMPIRE le pire cas. Il fallait separer.
+
+       fil de LECTURE    ne fait qu'av_read_frame, et empile des paquets
+       fil de DECODAGE   ne fait que decoder, et n'attend jamais le fichier
+
+   Entre les deux, une file de paquets COMPRESSES : 24 Mo, soit une vingtaine
+   de secondes de film a 8 Mbit/s. C'est ce qui rend une lecture d'une
+   seconde parfaitement invisible, pour le prix de 24 Mo -- la meme avance en
+   images decodees en couterait mille trois cents.
+
+   LE RENDEZ-VOUS. Deux moments demandent que les deux fils ne travaillent
+   pas en meme temps : un saut, qui deplace le demux sous le decodeur, et un
+   changement de piste, qui remplace un decodeur pendant qu'on s'en sert. Le
+   fil de lecture demande alors au fil de decodage de lacher prise, attend sa
+   confirmation, agit, puis le relache. C'est court et c'est rare ; c'est
+   surtout la seule facon de ne pas partager un AVFormatContext, qui n'est
+   pas fait pour cela. */
+
+#define PAQUETS_OCTETS (24 * 1024 * 1024)
+
+/* Appele par le fil de LECTURE. Au retour, le fil de decodage est arrete et
+ * ne touche plus ni au demux ni aux decodeurs. */
+static void rendez_vous_prendre(VideoMoteur *m)
+{
+    g_mutex_lock(&m->verrou);
+    m->repos_demande = TRUE;
+    g_cond_broadcast(&m->cond);
+    while (!m->au_repos && !m->quitte)
+        g_cond_wait(&m->cond_repos, &m->verrou);
+    g_mutex_unlock(&m->verrou);
+}
+
+static void rendez_vous_rendre(VideoMoteur *m)
+{
+    g_mutex_lock(&m->verrou);
+    m->repos_demande = FALSE;
+    g_cond_broadcast(&m->cond);
+    g_mutex_unlock(&m->verrou);
+}
+
+static void vider_paquets(VideoMoteur *m)      /* verrou tenu */
+{
+    AVPacket *pk;
+    while ((pk = g_queue_pop_head(m->paquets))) av_packet_free(&pk);
+    m->paquets_octets = 0;
+}
+
+/* ------------------------------------------------------ le fil de lecture */
 
 static void executer_saut(VideoMoteur *m, double cible)
 {
@@ -355,241 +509,337 @@ static void executer_saut(VideoMoteur *m, double cible)
         return;
     }
 
-    if (m->dec_v) avcodec_flush_buffers(m->dec_v);
-    if (m->dec_a) avcodec_flush_buffers(m->dec_a);
-    if (m->dec_s) avcodec_flush_buffers(m->dec_s);
-    if (m->audio) video_audio_vider(m->audio);
-
     g_mutex_lock(&m->verrou);
+    vider_paquets(m);
     vider_file(m);
     /* Les sous-titres d'avant le saut n'ont plus de sens : les garder
      * ferait reapparaitre une replique de la scene precedente. */
     g_queue_clear_full(m->st_file, sous_titre_libre);
     g_clear_pointer(&m->st_courant, g_free);
-    m->st_change = TRUE;
+    m->st_change    = TRUE;
     m->demux_fini   = FALSE;
     m->fin_signalee = FALSE;
     m->pts_dernier  = cible;
     m->rattrapage   = cible;
     m->rattrape_v   = (m->dec_v != NULL);
     m->rattrape_a   = (m->dec_a != NULL && m->audio != NULL);
+    /* Le fil de decodage vide ses decodeurs en voyant ce numero changer :
+     * lui seul a le droit d'y toucher. */
+    m->generation++;
     horloge_poser(m, cible);
+    g_cond_broadcast(&m->cond);
     g_mutex_unlock(&m->verrou);
+
+    if (m->audio) video_audio_vider(m->audio);
+}
+
+/* Remplace un decodeur. N'est appele QUE par le fil de lecture, et
+ * seulement pendant un rendez-vous. */
+static void changer_pistes(VideoMoteur *m, gboolean chg_a, int cible_a,
+                           gboolean chg_s, int cible_s)
+{
+    if (chg_s) {
+        g_mutex_lock(&m->verrou);
+        avcodec_free_context(&m->dec_s);
+        m->piste_s = -1;
+        g_queue_clear_full(m->st_file, sous_titre_libre);
+        g_clear_pointer(&m->st_courant, g_free);
+        m->st_change = TRUE;
+        g_mutex_unlock(&m->verrou);
+        if (cible_s >= 0) ouvrir_sous_titres(m, cible_s);
+    }
+
+    if (chg_a && cible_a >= 0 && cible_a != m->piste_a) {
+        AVCodecContext *ancien = m->dec_a;
+        int ancienne = m->piste_a;
+        GError *e = NULL;
+        m->dec_a = NULL;
+        m->piste_a = cible_a;
+        if (!ouvrir_piste(m, cible_a, FALSE, &e) || !configurer_reech(m)) {
+            /* On remet ce qui marchait : une piste illisible ne doit pas
+             * laisser le lecteur muet et sans explication. */
+            g_message("video-moteur : piste audio %d inutilisable (%s) -- "
+                      "on garde la précédente", cible_a,
+                      e ? e->message : "rééchantillonneur");
+            g_clear_error(&e);
+            avcodec_free_context(&m->dec_a);
+            m->dec_a   = ancien;
+            m->piste_a = ancienne;
+            configurer_reech(m);
+        } else {
+            avcodec_free_context(&ancien);
+            if (m->audio) video_audio_vider(m->audio);
+        }
+    }
+}
+
+static gpointer fil_lecture(gpointer data)
+{
+    VideoMoteur *m = data;
+
+    while (TRUE) {
+        g_mutex_lock(&m->verrou);
+
+        /* On dort quand la file de paquets est pleine, ou qu'il n'y a plus
+         * rien a lire. Aucune scrutation : une condition, et rien entre. */
+        while (!m->quitte && !m->saut_demande &&
+               !m->piste_a_demandee && !m->piste_s_demandee &&
+               (m->paquets_octets >= PAQUETS_OCTETS || m->demux_fini))
+            g_cond_wait(&m->cond_lec, &m->verrou);
+
+        if (m->quitte) { g_mutex_unlock(&m->verrou); break; }
+
+        gboolean saut    = m->saut_demande;
+        double   cible   = m->saut_cible;
+        gboolean chg_a   = m->piste_a_demandee;
+        int      cible_a = m->piste_a_cible;
+        gboolean chg_s   = m->piste_s_demandee;
+        int      cible_s = m->piste_s_cible;
+        m->saut_demande = m->piste_a_demandee = m->piste_s_demandee = FALSE;
+        g_mutex_unlock(&m->verrou);
+
+        if (chg_a || chg_s || saut) {
+            rendez_vous_prendre(m);
+            if (chg_a || chg_s) changer_pistes(m, chg_a, cible_a, chg_s, cible_s);
+            if (saut)           executer_saut(m, cible);
+            rendez_vous_rendre(m);
+            continue;
+        }
+
+        AVPacket *pk = av_packet_alloc();
+        if (!pk) break;
+
+        gint64 t_avant = g_get_monotonic_time();
+        int r = av_read_frame(m->fmt, pk);
+        gint64 dt = g_get_monotonic_time() - t_avant;
+
+        g_mutex_lock(&m->verrou);
+        m->us_lecture += dt;
+        m->lectures++;
+        if (dt > m->us_lecture_max) m->us_lecture_max = dt;
+
+        if (r < 0) {
+            /* INVARIANT N.4 : une fin de fichier n'est pas une erreur, mais
+             * une erreur se dit. */
+            if (r != AVERROR_EOF) dire_erreur("av_read_frame", r);
+            m->demux_fini = TRUE;
+            g_cond_broadcast(&m->cond);
+            g_mutex_unlock(&m->verrou);
+            av_packet_free(&pk);
+            continue;
+        }
+
+        m->paquets_octets += pk->size;
+        g_queue_push_tail(m->paquets, pk);
+        g_cond_broadcast(&m->cond);
+        g_mutex_unlock(&m->verrou);
+    }
+    return NULL;
+}
+
+/* ----------------------------------------------------- le fil de decodage */
+
+static void traiter_sous_titre(VideoMoteur *m, AVPacket *paquet)
+{
+    /* LE SOUS-TITRE A SA PROPRE API, et elle est synchrone : ni send_packet
+     * ni receive_frame. C'est la seule partie de libavcodec restee dans
+     * l'ancien style, et l'oublier donne un decodeur qui ne rend jamais
+     * rien, sans erreur. */
+    AVSubtitle sub;
+    int fini = 0;
+    AVRational tb = m->fmt->streams[m->piste_s]->time_base;
+    if (avcodec_decode_subtitle2(m->dec_s, &sub, &fini, paquet) < 0 || !fini)
+        return;
+
+    double base = (paquet->pts != AV_NOPTS_VALUE)
+                ? paquet->pts * av_q2d(tb) : 0.0;
+    double debut = base + sub.start_display_time / 1000.0;
+    double fin   = base + sub.end_display_time   / 1000.0;
+
+    /* LA FIN VIENT DU PAQUET AVANT DE VENIR DU DECODEUR.
+     *
+     * end_display_time est souvent nul -- Matroska porte la duree dans le
+     * paquet, pas dans l'evenement. Tomber sur le repli de trois secondes
+     * faisait se chevaucher trois repliques, ce qui ressemble a un defaut
+     * de synchronisation. */
+    if (fin <= debut && paquet->duration > 0)
+        fin = debut + paquet->duration * av_q2d(tb);
+    if (fin <= debut) fin = debut + 3.0;
+
+    GString *tout = g_string_new(NULL);
+    for (unsigned i = 0; i < sub.num_rects; i++) {
+        const char *a = sub.rects[i]->ass;
+        gchar *t = texte_de_ass(a ? a : sub.rects[i]->text);
+        if (t) {
+            if (tout->len) g_string_append_c(tout, '\n');
+            g_string_append(tout, t);
+            g_free(t);
+        }
+    }
+    if (tout->len) {
+        SousTitre *st = g_new0(SousTitre, 1);
+        st->debut = debut; st->fin = fin;
+        st->texte = g_string_free(tout, FALSE);
+        g_mutex_lock(&m->verrou);
+        g_queue_push_tail(m->st_file, st);
+        g_mutex_unlock(&m->verrou);
+    } else {
+        g_string_free(tout, TRUE);
+    }
+    avsubtitle_free(&sub);
+}
+
+/* Depile ce que les decodeurs ont produit. « fin » dit qu'on les a vidanges
+ * et qu'un AVERROR_EOF signifie la fin du film, non un simple manque. */
+static void depiler_decodeurs(VideoMoteur *m, AVFrame *trame, gboolean fin)
+{
+    for (int passe = 0; passe < 2; passe++) {
+        AVCodecContext *d = passe == 0 ? m->dec_v : m->dec_a;
+        if (!d) continue;
+        gboolean video = (passe == 0);
+        AVRational tb = m->fmt->streams[video ? m->piste_v : m->piste_a]->time_base;
+
+        while (TRUE) {
+            int q = avcodec_receive_frame(d, trame);
+            if (q == AVERROR(EAGAIN)) break;
+            if (q == AVERROR_EOF) {
+                if (fin) {
+                    g_mutex_lock(&m->verrou);
+                    m->demux_fini = TRUE;
+                    g_mutex_unlock(&m->verrou);
+                }
+                break;
+            }
+            if (q < 0) { dire_erreur("receive_frame", q); break; }
+
+            int64_t pts_brut = trame->best_effort_timestamp != AV_NOPTS_VALUE
+                             ? trame->best_effort_timestamp : trame->pts;
+            double pts = pts_brut == AV_NOPTS_VALUE
+                       ? 0.0 : pts_brut * av_q2d(tb);
+
+            /* Pendant le rattrapage, tout ce qui precede la cible est jete :
+             * ni affiche, ni entendu. */
+            g_mutex_lock(&m->verrou);
+            gboolean jeter = FALSE;
+            if (m->rattrapage >= 0) {
+                if (pts < m->rattrapage - 0.001) {
+                    jeter = TRUE;
+                } else {
+                    if (video) m->rattrape_v = FALSE;
+                    else       m->rattrape_a = FALSE;
+                    if (!m->rattrape_v && !m->rattrape_a)
+                        m->rattrapage = -1.0;
+                }
+            }
+            g_mutex_unlock(&m->verrou);
+
+            if (jeter) { av_frame_unref(trame); continue; }
+
+            if (video) {
+                AVFrame *copie = av_frame_alloc();
+                av_frame_move_ref(copie, trame);
+                copie->pts = (int64_t)(pts * AV_TIME_BASE);
+
+                g_mutex_lock(&m->verrou);
+                g_queue_push_tail(m->images, copie);
+                g_mutex_unlock(&m->verrou);
+            } else {
+                pousser_audio(m, trame, pts);
+                av_frame_unref(trame);
+            }
+        }
+    }
 }
 
 static gpointer fil_decodage(gpointer data)
 {
     VideoMoteur *m = data;
-    AVPacket *paquet = av_packet_alloc();
-    AVFrame  *trame  = av_frame_alloc();
-    if (!paquet || !trame) return NULL;
+    AVFrame *trame = av_frame_alloc();
+    if (!trame) return NULL;
+
+    int gen_vue = 0;
+    gboolean vidange_faite = FALSE;
 
     while (TRUE) {
         g_mutex_lock(&m->verrou);
 
-        /* On dort tant qu'il n'y a rien a faire : file pleine, ou fin du
-         * fichier atteinte. C'est ici que se realise le « zero reveil » --
-         * pas de delai, pas de scrutation, une condition. */
-        while (!m->quitte && !m->saut_demande &&
-               !m->piste_a_demandee && !m->piste_s_demandee &&
-               (g_queue_get_length(m->images) >= FILE_IMAGES || m->demux_fini))
+        /* LE RENDEZ-VOUS : on lache tout tant que le fil de lecture en a
+         * besoin. Il ne touche au demux et aux decodeurs que la. */
+        while (m->repos_demande && !m->quitte) {
+            m->au_repos = TRUE;
+            g_cond_broadcast(&m->cond_repos);
+            g_cond_wait(&m->cond, &m->verrou);
+        }
+        m->au_repos = FALSE;
+
+        /* Un saut a eu lieu : nos decodeurs contiennent l'ancienne scene. */
+        gboolean a_vider = (m->generation != gen_vue);
+        gen_vue = m->generation;
+        if (a_vider) vidange_faite = FALSE;
+
+        while (!m->quitte && !m->repos_demande && m->generation == gen_vue &&
+               (g_queue_get_length(m->images) >= (guint)m->file_images ||
+                (g_queue_is_empty(m->paquets) &&
+                 (!m->demux_fini || vidange_faite))))
             g_cond_wait(&m->cond, &m->verrou);
 
         if (m->quitte) { g_mutex_unlock(&m->verrou); break; }
+        if (m->repos_demande || m->generation != gen_vue) {
+            g_mutex_unlock(&m->verrou);
+            continue;
+        }
 
-        gboolean saut  = m->saut_demande;
-        double   cible = m->saut_cible;
-        gboolean chg_a = m->piste_a_demandee;
-        int      cible_a = m->piste_a_cible;
-        gboolean chg_s = m->piste_s_demandee;
-        int      cible_s = m->piste_s_cible;
-        m->saut_demande = m->piste_a_demandee = m->piste_s_demandee = FALSE;
+        AVPacket *pk = g_queue_pop_head(m->paquets);
+        if (pk) m->paquets_octets -= pk->size;
+        gboolean fin = (!pk && m->demux_fini);
+        g_cond_broadcast(&m->cond_lec);     /* de la place : le lecteur repart */
         g_mutex_unlock(&m->verrou);
 
-        if (chg_s) {
-            g_mutex_lock(&m->verrou);
-            avcodec_free_context(&m->dec_s);
-            m->piste_s = -1;
-            g_queue_clear_full(m->st_file, sous_titre_libre);
-            g_clear_pointer(&m->st_courant, g_free);
-            m->st_change = TRUE;
-            g_mutex_unlock(&m->verrou);
-            if (cible_s >= 0) ouvrir_sous_titres(m, cible_s);
+        if (a_vider) {
+            if (m->dec_v) avcodec_flush_buffers(m->dec_v);
+            if (m->dec_a) avcodec_flush_buffers(m->dec_a);
+            if (m->dec_s) avcodec_flush_buffers(m->dec_s);
         }
 
-        if (chg_a && cible_a >= 0 && cible_a != m->piste_a) {
-            AVCodecContext *ancien = m->dec_a;
-            int ancienne = m->piste_a;
-            GError *e = NULL;
-            m->dec_a = NULL;
-            m->piste_a = cible_a;
-            if (!ouvrir_piste(m, cible_a, FALSE, &e) || !configurer_reech(m)) {
-                /* On remet ce qui marchait : une piste illisible ne doit pas
-                 * laisser le lecteur muet et sans explication. */
-                g_message("video-moteur : piste audio %d inutilisable (%s) -- "
-                          "on garde la précédente", cible_a,
-                          e ? e->message : "rééchantillonneur");
-                g_clear_error(&e);
-                avcodec_free_context(&m->dec_a);
-                m->dec_a   = ancien;
-                m->piste_a = ancienne;
-                configurer_reech(m);
-            } else {
-                avcodec_free_context(&ancien);
-                if (m->audio) video_audio_vider(m->audio);
-            }
-        }
+        gint64 t_dec = g_get_monotonic_time();
 
-        if (saut) { executer_saut(m, cible); continue; }
-        if (chg_a || chg_s) continue;
-
-        int r = av_read_frame(m->fmt, paquet);
-        if (r == AVERROR_EOF) {
+        if (!pk) {
+            if (!fin) continue;
             /* Vidange des decodeurs : sans elle, les dernieres images
              * restent dedans et la lecture s'arrete avant la fin. */
             if (m->dec_v) avcodec_send_packet(m->dec_v, NULL);
             if (m->dec_a) avcodec_send_packet(m->dec_a, NULL);
-        } else if (r < 0) {
-            dire_erreur("av_read_frame", r);
-            g_mutex_lock(&m->verrou); m->demux_fini = TRUE; g_mutex_unlock(&m->verrou);
-            continue;
-        }
-
-        if (r != AVERROR_EOF && m->dec_s &&
-            paquet->stream_index == m->piste_s) {
-            /* LE SOUS-TITRE A SA PROPRE API, et elle est synchrone : ni
-             * send_packet ni receive_frame. C'est la seule partie de
-             * libavcodec restee dans l'ancien style, et l'oublier donne un
-             * decodeur qui ne rend jamais rien, sans erreur. */
-            AVSubtitle sub;
-            int fini = 0;
-            AVRational tb = m->fmt->streams[m->piste_s]->time_base;
-            if (avcodec_decode_subtitle2(m->dec_s, &sub, &fini, paquet) >= 0 && fini) {
-                double base = (paquet->pts != AV_NOPTS_VALUE)
-                            ? paquet->pts * av_q2d(tb) : 0.0;
-                double debut = base + sub.start_display_time / 1000.0;
-                double fin   = base + sub.end_display_time   / 1000.0;
-
-                /* LA FIN VIENT DU PAQUET AVANT DE VENIR DU DECODEUR.
-                 *
-                 * end_display_time est souvent nul -- Matroska porte la
-                 * duree dans le paquet, pas dans l'evenement. Tomber sur le
-                 * repli laisse alors chaque replique trois secondes a
-                 * l'ecran : elles se chevauchent, et l'on croit a un
-                 * probleme de synchronisation alors que c'est une lecture
-                 * de duree qui manque. */
-                if (fin <= debut && paquet->duration > 0)
-                    fin = debut + paquet->duration * av_q2d(tb);
-                if (fin <= debut) fin = debut + 3.0;
-
-                GString *tout = g_string_new(NULL);
-                for (unsigned i = 0; i < sub.num_rects; i++) {
-                    const char *a = sub.rects[i]->ass;
-                    gchar *t = texte_de_ass(a ? a : sub.rects[i]->text);
-                    if (t) {
-                        if (tout->len) g_string_append_c(tout, '\n');
-                        g_string_append(tout, t);
-                        g_free(t);
-                    }
-                }
-                if (tout->len) {
-                    SousTitre *st = g_new0(SousTitre, 1);
-                    st->debut = debut; st->fin = fin;
-                    st->texte = g_string_free(tout, FALSE);
-                    g_mutex_lock(&m->verrou);
-                    g_queue_push_tail(m->st_file, st);
-                    g_mutex_unlock(&m->verrou);
-                } else {
-                    g_string_free(tout, TRUE);
-                }
-                avsubtitle_free(&sub);
-            }
-            av_packet_unref(paquet);
-            continue;
-        }
-
-        if (r != AVERROR_EOF) {
-            if (paquet->stream_index == m->piste_v && m->dec_v) {
-                int s = avcodec_send_packet(m->dec_v, paquet);
-                if (s < 0 && s != AVERROR(EAGAIN))
-                    dire_erreur("send_packet video", s);
-            } else if (paquet->stream_index == m->piste_a && m->dec_a) {
-                int s = avcodec_send_packet(m->dec_a, paquet);
-                if (s < 0 && s != AVERROR(EAGAIN))
-                    dire_erreur("send_packet audio", s);
-            }
-        }
-        av_packet_unref(paquet);
-
-        /* On depile les deux decodeurs a chaque tour : un paquet audio peut
-         * liberer une image video restee dans la file interne. */
-        for (int passe = 0; passe < 2; passe++) {
-            AVCodecContext *d = passe == 0 ? m->dec_v : m->dec_a;
-            if (!d) continue;
-            gboolean video = (passe == 0);
-            AVRational tb = m->fmt->streams[video ? m->piste_v : m->piste_a]->time_base;
-
-            while (TRUE) {
-                int q = avcodec_receive_frame(d, trame);
-                if (q == AVERROR(EAGAIN)) break;
-                if (q == AVERROR_EOF) {
-                    if (r == AVERROR_EOF) {
-                        g_mutex_lock(&m->verrou);
-                        m->demux_fini = TRUE;
-                        g_mutex_unlock(&m->verrou);
-                    }
-                    break;
-                }
-                if (q < 0) { dire_erreur("receive_frame", q); break; }
-
-                int64_t pts_brut = trame->best_effort_timestamp != AV_NOPTS_VALUE
-                                 ? trame->best_effort_timestamp : trame->pts;
-                double pts = pts_brut == AV_NOPTS_VALUE
-                           ? 0.0 : pts_brut * av_q2d(tb);
-
-                /* Pendant le rattrapage, tout ce qui precede la cible est
-                 * jete : ni affiche, ni entendu. */
-                g_mutex_lock(&m->verrou);
-                gboolean jeter = FALSE;
-                if (m->rattrapage >= 0) {
-                    if (pts < m->rattrapage - 0.001) {
-                        jeter = TRUE;
-                    } else {
-                        if (video) m->rattrape_v = FALSE;
-                        else       m->rattrape_a = FALSE;
-                        if (!m->rattrape_v && !m->rattrape_a)
-                            m->rattrapage = -1.0;
-    m->volume  = 1.0;
-                    }
-                }
-                g_mutex_unlock(&m->verrou);
-
-                if (jeter) { av_frame_unref(trame); continue; }
-
-                if (video) {
-                    AVFrame *copie = av_frame_alloc();
-                    av_frame_move_ref(copie, trame);
-                    copie->pts = (int64_t)(pts * AV_TIME_BASE);
-
-                    g_mutex_lock(&m->verrou);
-                    g_queue_push_tail(m->images, copie);
-                    g_mutex_unlock(&m->verrou);
-                } else {
-                    pousser_audio(m, trame, pts);
-                    av_frame_unref(trame);
-                }
-            }
-        }
-
-        if (r == AVERROR_EOF) {
+            vidange_faite = TRUE;
+            depiler_decodeurs(m, trame, TRUE);
             g_mutex_lock(&m->verrou);
-            m->demux_fini = TRUE;
+            m->us_decodage += g_get_monotonic_time() - t_dec;
             g_mutex_unlock(&m->verrou);
+            continue;
         }
+
+        if (m->dec_s && pk->stream_index == m->piste_s) {
+            traiter_sous_titre(m, pk);
+            av_packet_free(&pk);
+            continue;
+        }
+
+        if (pk->stream_index == m->piste_v && m->dec_v) {
+            int r = avcodec_send_packet(m->dec_v, pk);
+            if (r < 0 && r != AVERROR(EAGAIN)) dire_erreur("send_packet video", r);
+        } else if (pk->stream_index == m->piste_a && m->dec_a) {
+            int r = avcodec_send_packet(m->dec_a, pk);
+            if (r < 0 && r != AVERROR(EAGAIN)) dire_erreur("send_packet audio", r);
+        }
+        av_packet_free(&pk);
+
+        depiler_decodeurs(m, trame, FALSE);
+
+        g_mutex_lock(&m->verrou);
+        m->us_decodage += g_get_monotonic_time() - t_dec;
+        g_mutex_unlock(&m->verrou);
     }
 
     av_frame_free(&trame);
-    av_packet_free(&paquet);
     return NULL;
 }
 
@@ -653,10 +903,27 @@ static gboolean ouvrir_piste(VideoMoteur *m, int piste, gboolean video,
     if (video) {
         m->nom_codec = codec->name;
         dec->opaque  = m;
+
+        /* Une surface tient au plus trois octets par pixel -- P010, le pire
+         * cas ; NV12 en tient un et demi. On dimensionne sur le pire. */
+        gint64 par_image = (gint64)MAX(dec->width, 1) * MAX(dec->height, 1) * 3;
+        m->file_images = (int)(BUDGET_IMAGES / MAX(par_image, 1));
+        m->file_images = CLAMP(m->file_images, FILE_MIN, FILE_MAX);
+
         if (m->materiel) {
             dec->hw_device_ctx = av_buffer_ref(m->materiel);
             dec->get_format    = choisir_format;
             m->en_materiel     = TRUE;
+
+            /* LA RESERVE DE SURFACES DOIT SUIVRE LA FILE.
+             *
+             * Le decodeur VA-API alloue un lot fixe de surfaces a
+             * l'ouverture. Si l'on en retient plus que le lot n'en contient,
+             * il ne lui en reste plus pour travailler et il S'ARRETE --
+             * silencieusement, en attendant qu'on lui en rende une. Creuser
+             * la file sans creuser la reserve echangerait donc une saccade
+             * contre un blocage. */
+            dec->extra_hw_frames = m->file_images + 4;
         }
     } else {
         dec->thread_count = 1;    /* l'audio ne merite pas quatre coeurs */
@@ -684,6 +951,7 @@ VideoMoteur *video_moteur_ouvrir(const char *chemin,
     m->usager  = u;
     m->piste_v = m->piste_a = -1;
     m->images  = g_queue_new();
+    m->paquets = g_queue_new();
     m->st_file = g_queue_new();
     m->piste_s = -1;
     m->piste_s_dispo = -1;
@@ -693,6 +961,29 @@ VideoMoteur *video_moteur_ouvrir(const char *chemin,
     if (rappels) m->rappels = *rappels;
     g_mutex_init(&m->verrou);
     g_cond_init(&m->cond);
+    g_cond_init(&m->cond_lec);
+    g_cond_init(&m->cond_repos);
+
+    /* Entree-sortie a nous, quand le chemin est un vrai fichier. Un flux
+     * distant (http) garderait l'entree-sortie de FFmpeg, qui sait parler le
+     * protocole ; ici on ne fait qu'elargir le tampon d'un fichier local ou
+     * monte. */
+    m->fd = open(chemin, O_RDONLY | O_CLOEXEC);
+    if (m->fd >= 0) {
+        uint8_t *tampon = av_malloc(TAMPON_IO);
+        if (tampon) {
+            m->pb = avio_alloc_context(tampon, TAMPON_IO, 0, m,
+                                       io_lire, NULL, io_chercher);
+            if (!m->pb) av_free(tampon);
+        }
+        if (m->pb) {
+            m->fmt = avformat_alloc_context();
+            if (m->fmt) {
+                m->fmt->pb     = m->pb;
+                m->fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+            }
+        }
+    }
 
     int r = avformat_open_input(&m->fmt, chemin, NULL, NULL);
     if (r < 0) {
@@ -778,7 +1069,11 @@ VideoMoteur *video_moteur_ouvrir(const char *chemin,
         (void)0;
     }
 
-    m->fil = g_thread_new("claude-os-video-decodage", fil_decodage, m);
+    g_message("video-moteur : file de %d images d'avance (%d x %d)",
+              m->file_images, m->largeur, m->hauteur);
+
+    m->fil     = g_thread_new("claude-os-video-decodage", fil_decodage, m);
+    m->fil_lec = g_thread_new("claude-os-video-lecture",   fil_lecture,  m);
     return m;
 }
 
@@ -786,12 +1081,18 @@ void video_moteur_fermer(VideoMoteur *m)
 {
     if (!m) return;
 
-    if (m->fil) {
+    if (m->fil || m->fil_lec) {
         g_mutex_lock(&m->verrou);
         m->quitte = TRUE;
+        /* Les trois conditions, sans exception : un fil endormi sur celle
+         * qu'on aurait oubliee ne se reveillerait jamais, et g_thread_join
+         * attendrait pour toujours. */
         g_cond_broadcast(&m->cond);
+        g_cond_broadcast(&m->cond_lec);
+        g_cond_broadcast(&m->cond_repos);
         g_mutex_unlock(&m->verrou);
-        g_thread_join(m->fil);
+        if (m->fil_lec) g_thread_join(m->fil_lec);
+        if (m->fil)     g_thread_join(m->fil);
     }
 
     if (m->audio) video_audio_fermer(m->audio);
@@ -799,6 +1100,7 @@ void video_moteur_fermer(VideoMoteur *m)
     g_free(m->bloc);
 
     if (m->images) { vider_file(m); g_queue_free(m->images); }
+    if (m->paquets) { vider_paquets(m); g_queue_free(m->paquets); }
     if (m->st_file) g_queue_free_full(m->st_file, sous_titre_libre);
     g_free(m->st_courant);
     avcodec_free_context(&m->dec_s);
@@ -807,9 +1109,13 @@ void video_moteur_fermer(VideoMoteur *m)
     avcodec_free_context(&m->dec_a);
     av_buffer_unref(&m->materiel);
     if (m->fmt) avformat_close_input(&m->fmt);
+    if (m->pb) { av_freep(&m->pb->buffer); avio_context_free(&m->pb); }
+    if (m->fd >= 0) close(m->fd);
 
     g_mutex_clear(&m->verrou);
     g_cond_clear(&m->cond);
+    g_cond_clear(&m->cond_lec);
+    g_cond_clear(&m->cond_repos);
     g_free(m->chemin);
     g_free(m);
 }
@@ -833,6 +1139,7 @@ void video_moteur_lire(VideoMoteur *m)
     m->en_pause = FALSE;
     horloge_partir(m);
     g_cond_broadcast(&m->cond);
+    g_cond_broadcast(&m->cond_lec);
     g_mutex_unlock(&m->verrou);
 
     if (m->audio) video_audio_pause(m->audio, FALSE);
@@ -896,7 +1203,20 @@ COMPTEUR(video_moteur_images_sautees, m->sautees, gint64)
 COMPTEUR(video_moteur_images_vues,    m->vues,    gint64)
 COMPTEUR(video_moteur_ecart_max,      m->ecart_max, double)
 COMPTEUR(video_moteur_ecart_moyen,    m->vues ? m->ecart_somme / m->vues : 0.0, double)
+COMPTEUR(video_moteur_famines,        m->famines, gint64)
 #undef COMPTEUR
+
+void video_moteur_temps(VideoMoteur *m, double *lecture_ms, double *lecture_max_ms,
+                        double *decodage_ms)
+{
+    if (!m) return;
+    g_mutex_lock(&m->verrou);
+    gint64 n = MAX(m->lectures, 1);
+    if (lecture_ms)     *lecture_ms     = m->us_lecture / 1000.0 / n;
+    if (lecture_max_ms) *lecture_max_ms = m->us_lecture_max / 1000.0;
+    if (decodage_ms)    *decodage_ms    = m->us_decodage / 1000.0 / MAX(m->vues, 1);
+    g_mutex_unlock(&m->verrou);
+}
 gboolean  video_moteur_materiel(VideoMoteur *m) { return m && m->en_materiel; }
 const char *video_moteur_codec(VideoMoteur *m)
 {
@@ -935,7 +1255,7 @@ void video_moteur_sauter(VideoMoteur *m, double secondes)
     m->saut_demande = TRUE;
     m->saut_cible   = secondes;
     m->pts_dernier  = secondes;
-    g_cond_broadcast(&m->cond);
+    g_cond_broadcast(&m->cond_lec);
     g_mutex_unlock(&m->verrou);
 
     if (m->etat == VIDEO_FINI) poser_etat(m, VIDEO_EN_PAUSE);
@@ -1072,7 +1392,7 @@ void video_moteur_choisir_piste(VideoMoteur *m, VideoTypePiste type, int index)
     }
     m->saut_demande = TRUE;
     m->saut_cible   = ou;
-    g_cond_broadcast(&m->cond);
+    g_cond_broadcast(&m->cond_lec);
     g_mutex_unlock(&m->verrou);
 }
 
@@ -1086,6 +1406,8 @@ AVFrame *video_moteur_image_due(VideoMoteur *m)
 
     g_mutex_lock(&m->verrou);
     double maintenant = horloge(m);
+    if (g_queue_is_empty(m->images) && m->etat == VIDEO_LIT && !m->demux_fini)
+        m->famines++;
 
     while (TRUE) {
         AVFrame *tete = g_queue_peek_head(m->images);
@@ -1095,8 +1417,16 @@ AVFrame *video_moteur_image_due(VideoMoteur *m)
 
         /* La toute premiere image s'affiche sans attendre : au demarrage et
          * apres un saut, l'horloge audio n'existe pas encore et attendre
-         * laisserait la fenetre noire une demi-seconde. */
-        gboolean due = (pts <= maintenant + 0.001) || (m->vues == 0);
+         * laisserait la fenetre noire une demi-seconde.
+         *
+         * MAIS LA PREMIERE SEULEMENT -- « choisie == NULL » n'est pas un
+         * detail. Sans lui, la regle vaut pour tout ce tour de boucle : au
+         * premier battement, TOUTE la file devient due d'un coup et l'on
+         * jette tout sauf la derniere. Avec trois images d'avance cela
+         * passait inapercu ; avec seize, c'etait quinze images sautees a
+         * chaque ouverture, et un ecart de synchronisation de 450 ms. */
+        gboolean due = (pts <= maintenant + 0.001) ||
+                       (m->vues == 0 && choisie == NULL);
         if (!due) break;
 
         if (choisie) {
@@ -1121,7 +1451,17 @@ AVFrame *video_moteur_image_due(VideoMoteur *m)
         g_cond_broadcast(&m->cond);   /* de la place : le decodeur repart */
     }
 
-    gboolean fini = m->demux_fini && g_queue_is_empty(m->images) &&
+    /* LA FIN, C'EST TROIS FILES VIDES, PAS UNE.
+     *
+     * « demux_fini » ne dit plus que le fil de LECTURE a atteint la fin du
+     * fichier -- depuis qu'il lit en avance, cela arrive des la premiere
+     * seconde sur un fichier qui tient dans les 24 Mo de la file. Il reste
+     * alors tout le film a decoder. Oublier la file de paquets ici faisait
+     * annoncer « fin du fichier » au bout de six secondes sur une mire de
+     * trente. */
+    gboolean fini = m->demux_fini &&
+                    g_queue_is_empty(m->paquets) &&
+                    g_queue_is_empty(m->images) &&
                     !m->fin_signalee;
     if (fini) m->fin_signalee = TRUE;
 

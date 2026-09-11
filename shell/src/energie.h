@@ -36,6 +36,7 @@
 #pragma once
 
 #include <glib.h>
+#include <gio/gio.h>     /* GIcon : l'icone des modes */
 #include "config.h"
 
 /* -------------------------------------------------------------------------
@@ -60,6 +61,11 @@ typedef struct {
 
 /* Table terminee par un id NULL. */
 const ShellModeEnergie *shell_energie_modes (void);
+
+/* L'icone d'un mode, a poser par gtk_image_set_from_gicon(). A liberer. Voir
+ * modes-energie.c : pour ces trois-la, le dessin d'Adwaita est prefere a
+ * celui du theme en vigueur. */
+GIcon *shell_energie_mode_icone (const ShellModeEnergie *m);
 
 /* Le mode en vigueur, jamais NULL : un identifiant inconnu -- fichier d'une
  * version anterieure -- renvoie « automatique ». */
@@ -90,3 +96,9 @@ void shell_energie_init (const ShellConfig *cfg);
  * de shell_config_watch : le panneau de reglages ecrit shell.conf, chaque
  * composant relit, et la veille suit sans qu'on ait rien a redemarrer. */
 void shell_energie_reconfigurer (const ShellConfig *cfg);
+
+/* Verrouille l'ecran tout de suite, sans fermer la session : le bouton
+ * « Verrouiller » de la Console. Passe par le meme lanceur que l'etage de
+ * veille, qui sait qu'un verrou est deja en place et n'en lance pas un
+ * second. */
+void shell_energie_verrouiller (void);

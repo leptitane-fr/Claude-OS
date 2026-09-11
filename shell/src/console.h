@@ -60,6 +60,10 @@ void       console_lumiere_relire (GtkWidget *rangee);
  * sert dans les deux sens -- garder l'ecran allume pendant une presentation
  * alors qu'on est sur batterie, ou economiser alors qu'on est branche.
  *
+ * Trois boutons, icone au-dessus du nom -- l'icone est aussi celle que la
+ * barre d'etat montre pour le mode en vigueur. Plus de titre ni de roue
+ * crantee : les durees se reglent par le bouton « Réglages » de la Console.
+ *
  * La rangee N'APPELLE PAS le module d'energie. Elle ecrit shell.conf, et
  * c'est shell_config_watch qui previent tout le monde -- y compris ce
  * processus. C'est le mecanisme deja utilise par le panneau de reglages :
@@ -74,10 +78,14 @@ void console_energie_relire (GtkWidget *rangee);
 
 /* --- Alimentation --------------------------------------------------------
  *
- * Eteindre, redemarrer, mettre en veille — par logind sur le bus systeme.
- * Pas d'appel a « systemctl » : polkit autorise deja ces trois actions pour
- * l'utilisateur de la session active, et lancer un processus pour cela
- * ajouterait une dependance a un binaire et une fenetre de course.
+ * Verrouiller, fermer la session, mettre en veille, redemarrer, eteindre.
+ * Les trois derniers par logind sur le bus systeme -- pas d'appel a
+ * « systemctl » : polkit les autorise deja pour l'utilisateur de la session
+ * active, et lancer un processus pour cela ajouterait une dependance a un
+ * binaire et une fenetre de course. Verrouiller passe par le module
+ * d'energie (claude-os-verrou), fermer la session arrete labwc.
+ *
+ * Icones seules : le nom de chaque bouton est dans son infobulle.
  *
  * `popover` est referme avant d'agir : la Console est une surface
  * layer-shell posee par-dessus tout, et la laisser ouverte pendant l'arret

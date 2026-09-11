@@ -22,7 +22,7 @@
 /* Deux cents millisecondes de tampon. Assez pour absorber un hoquet du
  * decodeur, assez peu pour qu'un saut soit immediat -- ce qui est vide au
  * saut, l'oreille l'entend comme un temps de reaction. */
-#define TAMPON_MS 200
+#define TAMPON_MS 1000
 
 struct _VideoAudio {
     struct pw_thread_loop *boucle;

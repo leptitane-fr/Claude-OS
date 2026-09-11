@@ -25,6 +25,7 @@ struct _ShellWindow {
     gboolean  activated;
     gboolean  minimized;
     gpointer  handle;      /* zwlr_foreign_toplevel_handle_v1 *             */
+    guint64   serie;       /* identite stable, jamais reutilisee            */
 };
 
 /* Appelee apres chaque lot d'evenements valide par le compositeur. */
@@ -39,6 +40,14 @@ void shell_toplevels_init (ShellToplevelsFunc on_change, gpointer user_data);
  * Le tableau appartient au module et change a chaque rappel : ne pas le
  * conserver au-dela du traitement en cours. Elements : ShellWindow *. */
 const GPtrArray *shell_toplevels_get (void);
+
+/* Serie de la fenetre active, ou 0 s'il n'y en a aucune.
+ *
+ * Une serie et non un pointeur : l'adresse d'une fenetre fermee peut etre
+ * rendue a la suivante par l'allocateur, et « la fenetre active n'a pas
+ * change » serait alors vrai a tort -- le dock resterait a l'ecran au
+ * lancement d'une application. */
+guint64 shell_toplevels_serie_active (void);
 
 /* Ramene une fenetre au premier plan. */
 void shell_toplevel_activate (const ShellWindow *win);

@@ -101,8 +101,14 @@ struct _Notifs {
     GtkWidget   *centre_vide;
     GtkWidget   *banniere;     /* GtkPopover : l'arrivante                   */
     guint        banniere_timer;
+    gboolean     banniere_attente;  /* prete, la barre n'est pas encore la   */
+    int          banniere_duree;    /* ms ; 0 = jusqu'a ce qu'on l'ouvre      */
 
-    GtkWidget   *fenetre;      /* la barre d'etat : sert de nappe            */
+    NotifsBarreFunc barre;          /* la barre d'etat, qui peut etre partie */
+    gpointer        barre_data;
+
+    GtkWidget   *fenetre;      /* la barre d'etat : la nappe la laisse dehors */
+    GtkWidget   *nappe;        /* recoit le clic a cote, centre ouvert       */
     int          hauteur_console;   /* 0 quand elle est fermee               */
     int          largeur_console;   /* imposee aux deux surfaces             */
     GtkWidget   *centre_boite;      /* contenu du centre, pour sa largeur    */
@@ -111,23 +117,138 @@ struct _Notifs {
 static void centre_reconstruire (Notifs *n);
 static void positionner (Notifs *n);
 
+/* Dit a la barre que ce qu'on lui demande a change. Rend ce qu'elle rend :
+ * TRUE si elle est a sa place. Sans barre inscrite -- le banc d'essai --,
+ * elle est reputee y etre. */
+static gboolean
+prevenir_barre (Notifs *n)
+{
+    return n->barre != NULL ? n->barre (n->barre_data) : TRUE;
+}
+
 /* -------------------------------------------------------------------------
  * La nappe
- * ------------------------------------------------------------------------- */
-/* Etendre la fenetre de la barre a tout l'ecran, ou la rendre a son coin.
  *
- * Elle ne dessine rien de plus : « window.shell » est transparente, et son
- * contenu reste cale en bas a droite. Seule sa zone d'entree change, ce qui
- * suffit a recevoir le clic exterieur. On ne touche PAS a la zone exclusive
- * — elle vaut -1, la barre ne reserve rien et ne repousse aucune fenetre,
- * etendue ou non. */
+ * Ce qui recoit le clic « a cote » tant que le centre est ouvert. Le centre
+ * n'a pas de saisie a lui (voir notifs_ancrer) : sans nappe, un clic sur une
+ * application le laisserait ouvert.
+ *
+ * UNE SURFACE A PART, ET SURTOUT PAS LA BARRE ELARGIE.
+ *
+ * La premiere version etendait la fenetre de la barre a tout l'ecran. Elle
+ * n'a jamais servi -- l'appel qui la deployait manquait -- et, le jour ou il
+ * a ete ajoute (11 septembre 2026), le centre s'est mis a sauter a gauche de
+ * l'ecran des son ouverture. Mesure au banc dans la trace Wayland : la
+ * surface de la barre passe de 216x42 a 1920x1080, GTK redemande la position
+ * du popover (anchor_rect 1740,1038), et labwc 0.8.3 la calcule depuis
+ * l'ancienne origine de la surface -- configure(-151, ...). Le centre, et la
+ * Console avec lui si elle est ouverte, partent hors de l'ecran.
+ *
+ * REGLE : ON NE REDIMENSIONNE JAMAIS UNE SURFACE QUI PORTE UN POPOVER OUVERT.
+ *
+ * La nappe est donc sa propre fenetre, plein ecran, qui laisse la barre
+ * dehors : sa zone d'entree exclut le coin qu'occupe la fenetre de la barre.
+ * La pilule et la cloche restent cliquables a travers elle -- ouvrir la
+ * Console pendant que le centre est ouvert marche toujours. Le centre et la
+ * Console sont des popovers, que labwc empile au-dessus de toutes les
+ * couches : la nappe ne les couvre pas.
+ *
+ * PRESQUE TRANSPARENTE : une fenetre GTK entierement transparente et vide ne
+ * recoit aucun appui. Meme constat, meme remede que la bande du bord du
+ * dock (dock.c, bord_creer).
+ * ------------------------------------------------------------------------- */
+static void
+nappe_zone (GtkDrawingArea *zone, int largeur, int hauteur, gpointer data)
+{
+    Notifs *n = data;
+    (void) zone;
+
+    GdkSurface *surface = gtk_native_get_surface (GTK_NATIVE (n->nappe));
+    if (surface == NULL)
+        return;
+
+    cairo_rectangle_int_t tout = { 0, 0, largeur, hauteur };
+    cairo_region_t *entree = cairo_region_create_rectangle (&tout);
+
+    /* La barre est ancree en bas a droite : son coin se deduit de sa taille. */
+    if (n->fenetre != NULL) {
+        int lb = gtk_widget_get_width (n->fenetre);
+        int hb = gtk_widget_get_height (n->fenetre);
+        cairo_rectangle_int_t barre = { largeur - lb, hauteur - hb, lb, hb };
+        cairo_region_subtract_rectangle (entree, &barre);
+    }
+    gdk_surface_set_input_region (surface, entree);
+    cairo_region_destroy (entree);
+}
+
+static void centre_fermer (Notifs *n);
+
+/* A LA FIN DU GESTE, PAS A L'APPUI.
+ *
+ * Fermer le centre retire la nappe. Retiree pendant que le bouton est
+ * encore enfonce, elle ne recevait jamais le relachement, et GTK s'en
+ * plaignait a chaque fois dans le journal : « Broken accounting of active
+ * state » -- releve au banc, geste par geste. « end » vient apres le
+ * relachement, et aussi quand le doigt a glisse au lieu de toucher : un
+ * glisser a cote ferme le centre comme un clic. */
+static void
+on_nappe_fin (GtkGesture *g, GdkEventSequence *seq, gpointer data)
+{
+    Notifs *n = data;
+    (void) g; (void) seq;
+    if (gtk_widget_get_visible (n->centre))
+        centre_fermer (n);
+}
+
+static GtkWidget *
+nappe_creer (Notifs *n)
+{
+    static GtkCssProvider *presque = NULL;
+    if (presque == NULL) {
+        presque = gtk_css_provider_new ();
+        gtk_css_provider_load_from_string (presque,
+            "window.claude-os-nappe { background-color: rgba(0, 0, 0, 0.01); }");
+        gtk_style_context_add_provider_for_display (gdk_display_get_default (),
+            GTK_STYLE_PROVIDER (presque), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    }
+
+    GtkWidget *nappe = gtk_window_new ();
+    gtk_widget_add_css_class (nappe, "claude-os-nappe");
+    gtk_layer_init_for_window (GTK_WINDOW (nappe));
+    /* OVERLAY, comme la barre : au-dessus des fenetres plein ecran. */
+    gtk_layer_set_layer (GTK_WINDOW (nappe), GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_namespace (GTK_WINDOW (nappe), "claude-os-nappe-centre");
+    for (int bord = 0; bord < GTK_LAYER_SHELL_EDGE_ENTRY_NUMBER; bord++)
+        gtk_layer_set_anchor (GTK_WINDOW (nappe), bord, TRUE);
+    gtk_layer_set_exclusive_zone (GTK_WINDOW (nappe), -1);
+    gtk_layer_set_keyboard_mode (GTK_WINDOW (nappe),
+                                 GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+
+    /* Une zone de dessin pour son signal « resize » : c'est la qu'on connait
+     * enfin la taille de l'ecran, donc la zone d'entree a poser. */
+    GtkWidget *zone = gtk_drawing_area_new ();
+    g_signal_connect (zone, "resize", G_CALLBACK (nappe_zone), n);
+    gtk_window_set_child (GTK_WINDOW (nappe), zone);
+
+    GtkGesture *g = gtk_gesture_click_new ();
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (g), 0);   /* tous les boutons */
+    g_signal_connect (g, "end", G_CALLBACK (on_nappe_fin), n);
+    gtk_widget_add_controller (nappe, GTK_EVENT_CONTROLLER (g));
+    return nappe;
+}
+
+/* Affichee a l'ouverture du centre, retiree a sa fermeture -- retiree et non
+ * vide : une surface plein ecran est composee a chaque image de ce qui bouge
+ * dessous, et celle-ci avalerait les clics destines aux applications. */
 static void
 nappe_deployer (Notifs *n, gboolean deployee)
 {
     if (n->fenetre == NULL)
-        return;
-    gtk_layer_set_anchor (GTK_WINDOW (n->fenetre), GTK_LAYER_SHELL_EDGE_LEFT, deployee);
-    gtk_layer_set_anchor (GTK_WINDOW (n->fenetre), GTK_LAYER_SHELL_EDGE_TOP,  deployee);
+        return;                 /* banc d'essai sans barre */
+    if (deployee && n->nappe == NULL)
+        n->nappe = nappe_creer (n);
+    if (n->nappe != NULL)
+        gtk_widget_set_visible (n->nappe, deployee);
 }
 
 static void
@@ -135,28 +256,13 @@ centre_fermer (Notifs *n)
 {
     gtk_popover_popdown (GTK_POPOVER (n->centre));
     nappe_deployer (n, FALSE);
-}
-
-/* Un clic recu par la fenetre elle-meme est forcement « a cote » : tout ce
- * qui se clique — la cloche, la pilule, le centre — est un widget qui
- * revendique le geste avant que la fenetre ne le voie. */
-static void
-on_nappe_clic (GtkGestureClick *g, int n_press, double x, double y, gpointer data)
-{
-    Notifs *n = data;
-    (void) g; (void) n_press; (void) x; (void) y;
-    if (gtk_widget_get_visible (n->centre))
-        centre_fermer (n);
+    prevenir_barre (n);
 }
 
 void
 notifs_nappe (Notifs *n, GtkWidget *fenetre)
 {
     n->fenetre = fenetre;
-    GtkGesture *g = gtk_gesture_click_new ();
-    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (g), 0);   /* tous les boutons */
-    g_signal_connect (g, "pressed", G_CALLBACK (on_nappe_clic), n);
-    gtk_widget_add_controller (fenetre, GTK_EVENT_CONTROLLER (g));
 }
 
 /* -------------------------------------------------------------------------
@@ -579,7 +685,26 @@ banniere_masquer (gpointer data)
     n->banniere_timer = 0;
     if (n->banniere != NULL)
         gtk_popover_popdown (GTK_POPOVER (n->banniere));
+    prevenir_barre (n);        /* elle peut repartir */
     return G_SOURCE_REMOVE;
+}
+
+/* La banniere prete, et la barre a sa place : on l'affiche. La duree court
+ * a partir d'ici, pas de l'arrivee -- le temps que la barre remonte ne doit
+ * pas etre pris sur le temps de lecture. */
+static void
+banniere_afficher (Notifs *n)
+{
+    n->banniere_attente = FALSE;
+    positionner (n);
+    gtk_popover_popup (GTK_POPOVER (n->banniere));
+
+    /* Urgence critique : la banniere reste jusqu'a ce qu'on s'en occupe.
+     * C'est le seul cas ou la specification demande de ne pas expirer, et
+     * c'est aussi le seul ou l'ignorer serait grave. */
+    if (n->banniere_duree == 0)
+        return;
+    n->banniere_timer = g_timeout_add (n->banniere_duree, banniere_masquer, n);
 }
 
 static void
@@ -594,8 +719,10 @@ banniere_montrer (Notifs *n, Notif *x, int duree_ms)
     if (gtk_widget_get_visible (n->centre))
         return;
 
-    if (n->banniere_timer != 0)
+    if (n->banniere_timer != 0) {
         g_source_remove (n->banniere_timer);
+        n->banniere_timer = 0;   /* sinon un identifiant mort survit a l'attente */
+    }
 
     GtkWidget *ancien = gtk_popover_get_child (GTK_POPOVER (n->banniere));
     if (ancien != NULL)
@@ -605,15 +732,15 @@ banniere_montrer (Notifs *n, Notif *x, int duree_ms)
         gtk_widget_set_size_request (c, n->largeur_console, -1);
     gtk_popover_set_child (GTK_POPOVER (n->banniere), c);
 
-    positionner (n);
-    gtk_popover_popup (GTK_POPOVER (n->banniere));
+    n->banniere_duree   = (x->urgence >= 2 && duree_ms == 0) ? 0 : duree_ms;
+    n->banniere_attente = TRUE;
 
-    /* Urgence critique : la banniere reste jusqu'a ce qu'on s'en occupe.
-     * C'est le seul cas ou la specification demande de ne pas expirer, et
-     * c'est aussi le seul ou l'ignorer serait grave. */
-    if (x->urgence >= 2 && duree_ms == 0)
-        return;
-    n->banniere_timer = g_timeout_add (duree_ms, banniere_masquer, n);
+    /* « Encore en attente » verifie APRES le rappel : si les animations sont
+     * coupees, la barre arrive a sa place pendant le rappel meme, et a deja
+     * appele notifs_barre_en_place(). L'afficher une seconde fois ici
+     * poserait deux minuteries pour une banniere. */
+    if (prevenir_barre (n) && n->banniere_attente)
+        banniere_afficher (n);
 }
 
 /* -------------------------------------------------------------------------
@@ -794,12 +921,18 @@ on_cloche (GtkButton *b, gpointer data)
         g_source_remove (n->banniere_timer);
         n->banniere_timer = 0;
     }
+    n->banniere_attente = FALSE;
     gtk_popover_popdown (GTK_POPOVER (n->banniere));
 
     centre_reconstruire (n);
     positionner (n);
     gtk_popover_popup (GTK_POPOVER (n->centre));
 
+    /* LA NAPPE SE DEPLOIE A L'OUVERTURE. Ecrite le 8 septembre 2026 avec son
+     * repli, elle n'etait jamais deployee : seul l'appel a FALSE existait,
+     * et le clic a cote ne fermait pas le centre. */
+    nappe_deployer (n, TRUE);
+    prevenir_barre (n);
 }
 
 static GtkWidget *
@@ -910,7 +1043,13 @@ notifs_new (gboolean apercu)
     n->prochain_id = 1;
     n->apercu = apercu;
 
-    n->cloche = gtk_button_new_from_icon_name ("claude-os-cloche-symbolic");
+    /* L'icone a 20 px, pas aux 16 par defaut : la cloche prend la hauteur
+     * de la pilule (status.c, cloche_caler), et la pilule a grandi avec la
+     * date. Une icone de 16 dans un rond de 48 s'y perdait. */
+    GtkWidget *pictogramme = gtk_image_new_from_icon_name ("claude-os-cloche-symbolic");
+    gtk_image_set_pixel_size (GTK_IMAGE (pictogramme), 20);
+    n->cloche = gtk_button_new ();
+    gtk_button_set_child (GTK_BUTTON (n->cloche), pictogramme);
     gtk_widget_add_css_class (n->cloche, "cloche");
     gtk_widget_set_valign (n->cloche, GTK_ALIGN_END);
     gtk_widget_set_tooltip_text (n->cloche, "Notifications");
@@ -940,4 +1079,36 @@ notifs_new (gboolean apercu)
 
     g_bus_get (G_BUS_TYPE_SESSION, NULL, on_bus, n);
     return n;
+}
+
+/* -------------------------------------------------------------------------
+ * La barre qui peut etre partie -- voir notifications.h
+ * ------------------------------------------------------------------------- */
+void
+notifs_suivre_barre (Notifs *n, NotifsBarreFunc f, gpointer user_data)
+{
+    n->barre      = f;
+    n->barre_data = user_data;
+}
+
+void
+notifs_barre_en_place (Notifs *n)
+{
+    if (n->banniere_attente)
+        banniere_afficher (n);
+}
+
+gboolean
+notifs_occupe (Notifs *n)
+{
+    return n->banniere_attente
+        || (n->banniere != NULL && gtk_widget_get_visible (n->banniere))
+        || (n->centre   != NULL && gtk_widget_get_visible (n->centre));
+}
+
+void
+notifs_fermer_centre (Notifs *n)
+{
+    if (n->centre != NULL && gtk_widget_get_visible (n->centre))
+        centre_fermer (n);
 }

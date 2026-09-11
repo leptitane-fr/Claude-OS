@@ -702,6 +702,12 @@ static void bilan(App *a, const char *quand)
 {
     if (!a->moteur) return;
     double sec = (g_get_monotonic_time() - a->depart) / 1e6;
+    double lec = 0, lec_max = 0, dec = 0;
+    video_moteur_temps(a->moteur, &lec, &lec_max, &dec);
+    g_message("video : %s -- lecture du fichier %.1f ms/appel (pire %.0f ms) ; "
+              "décodage %.1f ms/image ; %ld famines",
+              quand, lec, lec_max, dec,
+              (long)video_moteur_famines(a->moteur));
     g_message("video : %s -- %ld images vues, %ld sautées ; "
               "%ld sans copie, %ld recopiées ; "
               "synchro %.1f ms en moyenne, %.1f ms au pire ; "

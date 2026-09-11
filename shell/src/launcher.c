@@ -769,8 +769,10 @@ construire_fenetre (GtkApplication *app, ShellConfig *cfg)
      * pourrait de toute facon pas se placer elle-meme : sous Wayland, un
      * client ne choisit pas ses coordonnees. */
     gtk_layer_init_for_window (GTK_WINDOW (L.fenetre));
-    /* OVERLAY, au-dessus du dock qui est en TOP : le lanceur doit passer
-     * devant lui, sans quoi ses dernieres lignes seraient masquees. */
+    /* OVERLAY : au-dessus des fenetres, plein ecran compris. Le dock et la
+     * barre y sont aussi depuis le 11 septembre 2026 (voir dock.c, « A
+     * l'ecran ou non ») ; l'ordre entre eux n'importe pas, puisque le
+     * lanceur leur laisse la bande du bas et ne les chevauche jamais. */
     gtk_layer_set_layer (GTK_WINDOW (L.fenetre), GTK_LAYER_SHELL_LAYER_OVERLAY);
     gtk_layer_set_namespace (GTK_WINDOW (L.fenetre), "claude-os-lanceur");
     for (int bord = 0; bord < GTK_LAYER_SHELL_EDGE_ENTRY_NUMBER; bord++)
