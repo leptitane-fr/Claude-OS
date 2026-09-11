@@ -1765,6 +1765,25 @@ window.images { background-color: @surface; }
 .video-bouton:active   { background-color: @surface-sunk; }
 .video-bouton:disabled { opacity: 0.35; }
 
+/* LE SÉLECTEUR, QUI EST UN PANNEAU ET NON UNE FENÊTRE.
+   Deux fenêtres, c'est un empilement à négocier et un focus à obtenir — et
+   c'est ce qui a enfermé l'utilisateur deux fois. Une seule fenêtre : ce qui
+   est visible est cliquable, par construction. */
+.video-panneau {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px alpha(#000000, 0.55);
+}
+.video-panneau-barre {
+  padding: 8px 10px;
+  border-bottom: 1px solid @border;
+}
+.video-panneau-titre {
+  font-weight: 700;
+  color: @text;
+}
+
 /* L'ACCUEIL : la seule chose visible d'une fenêtre sans film. Elle flotte
    sur un fond transparent, donc elle porte son propre fond. */
 .video-accueil {

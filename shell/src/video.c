@@ -87,7 +87,9 @@ typedef struct {
     GtkWidget      *racine;        /* la GtkOverlay qui porte tout        */
     GtkWidget      *rev_fermer;    /* la croix, au survol de l'image      */
     GtkWidget      *accueil;       /* « Ouvrir une vidéo… », fenetre vide */
-    GtkWidget      *selecteur;     /* la boite d'ouverture, s'il y en a   */
+    GtkWidget      *panneau;       /* le selecteur, DANS la fenetre       */
+    GtkWidget      *choix;         /* le GtkFileChooserWidget             */
+    GtkWidget      *b_valider;
     guint           retrait_fermer;
 
     GtkWidget      *b_lecture;
@@ -130,6 +132,7 @@ typedef struct {
     int             duree_essai;
     gboolean        plein;
     gboolean        scenario;
+    gboolean        ouvrir_au_depart;  /* banc : montrer le panneau      */
     gboolean        sans_offload;   /* banc : pour mesurer ce qu'il coute  */
     gboolean        revele;         /* --revele : banc, pour la capture     */
     gboolean        avec_st;        /* --sous-titres : banc, active la 1re  */
@@ -150,7 +153,10 @@ static void bilan(App *a, const char *quand);
 static void act_sourdine(GtkButton *b, gpointer u);
 static void ouvrir_fichier(App *a, const char *chemin);
 static void demander_fichier(App *a);
+static void panneau_cacher(App *a);
 static void reprise_ecrire(const char *fichier, double position, double duree);
+static GtkWidget *construire_panneau(App *a);
+static GPtrArray *lecteurs_reseau_montes(void);
 static void reveler(App *a, gboolean visible, gboolean momentane);
 
 /* ---------------------------------------------------- reprendre ou l'on en
@@ -1066,6 +1072,10 @@ static gboolean sur_touche(GtkEventControllerKey *c, guint val, guint code,
         case GDK_KEY_f:
         case GDK_KEY_F11:    basculer_plein(a);                      return TRUE;
         case GDK_KEY_Escape:
+            if (a->panneau && gtk_widget_get_visible(a->panneau)) {
+                panneau_cacher(a);
+                return TRUE;
+            }
             if (gtk_window_is_fullscreen(GTK_WINDOW(a->fenetre)))
                 gtk_window_unfullscreen(GTK_WINDOW(a->fenetre));
             else
@@ -1365,6 +1375,16 @@ static gboolean sur_position_flottant(GtkOverlay *o, GtkWidget *enfant,
 
     if (enfant == a->accueil) return FALSE;   /* centre, GTK s'en charge */
 
+    if (enfant == a->panneau) {
+        /* Il occupe la fenetre en laissant voir un liseré de l'image
+         * autour : on n'a pas quitte le lecteur, on ouvre un tiroir. */
+        int marge = MIN(40, MIN(W, H) / 12);
+        alloc->x = marge;  alloc->y = marge;
+        alloc->width  = W - 2 * marge;
+        alloc->height = H - 2 * marge;
+        return TRUE;
+    }
+
     if (enfant == a->rev_fermer) {
         gtk_widget_measure(a->rev_fermer, GTK_ORIENTATION_HORIZONTAL, -1,
                            &min, &nat_l, NULL, NULL);
@@ -1483,6 +1503,9 @@ static void construire(App *a)
     gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->commandes);
     gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->rev_fermer);
     gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->accueil);
+
+    a->panneau = construire_panneau(a);
+    gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->panneau);
     g_signal_connect(a->racine, "get-child-position",
                      G_CALLBACK(sur_position_flottant), a);
 
@@ -1668,40 +1691,104 @@ static GPtrArray *lecteurs_reseau_montes(void)
     return points;
 }
 
-static void sur_reponse_selecteur(GtkDialog *d, int reponse, gpointer u);
+/* ================================================ LE SELECTEUR EST UN PANNEAU
 
-/* LANCE SANS FICHIER, UN LECTEUR DOIT DEMANDER LEQUEL.
- *
- * DEUX PIEGES PAYES ICI, tous deux constates sur MADOO.
- *
- * 1. La boite s'ouvrait DERRIERE la fenetre. Elle etait creee dans
- *    l'activation, avant que la fenetre parente ne soit affichee : il n'y
- *    avait alors rien au-dessus de quoi se placer. Elle est desormais
- *    ouverte au « map » de la fenetre, modale et transitoire -- les trois
- *    ensemble, pas l'une des trois.
- *
- * 2. GtkFileDialog, l'API recommandee depuis GTK 4.10, NE SAIT PAS ajouter
- *    de raccourci vers un dossier. Elle n'expose que le dossier initial. Or
- *    les lecteurs reseau ne sont pas dans la barre laterale de GIO (voir
- *    ci-dessus) : avec elle, ils resteraient hors d'atteinte, sauf a taper
- *    le chemin de memoire. On garde donc GtkFileChooserDialog, deprecie
- *    mais capable, et on le dit plutot que de le subir. */
-static void demander_fichier(App *a)
+   ET NON UNE FENETRE, APRES DEUX PIEGES.
+
+   Version 1 : une boite MODALE. Le 10 septembre, elle s'est glissee derriere
+   une autre application ; son « Annuler » est passe hors de vue, et la
+   fenetre dessous -- inerte parce que modale, et sans barre de titre --
+   n'offrait plus rien a cliquer. Application enfermee.
+
+   Version 2 : la meme, NON modale. Le 11 septembre, l'utilisateur decrit une
+   fenetre « gelee au sens strict » : aucun clic ne passe, elle ne remonte
+   meme pas au premier plan, et seul un clic droit sur l'icone du dock permet
+   de fermer l'application. Une fenetre qui ne remonte pas au clic ne recoit
+   aucun evenement : ce n'est pas de la lenteur, c'est une surface que le
+   compositeur ne lui destine pas.
+
+   Deux causes possibles -- le focus donne au parent, ou un empilement ou la
+   fenetre transparente du lecteur passe par-dessus sa propre boite -- et
+   toutes deux tiennent a la MEME chose : il y avait deux fenetres.
+
+   Version 3, celle-ci : il n'y en a plus qu'une. Le selecteur est un panneau
+   posé dans la fenetre du lecteur, dans la meme GtkOverlay que la capsule.
+   Plus d'empilement, plus de focus a negocier, plus de transitoire : ce qui
+   est visible est cliquable, par construction.
+
+   Le prix : GtkFileChooserWidget est deprecie depuis GTK 4.10, comme la
+   boite qu'il remplace. On l'assume -- l'API recommandee ne sait ni
+   s'embarquer dans une fenetre, ni montrer les lecteurs reseau. */
+
+static void panneau_cacher(App *a)
 {
-    /* Deja ouverte : on la remonte plutot que d'en ouvrir une seconde. */
-    if (a->selecteur) {
-        gtk_window_present(GTK_WINDOW(a->selecteur));
+    if (!a->panneau) return;
+    gtk_widget_set_visible(a->panneau, FALSE);
+    gtk_widget_set_visible(a->accueil, a->moteur == NULL);
+}
+
+static void panneau_choisir(App *a)
+{
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+    g_autoptr(GFile) f = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(a->choix));
+    G_GNUC_END_IGNORE_DEPRECATIONS
+    if (!f) return;
+
+    g_autofree gchar *chemin = g_file_get_path(f);
+    g_autofree gchar *uri    = g_file_get_uri(f);
+
+    /* « Ouvrir » sur un DOSSIER y entre, il ne reste pas sans rien faire :
+     * un bouton qui ne repond pas est indiscernable d'une application
+     * bloquee, et ce lecteur en a deja assez donne sur ce chapitre. */
+    if (chemin && g_file_test(chemin, G_FILE_TEST_IS_DIR)) {
+        G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+        gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(a->choix), f, NULL);
+        G_GNUC_END_IGNORE_DEPRECATIONS
         return;
     }
 
+    panneau_cacher(a);
+
+    if (a->moteur && a->fichier)
+        reprise_ecrire(a->fichier, video_moteur_position(a->moteur),
+                       video_moteur_duree(a->moteur));
+
+    g_free(a->fichier);
+    a->fichier = g_strdup(chemin ? chemin : uri);
+    if (chemin) dernier_dossier_ecrire(chemin);
+    ouvrir_fichier(a, a->fichier);
+}
+
+static void act_panneau_ouvrir(GtkButton *b, gpointer u) { (void) b; panneau_choisir((App *)u); }
+static void act_panneau_annuler(GtkButton *b, gpointer u) { (void) b; panneau_cacher((App *)u); }
+static void sur_fichier_active(GtkWidget *w, gpointer u) { (void) w; panneau_choisir((App *)u); }
+
+static GtkWidget *construire_panneau(App *a)
+{
+    GtkWidget *boite = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_add_css_class(boite, "video-panneau");
+
+    GtkWidget *barre = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_widget_add_css_class(barre, "video-panneau-barre");
+
+    GtkWidget *annuler = gtk_button_new_with_label("Annuler");
+    g_signal_connect(annuler, "clicked", G_CALLBACK(act_panneau_annuler), a);
+
+    GtkWidget *titre = gtk_label_new("Ouvrir une vidéo");
+    gtk_widget_add_css_class(titre, "video-panneau-titre");
+    gtk_widget_set_hexpand(titre, TRUE);
+
+    a->b_valider = gtk_button_new_with_label("Ouvrir");
+    gtk_widget_add_css_class(a->b_valider, "suggested-action");
+    g_signal_connect(a->b_valider, "clicked", G_CALLBACK(act_panneau_ouvrir), a);
+
+    gtk_box_append(GTK_BOX(barre), annuler);
+    gtk_box_append(GTK_BOX(barre), titre);
+    gtk_box_append(GTK_BOX(barre), a->b_valider);
+
     G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    GtkWidget *d = gtk_file_chooser_dialog_new(
-        "Ouvrir une vidéo", GTK_WINDOW(a->fenetre),
-        GTK_FILE_CHOOSER_ACTION_OPEN,
-        "_Annuler", GTK_RESPONSE_CANCEL,
-        "_Ouvrir",  GTK_RESPONSE_ACCEPT,
-        NULL);
-    GtkFileChooser *ch = GTK_FILE_CHOOSER(d);
+    a->choix = gtk_file_chooser_widget_new(GTK_FILE_CHOOSER_ACTION_OPEN);
+    GtkFileChooser *ch = GTK_FILE_CHOOSER(a->choix);
 
     GtkFileFilter *videos = gtk_file_filter_new();
     gtk_file_filter_set_name(videos, "Vidéos");
@@ -1713,6 +1800,12 @@ static void demander_fichier(App *a)
     gtk_file_filter_add_pattern(tout, "*");
     gtk_file_chooser_add_filter(ch, tout);
 
+    /* LES LECTEURS RESEAU, A LA MAIN.
+     *
+     * Ils sont montes sous /run/claude-os/reseau/<nom>, et
+     * g_unix_mount_guess_should_display() ne retient que /media,
+     * /run/media/<user> et le dossier personnel : un partage monte,
+     * parfaitement accessible, reste invisible de toute boite « Ouvrir ». */
     g_autoptr(GPtrArray) reseau = lecteurs_reseau_montes();
     for (guint i = 0; i < reseau->len; i++) {
         const char *point = g_ptr_array_index(reseau, i);
@@ -1724,13 +1817,25 @@ static void demander_fichier(App *a)
             g_clear_error(&e);
         }
     }
+    G_GNUC_END_IGNORE_DEPRECATIONS
+
+    g_signal_connect(a->choix, "file-activated", G_CALLBACK(sur_fichier_active), a);
+    gtk_widget_set_vexpand(a->choix, TRUE);
+
+    gtk_box_append(GTK_BOX(boite), barre);
+    gtk_box_append(GTK_BOX(boite), a->choix);
+    gtk_widget_set_visible(boite, FALSE);
+    return boite;
+}
+
+static void demander_fichier(App *a)
+{
+    if (!a->panneau) return;
 
     /* OUVRIR SUR UN VRAI DOSSIER, ET JAMAIS SUR « RECENTS ».
      *
      * C'est le mode par defaut de GTK, et sur cette machine il ne montre que
-     * deux entrees sans rapport : la boite a l'air vide, donc cassee. On
-     * ouvre sur le dossier du film courant, sinon sur le dernier visite,
-     * sinon sur le dossier personnel. */
+     * deux entrees sans rapport : le panneau a l'air vide, donc casse. */
     g_autofree gchar *depart = NULL;
     if (a->fichier) {
         g_autoptr(GFile) f = g_file_new_for_path(a->fichier);
@@ -1742,52 +1847,17 @@ static void demander_fichier(App *a)
         g_free(depart);
         depart = g_strdup(g_get_home_dir());
     }
-    g_autoptr(GFile) fdep = g_file_new_for_path(depart);
-    gtk_file_chooser_set_current_folder(ch, fdep, NULL);
-    G_GNUC_END_IGNORE_DEPRECATIONS
-
-    /* PAS MODALE, ET C'EST DELIBERE.
-     *
-     * Une boite modale sur une fenetre SANS BARRE DE TITRE est un piege :
-     * le 10 septembre 2026, elle s'est glissee derriere une autre
-     * application, son « Annuler » est passe hors de vue, et la fenetre
-     * dessous -- inerte parce que modale -- n'offrait plus rien a cliquer.
-     * Non modale, la croix de fermeture du lecteur reste atteignable quoi
-     * qu'il arrive. Elle reste transitoire, donc au-dessus de son parent. */
-    gtk_window_set_default_size(GTK_WINDOW(d), 900, 600);
-    gtk_window_set_transient_for(GTK_WINDOW(d), GTK_WINDOW(a->fenetre));
-    gtk_window_set_destroy_with_parent(GTK_WINDOW(d), TRUE);
-    g_signal_connect(d, "response", G_CALLBACK(sur_reponse_selecteur), a);
-    a->selecteur = d;
-    gtk_window_present(GTK_WINDOW(d));
-}
-
-static void sur_reponse_selecteur(GtkDialog *d, int reponse, gpointer u)
-{
-    App *a = u;
-    a->selecteur = NULL;
-
-    if (reponse != GTK_RESPONSE_ACCEPT) {
-        /* Annuler ne ferme plus l'application : la fenetre reste, avec son
-         * invitation a ouvrir. Fermer d'autorite au moindre « Annuler »
-         * etait brutal -- et l'utilisateur n'avait rien demande de tel. */
-        gtk_window_destroy(GTK_WINDOW(d));
-        return;
-    }
 
     G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-    g_autoptr(GFile) f = gtk_file_chooser_get_file(GTK_FILE_CHOOSER(d));
+    g_autoptr(GFile) fdep = g_file_new_for_path(depart);
+    gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(a->choix), fdep, NULL);
     G_GNUC_END_IGNORE_DEPRECATIONS
-    gtk_window_destroy(GTK_WINDOW(d));
-    if (!f) return;
 
-    g_autofree gchar *chemin = g_file_get_path(f);
-    g_autofree gchar *uri    = g_file_get_uri(f);
-    g_free(a->fichier);
-    a->fichier = g_strdup(chemin ? chemin : uri);
-    if (chemin) dernier_dossier_ecrire(chemin);
-    ouvrir_fichier(a, a->fichier);
+    gtk_widget_set_visible(a->accueil, FALSE);
+    gtk_widget_set_visible(a->panneau, TRUE);
+    gtk_widget_grab_focus(a->choix);
 }
+
 
 static void sur_demarrage(GtkApplication *app, gpointer cfg)
 {
@@ -1831,6 +1901,7 @@ static void sur_activation(GApplication *app, gpointer u)
             g_source_remove(a->retrait_fermer);
             a->retrait_fermer = 0;
         }
+        if (a->ouvrir_au_depart) demander_fichier(a);
     }
 }
 
@@ -1845,6 +1916,8 @@ int main(int argc, char **argv)
             a.scenario = TRUE;
         } else if (!strcmp(argv[i], "--sous-titres")) {
             a.avec_st = TRUE;
+        } else if (!strcmp(argv[i], "--ouvrir")) {
+            a.ouvrir_au_depart = TRUE;
         } else if (!strcmp(argv[i], "--sans-offload")) {
             a.sans_offload = TRUE;
         } else if (!strcmp(argv[i], "--revele")) {
