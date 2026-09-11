@@ -1512,10 +1512,12 @@ window.images { background-color: @surface; }
 }
 
 /* Le clavier à l'écran de la SESSION (clavier-ecran.c), en mode tablette.
-   Mêmes touches que ceux de la connexion, dans un bandeau au bas de
-   l'écran. Plus hautes : on y écrit des phrases, pas six chiffres, et une
-   rangée de plus (les accents) tient encore sous 400 px — 37 % d'un écran
-   de 1080. Le fond couvre toute la largeur ; les touches, 1440 px au plus. */
+   Mêmes touches que ceux de la connexion. Deux dispositions :
+
+   - plein format : un bandeau sur toute la largeur, touches à l'écartement
+     d'un clavier physique (1800 px, 19 mm) ;
+   - deux mains : un clavier de téléphone en bas à gauche, un pavé
+     numérique en bas à droite, le milieu de l'écran libre. */
 .clavier-ecran {
   background-color: @surface;
   border-top: 1px solid @border;
@@ -1531,9 +1533,41 @@ window.images { background-color: @surface; }
 
 .clavier-ecran .clavier-touche.espace   { color: @text-dim; font-size: 15px; }
 
-/* La barre du haut — flèches, tabulation, ⌄ — plus basse : on s'en sert
-   moins, et chaque pixel pris ici l'est à la fenêtre au-dessus. */
-.clavier-ecran .clavier-barre .clavier-touche { min-height: 38px; }
+/* Une touche double porte deux lignes — le caractère de Maj en petit
+   au-dessus : la même hauteur doit les tenir sans rogner. */
+.clavier-ecran .clavier-touche.double { font-size: 20px; padding: 2px 0; }
+
+/* L'APPUI SUR LES TOUCHES DE FONCTION. « Aucun retour visuel » au premier
+   essai : .speciale et .valider posent leur couleur APRÈS la règle :active
+   des claviers, à priorité égale, et l'effaçaient. Réaffirmé ici, plus
+   précis. « tenue » : ⌫ et les flèches qui se répètent — l'appui long a
+   pris la main et GTK a retiré :active. */
+.clavier-touche.speciale:active,
+.clavier-touche.speciale.tenue {
+  background-color: @accent;
+  border-color: @accent;
+  color: @on-accent;
+}
+
+.clavier-touche.valider:active { background-color: @accent-press; }
+
+/* Deux mains : deux îlots, arrondis du côté de l'écran libre. Plus petits
+   que le plein format — c'est un pouce qui tape, pas dix doigts. */
+.clavier-ecran.clavier-gauche {
+  border-right: 1px solid @border;
+  border-top-right-radius: 16px;
+}
+
+.clavier-ecran.clavier-droite {
+  border-left: 1px solid @border;
+  border-top-left-radius: 16px;
+}
+
+.clavier-gauche .clavier-touche,
+.clavier-droite .clavier-touche {
+  min-height: 50px;
+  font-size: 19px;
+}
 
 /* Maj verrouillée : distincte de Maj « une lettre ». Sans différence, on
    ne sait pas si la prochaine lettre sera la dernière en majuscule. */

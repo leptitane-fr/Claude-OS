@@ -31,22 +31,54 @@
 #define INDICE_MASQUE     0x40    /* hidden_text    */
 #define INDICE_SENSIBLE   0x80    /* sensitive_data */
 
-/* Codes XKB de la disposition fabriquée : les commandes d'abord, puis Maj,
- * puis un code par caractère. Le code evdev envoyé est le code XKB moins 8
- * (convention de wl_keyboard). 255 est la limite des clients X — sans objet
- * ici, mais aucune raison de la franchir. */
-#define PREMIER_CODE  9
-#define CODE_MAJ      (PREMIER_CODE + SHELL_TOUCHE_N)
-#define CODE_TEXTE_0  (CODE_MAJ + 1)
-#define DERNIER_CODE  255
-
-static const char *const COMMANDES[SHELL_TOUCHE_N] = {
-    [SHELL_TOUCHE_EFFACER]    = "BackSpace",
-    [SHELL_TOUCHE_ENTREE]     = "Return",
-    [SHELL_TOUCHE_GAUCHE]     = "Left",
-    [SHELL_TOUCHE_DROITE]     = "Right",
-    [SHELL_TOUCHE_TABULATION] = "Tab",
+/* LES CODES DE TOUCHES NE SONT PAS INDIFFÉRENTS, ET CELA A ÉTÉ PAYÉ.
+ *
+ * La première version donnait à chaque caractère un code à la suite des
+ * autres, en croyant que seul comptait le symbole qu'on y attache. Vu le
+ * 11 septembre 2026 dans Claude Desktop : « ; : ! » faisaient sauter le
+ * curseur au lieu de s'écrire. Ils avaient reçu les codes evdev 101, 103
+ * et 105 — KEY_LINEFEED, KEY_UP, KEY_LEFT. Chromium (donc Electron) déduit
+ * du CODE la touche physique (DomCode, KeyboardEvent.code) et, pour une
+ * flèche, exécute le déplacement quel que soit le symbole. ⌫ et ↵
+ * occupaient les codes 1 à 5, dont KEY_ESC : ils marchaient par chance.
+ *
+ * D'où la règle, et elle vaut pour qui touchera à ce fichier :
+ *
+ *   - une touche de commande porte SON code evdev réel (⌫ = 14, ↵ = 28…) ;
+ *   - un caractère ne se loge QUE sur une position de touche ordinaire —
+ *     lettres, chiffres, ponctuation : celles dont le client lit le symbole
+ *     dans la disposition. Il y en a 48 ; chacune porte quatre niveaux,
+ *     comme une vraie disposition (aucun, Maj, AltGr, Maj+AltGr), soit 192
+ *     places. Les modificateurs de chaque niveau sont demandés à
+ *     xkbcommon, pas devinés. */
+static const guint32 POSITIONS[] = {
+     2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13,      /* 1 … =           */
+    16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,      /* q … ]           */
+    30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41,      /* a … `           */
+    43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53,          /* \ z … /         */
+    86,                                                  /* < (102e touche) */
 };
+#define NIVEAUX 4
+#define PLACES  (G_N_ELEMENTS (POSITIONS) * NIVEAUX)
+
+/* Codes evdev réels (linux/input-event-codes.h). Le code XKB est le code
+ * evdev plus 8, par convention de wl_keyboard. */
+#define EV_MAJ     42      /* KEY_LEFTSHIFT */
+#define EV_ALTGR  100      /* KEY_RIGHTALT  */
+
+static const struct { guint32 evdev; const char *symbole; } COMMANDES[SHELL_TOUCHE_N] = {
+    [SHELL_TOUCHE_EFFACER]    = { 14, "BackSpace" },
+    [SHELL_TOUCHE_ENTREE]     = { 28, "Return"    },
+    [SHELL_TOUCHE_GAUCHE]     = {105, "Left"      },
+    [SHELL_TOUCHE_DROITE]     = {106, "Right"     },
+    [SHELL_TOUCHE_TABULATION] = { 15, "Tab"       },
+};
+
+/* Où frapper un caractère : un code XKB et les modificateurs de son niveau. */
+typedef struct {
+    guint32 code;
+    guint32 modificateurs;
+} Frappe;
 
 static struct {
     struct wl_display                        *display;
@@ -56,8 +88,9 @@ static struct {
     struct zwp_input_method_v2               *im;
     struct zwp_virtual_keyboard_v1           *vk;
 
-    GPtrArray  *caracteres;   /* char *, dans l'ordre des codes          */
-    GHashTable *codes;        /* caractère -> code XKB                   */
+    GPtrArray  *caracteres;   /* char * ; l'indice i va en position i/4,
+                                 niveau i%4                               */
+    GHashTable *frappes;      /* caractère -> Frappe *                    */
     guint32     masque_maj;
 
     ShellSaisieFunc cb;
@@ -75,12 +108,15 @@ static struct {
  * La disposition fabriquée
  * ------------------------------------------------------------------------- */
 static char *
-nom_touche (gunichar c)
+nom_symbole (const char *car)
 {
     char nom[64];
-    xkb_keysym_t sym = xkb_utf32_to_keysym (c);
-    if (sym == XKB_KEY_NoSymbol || xkb_keysym_get_name (sym, nom, sizeof nom) < 0)
-        return NULL;
+    xkb_keysym_t sym = xkb_utf32_to_keysym (g_utf8_get_char (car));
+    if (sym == XKB_KEY_NoSymbol || xkb_keysym_get_name (sym, nom, sizeof nom) < 0) {
+        g_warning ("clavier à l'écran : « %s » n'a pas de nom XKB, "
+                   "sa touche n'écrira rien", car);
+        return g_strdup ("NoSymbol");
+    }
     return g_strdup (nom);
 }
 
@@ -90,33 +126,43 @@ disposition_texte (void)
     GString *k = g_string_new ("xkb_keymap {\n"
                                "xkb_keycodes \"claude-os\" {\n"
                                "  minimum = 8;\n  maximum = 255;\n");
-    guint dernier = CODE_TEXTE_0 + S.caracteres->len;
-    for (guint c = PREMIER_CODE; c < dernier; c++)
-        g_string_append_printf (k, "  <C%03u> = %u;\n", c, c);
+    for (int t = 0; t < SHELL_TOUCHE_N; t++)
+        g_string_append_printf (k, "  <I%03u> = %u;\n",
+                                COMMANDES[t].evdev + 8, COMMANDES[t].evdev + 8);
+    g_string_append_printf (k, "  <I%03u> = %u;\n  <I%03u> = %u;\n",
+                            EV_MAJ + 8, EV_MAJ + 8, EV_ALTGR + 8, EV_ALTGR + 8);
+    for (guint p = 0; p < G_N_ELEMENTS (POSITIONS); p++)
+        g_string_append_printf (k, "  <I%03u> = %u;\n",
+                                POSITIONS[p] + 8, POSITIONS[p] + 8);
 
     /* « complete » pour les types et la compatibilité : c'est ce que toute
-     * disposition XKB inclut, et xkeyboard-config est là — labwc en a
-     * besoin pour la sienne. */
+     * disposition XKB inclut — FOUR_LEVEL y est, et l'interprétation
+     * d'ISO_Level3_Shift qui fait d'AltGr le modificateur LevelThree. */
     g_string_append (k, "};\n"
                         "xkb_types \"claude-os\" { include \"complete\" };\n"
                         "xkb_compat \"claude-os\" { include \"complete\" };\n"
                         "xkb_symbols \"claude-os\" {\n");
 
     for (int t = 0; t < SHELL_TOUCHE_N; t++)
-        g_string_append_printf (k, "  key <C%03u> { [ %s ] };\n",
-                                PREMIER_CODE + t, COMMANDES[t]);
-    g_string_append_printf (k, "  key <C%03u> { [ Shift_L ] };\n"
-                               "  modifier_map Shift { <C%03u> };\n",
-                            CODE_MAJ, CODE_MAJ);
+        g_string_append_printf (k, "  key <I%03u> { [ %s ] };\n",
+                                COMMANDES[t].evdev + 8, COMMANDES[t].symbole);
+    g_string_append_printf (k, "  key <I%03u> { [ Shift_L ] };\n"
+                               "  modifier_map Shift { <I%03u> };\n"
+                               "  key <I%03u> { [ ISO_Level3_Shift ] };\n"
+                               "  modifier_map Mod5 { <I%03u> };\n",
+                            EV_MAJ + 8, EV_MAJ + 8, EV_ALTGR + 8, EV_ALTGR + 8);
 
-    for (guint i = 0; i < S.caracteres->len; i++) {
-        const char *car = g_ptr_array_index (S.caracteres, i);
-        g_autofree char *nom = nom_touche (g_utf8_get_char (car));
-        if (nom == NULL)
-            g_warning ("clavier à l'écran : « %s » n'a pas de nom XKB, "
-                       "sa touche n'écrira rien", car);
-        g_string_append_printf (k, "  key <C%03u> { [ %s ] };\n",
-                                CODE_TEXTE_0 + i, nom != NULL ? nom : "NoSymbol");
+    for (guint p = 0; p * NIVEAUX < S.caracteres->len; p++) {
+        g_string_append_printf (k, "  key <I%03u> { type = \"FOUR_LEVEL\", [ ",
+                                POSITIONS[p] + 8);
+        for (guint n = 0; n < NIVEAUX; n++) {
+            guint i = p * NIVEAUX + n;
+            g_autofree char *nom = i < S.caracteres->len
+                ? nom_symbole (g_ptr_array_index (S.caracteres, i))
+                : g_strdup ("NoSymbol");
+            g_string_append_printf (k, "%s%s", n > 0 ? ", " : "", nom);
+        }
+        g_string_append (k, " ] };\n");
     }
     g_string_append (k, "};\n};\n");
     return g_string_free (k, FALSE);
@@ -125,7 +171,9 @@ disposition_texte (void)
 /* Construit, VÉRIFIE, puis envoie la disposition. Vérifiée ici, avec la même
  * bibliothèque que le compositeur : une disposition refusée par wlroots ne
  * donnerait aucune erreur au client — les touches ne feraient simplement
- * rien. */
+ * rien. Et c'est la disposition COMPILÉE qui dit, pour chaque caractère, où
+ * il est et avec quels modificateurs : si elle ne le retrouve pas, on le
+ * dit au lieu d'envoyer une touche au hasard. */
 static gboolean
 envoyer_disposition (void)
 {
@@ -140,8 +188,33 @@ envoyer_disposition (void)
         if (ctx) xkb_context_unref (ctx);
         return FALSE;
     }
+
     xkb_mod_index_t maj = xkb_keymap_mod_get_index (km, XKB_MOD_NAME_SHIFT);
     S.masque_maj = maj == XKB_MOD_INVALID ? 0 : 1u << maj;
+
+    g_hash_table_remove_all (S.frappes);
+    guint egares = 0;
+    for (guint i = 0; i < S.caracteres->len; i++) {
+        const char *car = g_ptr_array_index (S.caracteres, i);
+        guint32 code = POSITIONS[i / NIVEAUX] + 8;
+        xkb_mod_mask_t masques[4];
+        size_t n = xkb_keymap_key_get_mods_for_level (km, code, 0, i % NIVEAUX,
+                                                      masques, G_N_ELEMENTS (masques));
+        /* Contre-épreuve : ce niveau donne-t-il bien ce caractère ? */
+        const xkb_keysym_t *syms;
+        int nsyms = xkb_keymap_key_get_syms_by_level (km, code, 0, i % NIVEAUX, &syms);
+        if (n == 0 || nsyms != 1
+            || xkb_keysym_to_utf32 (syms[0]) != g_utf8_get_char (car)) {
+            egares++;
+            g_warning ("clavier à l'écran : « %s » introuvable dans la disposition "
+                       "compilée (code %u, niveau %u)", car, code, i % NIVEAUX);
+            continue;
+        }
+        Frappe *f = g_new (Frappe, 1);
+        f->code = code;
+        f->modificateurs = masques[0];
+        g_hash_table_insert (S.frappes, (gpointer) car, f);
+    }
     xkb_keymap_unref (km);
     xkb_context_unref (ctx);
 
@@ -158,18 +231,22 @@ envoyer_disposition (void)
     zwp_virtual_keyboard_v1_keymap (S.vk, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, fd, taille);
     close (fd);
     wl_display_flush (S.display);
-    return TRUE;
+    return egares == 0;
 }
 
-static void
+static gboolean
 ajouter (const char *car)
 {
-    if (g_hash_table_contains (S.codes, car))
-        return;
-    char *copie = g_strdup (car);
-    g_ptr_array_add (S.caracteres, copie);
-    g_hash_table_insert (S.codes, copie,
-                         GUINT_TO_POINTER (CODE_TEXTE_0 + S.caracteres->len - 1));
+    for (guint i = 0; i < S.caracteres->len; i++)
+        if (g_str_equal (g_ptr_array_index (S.caracteres, i), car))
+            return TRUE;
+    if (S.caracteres->len >= PLACES) {
+        g_warning ("clavier à l'écran : disposition pleine (%u places), « %s » perdu",
+                   (guint) PLACES, car);
+        return FALSE;
+    }
+    g_ptr_array_add (S.caracteres, g_strdup (car));
+    return TRUE;
 }
 
 /* -------------------------------------------------------------------------
@@ -200,27 +277,25 @@ shell_saisie_texte (const char *caractere)
     if (S.vk == NULL || caractere == NULL || *caractere == '\0')
         return;
 
-    gpointer code = g_hash_table_lookup (S.codes, caractere);
-    if (code == NULL) {
-        if (CODE_TEXTE_0 + S.caracteres->len >= DERNIER_CODE) {
-            g_warning ("clavier à l'écran : disposition pleine, « %s » perdu", caractere);
-            return;
-        }
+    Frappe *f = g_hash_table_lookup (S.frappes, caractere);
+    if (f == NULL) {
         g_message ("clavier à l'écran : « %s » absent de la disposition, "
                    "ajouté (à inscrire dans la liste du clavier)", caractere);
-        ajouter (caractere);
-        if (!envoyer_disposition ())
+        if (!ajouter (caractere))
             return;
-        code = g_hash_table_lookup (S.codes, caractere);
+        envoyer_disposition ();
+        f = g_hash_table_lookup (S.frappes, caractere);
+        if (f == NULL)
+            return;
     }
-    frapper (GPOINTER_TO_UINT (code), 0);
+    frapper (f->code, f->modificateurs);
 }
 
 void
 shell_saisie_touche (ShellTouche t, gboolean maj)
 {
     g_return_if_fail (t >= 0 && t < SHELL_TOUCHE_N);
-    frapper (PREMIER_CODE + t, maj ? S.masque_maj : 0);
+    frapper (COMMANDES[t].evdev + 8, maj ? S.masque_maj : 0);
 }
 
 /* -------------------------------------------------------------------------
@@ -347,7 +422,9 @@ shell_saisie_init (const char *const *textes, ShellSaisieFunc cb, gpointer user_
     S.cb = cb;
     S.donnees = user_data;
     S.caracteres = g_ptr_array_new_with_free_func (g_free);
-    S.codes = g_hash_table_new (g_str_hash, g_str_equal);
+    /* Les clés sont les chaînes de S.caracteres, qui les possède ; les
+     * valeurs, des Frappe à libérer. */
+    S.frappes = g_hash_table_new_full (g_str_hash, g_str_equal, NULL, g_free);
     for (const char *const *t = textes; t != NULL && *t != NULL; t++)
         ajouter (*t);
 

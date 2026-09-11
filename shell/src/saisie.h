@@ -27,14 +27,15 @@
  *
  * Le clavier virtuel envoie des CODES de touches, que le client traduit
  * avec la disposition XKB qu'on lui a transmise. Emprunter la disposition
- * « fr » obligerait à rejouer AltGr pour « € » et une touche morte pour
- * « ê ». On fabrique donc une disposition où chaque caractère du clavier à
- * l'écran a SA touche, sans modificateur : « é » est une touche, « É » en
- * est une autre. Le clavier physique garde la sienne ; en mode tablette il
- * est de toute façon écarté par libinput.
- *
- * Seule exception : Maj, qui existe vraiment dans la disposition, pour que
- * Maj+Entrée arrive comme tel — c'est le retour à la ligne de Claude.
+ * « fr » obligerait à rejouer une touche morte pour « ê », et ne contiendrait
+ * pas « … » ni « ≠ ». On fabrique donc une disposition qui contient
+ * exactement les caractères du clavier à l'écran, chacun à une place fixe :
+ * une position de touche ordinaire et un niveau (aucun, Maj, AltGr,
+ * Maj+AltGr). Les touches de commande — ⌫, ↵, flèches — portent leur vrai
+ * code. Voir saisie.c : les CODES comptent pour Chromium, et l'ignorer a
+ * fait sauter le curseur au lieu d'écrire « ; ». Le clavier physique garde
+ * sa disposition ; en mode tablette il est de toute façon écarté par
+ * libinput.
  * ========================================================================= */
 #pragma once
 
