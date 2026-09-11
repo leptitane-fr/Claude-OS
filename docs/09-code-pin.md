@@ -217,9 +217,15 @@ Cinq garde-fous, tous dans le code, aucun dans la procédure :
 ## Le clavier à l'écran
 
 La machine est un convertible à écran tactile Goodix (`GDIX0000:00 27C6:0E88`)
-et porte un `Tablet Mode Switch`. **Capot retourné, l'EC coupe le clavier
-physique** : jusqu'ici, dans cette position, ouvrir une session était tout
+et porte un `Tablet Mode Switch`. **Capot retourné, le clavier physique ne
+répond plus** : jusqu'ici, dans cette position, ouvrir une session était tout
 simplement impossible.
+
+> **Corrigé le 11 septembre 2026** (voir [`docs/12`](12-mode-tablette.md)).
+> Ce paragraphe disait « l'EC coupe le clavier ». Mesuré : l'EC le laisse
+> passer — les frappes arrivent à evdev écran replié — et c'est **libinput**
+> qui les écarte en voyant le commutateur. L'effet est le même ; la cause
+> compte le jour où l'on chercherait pourquoi une frappe passe.
 
 Deux claviers, dans `shell/src/clavier.c` : un pavé numérique pour le code, un
 azerty complet — deux couches, lettres et symboles — pour le nom et le mot de
@@ -228,9 +234,16 @@ passe. Azerty parce que `/etc/xdg/labwc-greeter/environment` pose déjà
 aux mêmes endroits.
 
 **Pas de clavier virtuel Wayland.** squeekboard et wvkbd passent par
-`zwp_virtual_keyboard_v1`, que labwc n'expose pas, et demanderaient un second
-processus — donc une seconde surface — **avant authentification**. Ce sont
-des boutons GTK dans la même fenêtre.
+`zwp_virtual_keyboard_v1`, et demanderaient un second processus — donc une
+seconde surface — **avant authentification**. Ce sont des boutons GTK dans la
+même fenêtre.
+
+> **Corrigé le 11 septembre 2026.** Ce paragraphe ajoutait que labwc
+> n'expose pas `zwp_virtual_keyboard_v1`. C'est faux : une sonde des globaux
+> Wayland le trouve dans labwc 0.8.3, avec `zwp_input_method_manager_v2` et
+> `zwp_text_input_manager_v3`. Le choix reste bon pour l'écran de connexion —
+> la raison du second processus avant authentification suffit —, mais la
+> session, elle, peut avoir un vrai clavier virtuel : voir `docs/12`.
 
 ### Le piège qui tue les deux claviers, et il tient en deux lignes
 

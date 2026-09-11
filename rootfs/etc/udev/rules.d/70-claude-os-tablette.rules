@@ -1,0 +1,39 @@
+# Claude OS — laisser la session lire le commutateur du mode tablette.
+#
+# Le Chromebook annonce le retournement de l'écran par trois périphériques
+# d'entrée, tous en root:input 0660. Le dock doit le savoir pour montrer le
+# clavier à l'écran et tourner l'image ; sans cette règle il ouvre le
+# périphérique, reçoit EACCES, et reste en mode portable — il le dit dans
+# shell.log.
+#
+# « uaccess » et non le groupe « input » : le groupe ouvrirait TOUS les
+# périphériques d'entrée — clavier compris, donc la frappe — à tout
+# programme du compte, et ne prendrait effet qu'à la session suivante.
+# uaccess donne une ACL au seul utilisateur de la session active du siège,
+# tout de suite, et sur ces seuls périphériques.
+#
+# Mesuré le 11 septembre 2026 sur MADOO, capot passé au-delà de 180° : les
+# trois périphériques concordent à 120 ms près. Un seul est ouvert :
+# « Tablet Mode Switch », du pilote chromeos_tbmc (ACPI GOOG0006), propre aux
+# Chromebook, et qui ne porte QUE ce commutateur.
+#
+#   - « cros_ec_buttons » signale le même état, mais porte aussi les boutons
+#     d'alimentation et de volume : l'ouvrir exposerait plus que nécessaire.
+#   - « Intel Virtual Switches » (intel-vbtn) aussi, et ce pilote a un
+#     historique de faux « mode tablette » sur d'autres machines.
+#
+# Préfixe 70 : la règle doit poser l'étiquette AVANT 73-seat-late.rules, qui
+# est celle qui applique les ACL. Posée après, elle ne ferait rien — sans un
+# mot.
+#
+# udev ne rejoue pas un périphérique déjà présent : après déploiement, l'ACL
+# n'est posée qu'au démarrage suivant, ou par
+#   udevadm control --reload && udevadm trigger --action=change \
+#       --subsystem-match=input --sysname-match='event*'
+# (« --attr-match=name=… » ne marcherait pas : le nom est porté par le
+# parent inputN, pas par le nœud eventN que l'on veut rejouer.)
+#
+# Ce que cela expose : lire un commutateur. Un programme du compte pourrait
+# aussi « saisir » le périphérique (EVIOCGRAB) et en priver labwc, qui ne
+# l'utilise pas aujourd'hui. Aucune touche ne passe par lui.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Tablet Mode Switch", TAG+="uaccess"

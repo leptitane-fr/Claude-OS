@@ -49,6 +49,12 @@ xwayland                       # exigé par labwc — ne jamais purger
 # fabriquait le bus au passage.
 dbus-user-session
 libgtk4-layer-shell0           # ancre le dock et la barre hors du flux des fenêtres
+#
+# La rotation de l'écran en mode tablette (shell/src/rotation.c) passe par
+# lui : un processus par rotation plutôt qu'un client wlr-output-management
+# à entretenir dans le dock. Installé sur MADOO avant d'être écrit ici —
+# ajouté le 11 septembre 2026, quand le dock s'est mis à en dépendre.
+wlr-randr                      # oriente l'écran (44 Kio installés, mesuré)
 libglib2.0-bin                 # gapplication : la bascule dock/barre l'appelle
 #
 # L'écran de connexion. greetd ne dessine RIEN : il ouvre une session, et

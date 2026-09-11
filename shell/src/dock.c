@@ -23,6 +23,8 @@
 
 #include "config.h"
 #include "glissiere.h"
+#include "rotation.h"
+#include "tablette.h"
 #include "toplevels.h"
 #include "visibility.h"
 
@@ -1279,12 +1281,80 @@ on_action_annoncer (GSimpleAction *a, GVariant *p, gpointer d)
     barre_suivre (shell_visibility_etat () != SHELL_VIS_CACHE, TRUE);
 }
 
+/* Le mode tablette, publié sur le bus sous la forme d'une action À ÉTAT.
+ *
+ * L'état de l'action EST le mode effectif : un autre processus le lit par
+ * org.gtk.Actions.Describe et le suit par le signal Changed, sans que le
+ * dock ait à tenir une liste d'abonnés. Changer l'état FORCE le mode — pour
+ * le banc d'essai, et pour qui veut le clavier à l'écran capot ouvert ;
+ * « tablette-suivre » rend la main au commutateur.
+ *
+ *   gapplication action os.claude.shell.dock tablette          bascule, forcé
+ *   gapplication action os.claude.shell.dock tablette-suivre   le commutateur
+ */
+static void
+on_action_tablette_etat (GSimpleAction *a, GVariant *valeur, gpointer d)
+{
+    (void) a; (void) d;
+    shell_tablette_forcer (g_variant_get_boolean (valeur)
+                           ? SHELL_TABLETTE_TABLETTE : SHELL_TABLETTE_PORTABLE);
+    /* L'état de l'action n'est pas posé ici : on_tablette le fera, et
+     * seulement si le mode a réellement changé. */
+}
+
+static void
+on_action_tablette (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    /* Directement, sans repasser par un GVariant : un g_variant_new_boolean
+     * que personne n'absorbe (g_variant_ref_sink) est une fuite. */
+    shell_tablette_forcer (shell_tablette_active () ? SHELL_TABLETTE_PORTABLE
+                                                    : SHELL_TABLETTE_TABLETTE);
+}
+
+static void
+on_action_tablette_suivre (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    shell_tablette_forcer (SHELL_TABLETTE_SUIVRE);
+}
+
+/* Le verrou d'orientation, à état lui aussi : la Console l'affichera et le
+ * basculera par le bus, comme le mode tablette. */
+static void
+on_action_rotation_etat (GSimpleAction *a, GVariant *valeur, gpointer d)
+{
+    (void) d;
+    shell_rotation_verrouiller (g_variant_get_boolean (valeur));
+    g_simple_action_set_state (a, valeur);
+}
+
+static void
+on_action_rotation (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) p;
+    on_action_rotation_etat (a, g_variant_new_boolean (!shell_rotation_verrouillee ()), d);
+}
+
 static const GActionEntry actions[] = {
     { "basculer", on_action_basculer, NULL, NULL, NULL, { 0 } },
     { "afficher", on_action_afficher, NULL, NULL, NULL, { 0 } },
     { "masquer",  on_action_masquer,  NULL, NULL, NULL, { 0 } },
     { "annoncer", on_action_annoncer, NULL, NULL, NULL, { 0 } },
+    { "tablette", on_action_tablette, NULL, "false", on_action_tablette_etat, { 0 } },
+    { "tablette-suivre", on_action_tablette_suivre, NULL, NULL, NULL, { 0 } },
+    { "rotation-verrou", on_action_rotation, NULL, "false", on_action_rotation_etat, { 0 } },
 };
+
+/* Le mode effectif a changé : commutateur retourné, ou forçage. */
+static void
+on_tablette (gboolean tablette, gpointer data)
+{
+    (void) data;
+    GAction *a = g_action_map_lookup_action (G_ACTION_MAP (D.app), "tablette");
+    g_simple_action_set_state (G_SIMPLE_ACTION (a), g_variant_new_boolean (tablette));
+    shell_rotation_suivre (tablette);
+}
 
 /* -------------------------------------------------------------------------
  * Fenetre du dock
@@ -1414,6 +1484,10 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     shell_visibility_init (on_etat, NULL);
     shell_toplevels_init (on_windows_changed, NULL);
+
+    /* Après les actions : on_tablette pose l'état de l'une d'elles. */
+    shell_tablette_init (on_tablette, NULL);
+    on_tablette (shell_tablette_active (), NULL);
     shell_config_watch (on_config_reloaded, window);
 }
 

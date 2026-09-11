@@ -504,6 +504,35 @@ barre si le dock ne répond pas. **La barre ne se teste toujours que lancée
 par l'autostart** : relancée depuis un terminal de Claude Desktop, elle perd
 logind, donc la veille de l'écran.
 
+### Le mode tablette — commencé le 11 septembre 2026
+
+Détail, mesures et limites dans [`docs/12`](docs/12-mode-tablette.md).
+**Vu fonctionner sur MADOO** : détection, rotation paysage ↔ chevalet,
+doigt aligné sur l'écran tourné. **Le clavier AZERTY à l'écran reste à
+écrire.**
+
+- `shell/src/tablette.c` (dans le dock) suit le commutateur `Tablet Mode
+  Switch` par ses événements ; permission par
+  `rootfs/etc/udev/rules.d/70-claude-os-tablette.rules` (`uaccess`, ce seul
+  périphérique — le clavier reste fermé, vérifié). État publié comme action
+  à état `tablette` de `os.claude.shell.dock`, forçable pour le banc.
+- `shell/src/rotation.c` : accéléromètre de l'écran, lu deux fois par
+  seconde **en mode tablette seulement** — la seule scrutation du projet,
+  justifiée dans l'en-tête. **Portraits fermés à la demande de
+  l'utilisateur** (dalle illisible en portrait) ; seul le 180° sert, en
+  chevalet. `rc.xml` associe tactile et stylet à `eDP-1`, sans quoi le doigt
+  tombe à côté une fois l'écran tourné.
+
+**Deux faits mesurés qui contredisaient la doc**, corrigée : labwc 0.8.3
+**expose** `virtual_keyboard_v1`, `input_method_v2` et `text_input_v3` ; et
+l'EC **ne coupe pas** le clavier capot retourné — c'est libinput qui
+l'écarte, avec le pavé tactile.
+
+**Une limite de labwc, à ne pas rechercher dans le shell :** une fenêtre qui
+se décore elle-même — Claude Desktop — ne se déplace pas au doigt. labwc
+n'accepte une demande de déplacement que sous un bouton de souris enfoncé
+(`handle_request_move`, `seat.pressed.view`). Ses boutons, eux, marchent.
+
 ### La barre, le centre, la Console — refaits le 11 septembre 2026
 
 Date au-dessus de l'heure, icône du mode de veille dans la barre, toute la
@@ -537,6 +566,7 @@ sur lui — sur un conteneur.
 | Capot par mode | Le verrou s'ancre sur l'extinction ; le capot reste géré par logind, donc identique pour les trois modes. |
 | **Lecteur vidéo** | Écrit, compilé, mesuré sur batterie — **pas encore installé**, et **les gestes au doigt restent à éprouver**. Vitesse de lecture non faite, délibérément : voir `docs/11`. |
 | **Verrou sans clavier** | `claude-os-verrou` demande un clavier sans vérifier la capacité du siège : sans clavier, le compositeur le déconnecte (vu au banc). Sans conséquence sur MADOO aujourd'hui, mais un verrou qui meurt écran verrouillé laisse la session inaccessible. |
+| **Mode tablette** | Détection et rotation vues fonctionner. **Clavier AZERTY à l'écran à écrire** (input-method-v2 + virtual-keyboard-v1). Non établis : stylet écran tourné, boutons de barre de titre au doigt en chevalet. Voir `docs/12`. |
 | **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
 | Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
 

@@ -111,6 +111,7 @@ add_project_arguments(
 
 executable('claude-os-dock',
   'src/dock.c', 'src/toplevels.c', 'src/visibility.c', 'src/glissiere.c',
+  'src/tablette.c', 'src/rotation.c',
   ftl_header, ftl_code, commun,
   dependencies : [gtk, layershell, giounix, wlclient, pangocairo, m_dep],
   install : true)

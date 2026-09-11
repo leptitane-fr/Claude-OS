@@ -6,18 +6,22 @@
  * POURQUOI ILS EXISTENT
  *
  * La machine est un HP Chromebook x360 : un convertible, avec un écran
- * tactile Goodix et un « Tablet Mode Switch ». Capot retourné, l'EC coupe le
- * clavier physique. Jusqu'ici, dans cette position, il était tout simplement
- * impossible d'ouvrir sa session — l'écran de connexion n'avait rien à
- * toucher.
+ * tactile Goodix et un « Tablet Mode Switch ». Capot retourné, le clavier
+ * physique ne répond plus — l'EC le laisse passer, c'est libinput qui
+ * l'écarte (mesuré le 11 septembre 2026, docs/12). Jusqu'ici, dans cette
+ * position, il était tout simplement impossible d'ouvrir sa session —
+ * l'écran de connexion n'avait rien à toucher.
  *
  * POURQUOI PAS UN CLAVIER VIRTUEL WAYLAND
  *
  * squeekboard, wvkbd et leurs semblables passent par
- * zwp_virtual_keyboard_v1, que labwc n'expose pas, et ils demanderaient un
- * second processus sur l'écran de connexion — donc une seconde surface à
- * gérer avant authentification. Ces claviers-ci ne sont que des boutons GTK
- * dans la même fenêtre : rien à installer, rien à lancer, rien à surveiller.
+ * zwp_virtual_keyboard_v1, et ils demanderaient un second processus sur
+ * l'écran de connexion — donc une seconde surface à gérer avant
+ * authentification. Ces claviers-ci ne sont que des boutons GTK dans la même
+ * fenêtre : rien à installer, rien à lancer, rien à surveiller.
+ *
+ * (Une version antérieure ajoutait que labwc n'expose pas ce protocole :
+ * c'était faux, labwc 0.8.3 l'expose. La raison ci-dessus suffit.)
  * ========================================================================= */
 
 #ifndef CLAUDE_OS_CLAVIER_H

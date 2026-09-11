@@ -149,4 +149,21 @@
     </keybind>
   </keyboard>
 
+  <!-- LE DOIGT ET LE STYLET SUIVENT L'ÉCRAN QUAND IL TOURNE.
+       En mode tablette, le dock tourne l'image (shell/src/rotation.c, par
+       wlr-randr). Sans association à une sortie, wlroots rapporte l'écran
+       tactile à la disposition entière et NON tournée : le doigt toucherait
+       l'endroit où le point serait si l'écran n'avait pas tourné. Associé
+       à eDP-1, il applique la transformation de la sortie ; labwc(5) le dit
+       pour le stylet, wlroots le fait pour le toucher.
+
+       Le nom du périphérique est celui de /proc/bus/input/devices : écran
+       Goodix, relevé le 11 septembre 2026 sur MADOO. Le stylet, lui, est
+       une « tablette » pour libinput (ID_INPUT_TABLET) : il a sa section.
+
+       Aucun effet capot ouvert : la sortie est alors la disposition
+       entière, l'association ne change rien. -->
+  <touch deviceName="GDIX0000:00 27C6:0E88" mapToOutput="eDP-1" mouseEmulation="no"/>
+  <tablet mapToOutput="eDP-1" rotate="0" mouseEmulation="no"/>
+
 </labwc_config>
