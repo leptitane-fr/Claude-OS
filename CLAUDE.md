@@ -6,7 +6,16 @@ Ce fichier est chargé automatiquement à l'ouverture d'une session. Il dit
 
 ---
 
-## Où en est le projet — 10 septembre 2026
+## Où en est le projet — 11 septembre 2026
+
+**Le dock et la barre sortent de l'écran par le bas** (11 septembre 2026) dès
+qu'une application passe au premier plan, et reviennent par la touche Loupe
+ou un court glisser du doigt depuis le bord bas. Rappelés par-dessus une
+application, un clic à côté les renvoie ; bureau vide, le dock revient seul.
+**Le dock mène**, la barre suit par le bus — voir la section dédiée plus bas
+et `shell/src/visibility.h`. Éprouvé au banc (`shell/essais/banc-dock.sh`,
+12 étapes sur 12, sous AddressSanitizer) — **pas encore vu au doigt sur
+MADOO**.
 
 **L'écran de connexion a été repris le 9 septembre 2026** : il suit enfin le
 thème de la session, accepte un code PIN à six chiffres, et porte deux
@@ -468,6 +477,51 @@ instance travaillait dans le dépôt.
 **Reste à éprouver : les gestes au doigt**, que le banc sans écran ne sait
 pas produire.
 
+### Le dock qui sort de l'écran
+
+Écrit le 11 septembre 2026. La règle, trois états — caché, bureau, convoqué
+— dans `shell/src/visibility.h` ; la mécanique dans `shell/src/dock.c`,
+section « À l'écran ou non » ; le mouvement dans `shell/src/glissiere.c`.
+Détail et limites dans [`docs/04`](docs/04-environnement-bureau.md) §4.2.
+
+**Trois constats qui ont fixé la conception, à ne pas redécouvrir :**
+
+- **labwc ne signale rien quand on revient à la fenêtre déjà active.** Le
+  clavier qui passe à une surface layer-shell ne désactive pas la fenêtre
+  (`focus_change_notify`). D'où la **nappe** : rappelé, le dock tend sa
+  fenêtre à tout l'écran pour recevoir le clic à côté — et ce clic est
+  consommé, il n'atteint pas l'application.
+- **labwc éteint la couche TOP sous une fenêtre plein écran** — vu au banc,
+  contrairement à ce qu'affirmait l'ancien `visibility.h`. Dock, barre et
+  bande du bord sont en **OVERLAY**.
+- **Une fenêtre GTK entièrement transparente et vide ne reçoit aucun appui.**
+  La bande du bord a un fond à 1 %, écrit dans `dock.c` et pas dans la
+  feuille de style : un « transparent » posé par harmonie casserait le geste
+  en silence.
+
+`claude-os-shell-basculer` ne s'adresse plus qu'au dock, et se rabat sur la
+barre si le dock ne répond pas. **La barre ne se teste toujours que lancée
+par l'autostart** : relancée depuis un terminal de Claude Desktop, elle perd
+logind, donc la veille de l'écran.
+
+### La barre, le centre, la Console — refaits le 11 septembre 2026
+
+Date au-dessus de l'heure, icône du mode de veille dans la barre, toute la
+pilule cliquable ; Wi-Fi et Bluetooth en bouton (volet) plus interrupteur
+(module) ; alimentation en cinq icônes, dont **verrouiller** et **fermer la
+session** (SIGTERM à `LABWC_PID`, repli sur logind). Détail dans `docs/04`
+§4.2 et `docs/07`.
+
+**Une règle payée ce jour-là, qui vaut pour tout le shell : ne jamais
+redimensionner une surface layer-shell qui porte un popover ouvert.** labwc
+0.8.3 recalcule alors la position du popover depuis l'ancienne origine de la
+surface, et le popover part hors de l'écran. La nappe du centre de
+notifications est donc une fenêtre à part, jamais la barre étirée.
+
+Et une autre : **`gtk_widget_set_size_request` englobe les marges CSS**
+sous GTK 4. Pour qu'un widget se peigne à une taille donnée, pas de marge
+sur lui — sur un conteneur.
+
 ### Ce qui reste ouvert
 
 | Sujet | État |
@@ -482,6 +536,8 @@ pas produire.
 | `console.c` non converti | Le rétroéclairage y est encore soudé au widget du curseur, en double de `retroeclairage.c`. |
 | Capot par mode | Le verrou s'ancre sur l'extinction ; le capot reste géré par logind, donc identique pour les trois modes. |
 | **Lecteur vidéo** | Écrit, compilé, mesuré sur batterie — **pas encore installé**, et **les gestes au doigt restent à éprouver**. Vitesse de lecture non faite, délibérément : voir `docs/11`. |
+| **Verrou sans clavier** | `claude-os-verrou` demande un clavier sans vérifier la capacité du siège : sans clavier, le compositeur le déconnecte (vu au banc). Sans conséquence sur MADOO aujourd'hui, mais un verrou qui meurt écran verrouillé laisse la session inaccessible. |
+| **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
 | Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
 
 ---
@@ -724,3 +780,24 @@ Trois règles en sont sorties :
 Le code et les commentaires sont **en français**, et les commentaires
 expliquent *pourquoi*, pas *quoi*. Les messages de commit sont en français,
 détaillés, et disent ce qui a été mesuré.
+
+### Plusieurs instances travaillent dans ce dépôt en même temps
+
+Le 11 septembre 2026, deux sessions travaillaient ensemble dans ce même
+répertoire, l'une sur le lecteur vidéo, l'autre sur le dock, la barre et la
+Console. Les commits de la première ont emporté le travail non commité de la
+seconde : le code du dock est entré dans `6cbe5bf` (« Sépare la lecture du
+décodage… »), sa documentation dans `e2ba5ee`, ses outils de banc dans
+`0d5736a` et `7111957`. Rien n'a été perdu, mais `git log` ne le montrait
+plus là où on l'aurait cherché. Le commit qui a suivi, sur le dock, rétablit
+les renvois.
+
+**D'où la règle :**
+
+- **Commiter par chemins explicites** — `git add shell/src/dock.c …` —,
+  jamais `git commit -a`, `git add -A` ni `git add .`.
+- **Lire `git status` avant de commiter**, et laisser en place ce qu'on n'a
+  pas écrit : un fichier modifié qu'on ne reconnaît pas appartient
+  probablement à l'autre session.
+- **Ne réécrire aucun commit** : l'autre session s'appuie sur la branche
+  telle qu'elle est.

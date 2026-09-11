@@ -43,7 +43,16 @@
          le lui demande explicitement (src/config/rcxml.c, « default.keyboard »). -->
     <default />
 
-    <!-- Masquer / afficher le dock et la barre d'état.
+    <!-- Faire paraître / renvoyer le dock et la barre d'état.
+
+         Sur le Chromebook, c'est la touche Loupe (recherche) : le noyau
+         l'émet comme KEY_LEFTMETA, que XKB nomme Super_L.
+
+         Depuis le 11 septembre 2026, le dock et la barre sortent d'eux-mêmes
+         de l'écran dès qu'une application passe au premier plan ; cette
+         touche les rappelle (un court glisser du doigt depuis le bord bas
+         aussi). Le script ne s'adresse qu'au dock, qui décide et entraîne la
+         barre : voir shell/src/visibility.h.
 
          Deux liaisons pour la même action, et ce n'est pas de l'excès de
          zèle. Mesuré ici : labwc déclenche bien « Super_L » quand la touche

@@ -1,16 +1,29 @@
 #!/bin/sh
-# Masque ou affiche le dock et la barre d'état, ensemble.
+# La touche Loupe : fait paraître ou renvoie le dock et la barre d'état.
 #
-# Appelé par le raccourci clavier de labwc. Les deux composants sont des
-# processus séparés — un défaut dans l'un ne doit pas emporter l'autre — et
-# chacun publie l'action « basculer » sur le bus de session sous son
-# identifiant d'application. Pas de démon d'orchestration, pas de socket à
-# nous, pas de chasse au numéro de processus.
+# Appelé par le raccourci clavier de labwc (rc.xml, « Super_L »).
 #
-# Les deux appels sont indépendants : si un composant n'est pas lancé, son
-# appel échoue seul et l'autre bascule quand même.
+# LE DOCK MÈNE. Depuis le 11 septembre 2026, le dock et la barre sortent de
+# l'écran dès qu'une application passe au premier plan, et c'est le dock qui
+# en décide : lui seul suit les fenêtres. On ne s'adresse donc qu'à lui, et
+# il entraîne la barre par le bus. Adresser la bascule aux deux, comme avant,
+# ferait inverser à chacun son propre état — et au premier écart, l'un
+# monterait pendant que l'autre descend.
+#
+# SI LE DOCK NE RÉPOND PAS — tombé, ou pas encore lancé —, la barre bascule
+# seule. Mieux vaut une barre qu'on peut encore rappeler qu'une barre coincée
+# hors de l'écran.
+#
+# Aucune sortie jetée (invariant n°4) : ce que dit gapplication part dans le
+# journal de session, avec le code de retour.
 set -u
 
-for app in os.claude.shell.dock os.claude.shell.status; do
-    gapplication action "$app" basculer 2>/dev/null || true
-done
+gapplication action os.claude.shell.dock basculer && exit 0
+code=$?
+
+echo "claude-os-shell-basculer : le dock ne répond pas (code $code)," \
+     "la barre d'état bascule seule" >&2
+gapplication action os.claude.shell.status basculer
+code=$?
+[ "$code" -eq 0 ] || echo "claude-os-shell-basculer : la barre d'état ne répond pas non plus (code $code)" >&2
+exit "$code"
