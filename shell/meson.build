@@ -95,11 +95,13 @@ pam        = cc.find_library('pam', required : true)
 xkb        = dependency('xkbcommon')
 cairo      = dependency('cairo')
 
-# Sources communes aux deux composants. La bascule de visibilite doit se
-# comporter exactement pareil dans le dock et dans la barre, sinon les deux
-# se desynchronisent a l'ecran.
-commun = ['src/config.c', 'src/visibility.c', 'src/sysfs.c',
-          'src/modes-energie.c']
+# Sources communes a tous les composants.
+#
+# visibility.c n'y est plus : la decision « a l'ecran ou non » ne vit que
+# dans le dock, qui entraine la barre par le bus. Deux automates, un par
+# processus, finissaient par se contredire. glissiere.c, l'animation de
+# sortie, n'est lie qu'aux deux composants qui s'en servent.
+commun = ['src/config.c', 'src/sysfs.c', 'src/modes-energie.c']
 
 # Repertoire des feuilles de style, resolu a la compilation.
 data_dir = get_option('prefix') / get_option('datadir') / 'claude-os-shell'
@@ -108,7 +110,8 @@ add_project_arguments(
   language : 'c')
 
 executable('claude-os-dock',
-  'src/dock.c', 'src/toplevels.c', ftl_header, ftl_code, commun,
+  'src/dock.c', 'src/toplevels.c', 'src/visibility.c', 'src/glissiere.c',
+  ftl_header, ftl_code, commun,
   dependencies : [gtk, layershell, giounix, wlclient, pangocairo, m_dep],
   install : true)
 
@@ -125,7 +128,7 @@ executable('claude-os-dock',
 executable('claude-os-status',
   'src/status.c', 'src/panel.c', 'src/console.c', 'src/notifications.c',
   'src/wifi.c', 'src/bluetooth.c', 'src/energie.c', 'src/retroeclairage.c',
-  'src/preavis.c',
+  'src/preavis.c', 'src/glissiere.c',
   idle_header, idle_code, commun,
   dependencies : [gtk, layershell, giounix, wlclient, pangocairo, m_dep],
   install : true)
@@ -220,7 +223,7 @@ pipewire   = dependency('libpipewire-0.3')
 
 executable('claude-os-video',
   'src/video.c', 'src/video-moteur.c', 'src/video-image.c',
-  'src/video-audio.c', commun,
+  'src/video-audio.c', 'src/video-bibliotheque.c', commun,
   dependencies : [gtk, giounix, pangocairo,
                   avcodec, avformat, avutil, swscale, swresample,
                   libdrm, pipewire, m_dep],

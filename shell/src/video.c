@@ -59,6 +59,7 @@
 
 #include "video-moteur.h"
 #include "video-image.h"
+#include "video-bibliotheque.h"
 #include "config.h"
 
 #include <gtk/gtk.h>
@@ -86,7 +87,8 @@ typedef struct {
     GtkWidget      *commandes;     /* zone + capsule, flottant au bas     */
     GtkWidget      *racine;        /* la GtkOverlay qui porte tout        */
     GtkWidget      *rev_fermer;    /* la croix, au survol de l'image      */
-    GtkWidget      *accueil;       /* « Ouvrir une vidéo… », fenetre vide */
+    VideoBib       *bib;           /* la cinematheque, fenetre vide       */
+    GtkWidget      *bib_vue;
     GtkWidget      *panneau;       /* le selecteur, DANS la fenetre       */
     GtkWidget      *choix;         /* le GtkFileChooserWidget             */
     GtkWidget      *b_valider;
@@ -152,6 +154,8 @@ typedef struct {
 } App;
 
 static void bilan(App *a, const char *quand);
+static void sur_bib_choix(const char *chemin, gpointer u);
+static void sur_bib_ouvrir(gpointer u);
 static void act_sourdine(GtkButton *b, gpointer u);
 static void ouvrir_fichier(App *a, const char *chemin);
 static void demander_fichier(App *a);
@@ -616,6 +620,22 @@ static void act_fermer(GtkButton *b, gpointer u)
     (void) b;
     gtk_window_close(GTK_WINDOW(((App *)u)->fenetre));
 }
+
+/* Un film choisi dans la cinematheque, ou la demande d'en ouvrir un autre
+ * par le panneau ordinaire. */
+static void sur_bib_choix(const char *chemin, gpointer u)
+{
+    App *a = u;
+    if (a->moteur && a->fichier)
+        reprise_ecrire(a->fichier, video_moteur_position(a->moteur),
+                       video_moteur_duree(a->moteur));
+    g_free(a->fichier);
+    a->fichier = g_strdup(chemin);
+    dernier_dossier_ecrire(chemin);
+    ouvrir_fichier(a, a->fichier);
+}
+
+static void sur_bib_ouvrir(gpointer u) { demander_fichier((App *)u); }
 
 /* ------------------------------------------------------- la liste de lecture
 
@@ -1194,6 +1214,7 @@ static gboolean sur_fermeture(GtkWindow *w, gpointer u)
      * de decodage qui pousse une image dans une file detruite ne se voit
      * qu'au coredump. */
     g_clear_pointer(&a->moteur, video_moteur_fermer);
+    g_clear_pointer(&a->bib, video_bib_liberer);
     video_image_fin(&a->images);
     return FALSE;
 }
@@ -1406,7 +1427,14 @@ static gboolean sur_position_flottant(GtkOverlay *o, GtkWidget *enfant,
         return TRUE;
     }
 
-    if (enfant == a->accueil) return FALSE;   /* centre, GTK s'en charge */
+    if (enfant == a->bib_vue) {
+        /* La cinematheque occupe toute l'image, la capsule restant dessous. */
+        alloc->x = 0;
+        alloc->y = 0;
+        alloc->width  = W;
+        alloc->height = H - nat_h;
+        return TRUE;
+    }
 
     if (enfant == a->panneau) {
         /* Il occupe la fenetre en laissant voir un liseré de l'image
@@ -1520,14 +1548,12 @@ static void construire(App *a)
     gtk_revealer_set_child(GTK_REVEALER(a->rev_fermer), croix);
     gtk_revealer_set_reveal_child(GTK_REVEALER(a->rev_fermer), FALSE);
 
-    /* L'ACCUEIL : ce que montre une fenetre sans film. Sans lui, il ne
-     * resterait a l'ecran qu'une capsule flottante aux boutons eteints, sur
-     * un fond transparent -- rien qui dise quoi faire. */
-    a->accueil = gtk_button_new_with_label("Ouvrir une vidéo…");
-    gtk_widget_add_css_class(a->accueil, "video-accueil");
-    gtk_widget_set_halign(a->accueil, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign(a->accueil, GTK_ALIGN_CENTER);
-    g_signal_connect(a->accueil, "clicked", G_CALLBACK(act_ouvrir), a);
+    /* LA CINEMATHEQUE : ce que montre une fenetre sans film. Sans elle, il
+     * ne resterait a l'ecran qu'une capsule flottante aux boutons eteints,
+     * sur un fond transparent -- rien qui dise quoi faire, et rien a
+     * regarder. */
+    a->bib = video_bib_nouveau(sur_bib_choix, sur_bib_ouvrir, a);
+    a->bib_vue = video_bib_widget(a->bib);
 
     a->racine = gtk_overlay_new();
     gtk_widget_add_css_class(a->racine, "video-pile");
@@ -1535,7 +1561,7 @@ static void construire(App *a)
     gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->st_texte);
     gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->commandes);
     gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->rev_fermer);
-    gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->accueil);
+    gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->bib_vue);
 
     a->panneau = construire_panneau(a);
     gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->panneau);
@@ -1595,7 +1621,7 @@ static void ouvrir_fichier(App *a, const char *chemin)
         return;
     }
 
-    gtk_widget_set_visible(a->accueil, FALSE);
+    gtk_widget_set_visible(a->bib_vue, FALSE);
 
     double duree = video_moteur_duree(a->moteur);
     g_message("video : %s -- %s %dx%d, %s, %.1f s",
@@ -1643,6 +1669,8 @@ static void ouvrir_fichier(App *a, const char *chemin)
         reveler(a, TRUE, TRUE);
         g_message("video : reprise à %.0f s", reprise);
     }
+
+    if (a->bib) video_bib_vue(a->bib, chemin);
 
     /* Les proportions de la video viennent de changer : la glissiere et la
      * croix se placent d'apres elles, il faut refaire le calcul. */
@@ -1757,7 +1785,7 @@ static void panneau_cacher(App *a)
 {
     if (!a->panneau) return;
     gtk_widget_set_visible(a->panneau, FALSE);
-    gtk_widget_set_visible(a->accueil, a->moteur == NULL);
+    gtk_widget_set_visible(a->bib_vue, a->moteur == NULL);
 }
 
 static void panneau_choisir(App *a)
@@ -1794,7 +1822,20 @@ static void panneau_choisir(App *a)
 
 static void act_panneau_ouvrir(GtkButton *b, gpointer u) { (void) b; panneau_choisir((App *)u); }
 static void act_panneau_annuler(GtkButton *b, gpointer u) { (void) b; panneau_cacher((App *)u); }
-static void sur_fichier_active(GtkWidget *w, gpointer u) { (void) w; panneau_choisir((App *)u); }
+/* LE DOUBLE APPUI, FAUTE DE SIGNAL.
+ *
+ * GTK 4 a retire « file-activated » de GtkFileChooserWidget avec le reste
+ * des signaux de l'interface GtkFileChooser : un double-clic sur un fichier
+ * ne previent plus personne, et s'y abonner quand meme vaut un
+ * « signal is invalid for instance » au premier lancement. On l'ecoute donc
+ * soi-meme, en phase de CAPTURE et sans reclamer l'evenement : le selecteur
+ * continue de le recevoir et de faire son travail. */
+static void sur_double_appui_choix(GtkGestureClick *g, int n, double x,
+                                   double y, gpointer u)
+{
+    (void) g; (void) x; (void) y;
+    if (n == 2) panneau_choisir((App *)u);
+}
 
 static GtkWidget *construire_panneau(App *a)
 {
@@ -1852,7 +1893,11 @@ static GtkWidget *construire_panneau(App *a)
     }
     G_GNUC_END_IGNORE_DEPRECATIONS
 
-    g_signal_connect(a->choix, "file-activated", G_CALLBACK(sur_fichier_active), a);
+    GtkGesture *deux = gtk_gesture_click_new();
+    gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(deux),
+                                               GTK_PHASE_CAPTURE);
+    g_signal_connect(deux, "pressed", G_CALLBACK(sur_double_appui_choix), a);
+    gtk_widget_add_controller(a->choix, GTK_EVENT_CONTROLLER(deux));
     gtk_widget_set_vexpand(a->choix, TRUE);
 
     gtk_box_append(GTK_BOX(boite), barre);
@@ -1886,7 +1931,7 @@ static void demander_fichier(App *a)
     gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(a->choix), fdep, NULL);
     G_GNUC_END_IGNORE_DEPRECATIONS
 
-    gtk_widget_set_visible(a->accueil, FALSE);
+    gtk_widget_set_visible(a->bib_vue, FALSE);
     gtk_widget_set_visible(a->panneau, TRUE);
     gtk_widget_grab_focus(a->choix);
 }

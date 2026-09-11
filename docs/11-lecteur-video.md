@@ -492,6 +492,58 @@ aussi bien qu'une surface peinte. Le dock le disait pourtant : deux entrées,
 
 C'est exactement ce que le panneau supprime : il n'y a plus deux fenêtres.
 
+### La cinémathèque — 11 septembre
+
+`shell/src/video-bibliotheque.c`. Ce que montre la fenêtre quand aucun film
+n'est ouvert : une fenêtre vide n'est pas un état, c'est une absence.
+
+Deux volets — **Récents**, les films déjà vus, le dernier d'abord ;
+**Bibliothèque**, tout ce que contiennent les dossiers déclarés — et, à la
+toute première ouverture, un seul bouton : « Sélectionner un dossier… ». On
+ne demande pas à l'utilisateur de comprendre une interface vide.
+
+**Trois contraintes l'ont dessinée, et aucune n'est négociable ici :**
+
+- **Les dossiers sont souvent sur le réseau.** Tout parcours est asynchrone,
+  sans exception : une énumération synchrone sur un serveur endormi gèle la
+  fenêtre jusqu'au délai TCP. Fichiers a payé cette leçon, le lecteur l'a
+  repayée sur ses lectures ; on ne la repaie pas une troisième fois.
+- **Une vignette coûte un décodage.** Un seul fil les fabrique, et le cache
+  est sur le disque — `~/.cache/claude-os/video/vignettes/`. Le décodage y est
+  **logiciel** à dessein : une image fixe ne mérite pas qu'on dispute le
+  décodeur matériel au film en cours.
+- **Rien n'est fabriqué pour ce qu'on ne regarde pas.** Une vignette n'est
+  demandée qu'au « map » de sa carte. Un dossier de deux cents films ne
+  déclenche pas deux cents décodages à l'ouverture.
+
+La vignette est prise **à un dixième du film**, jamais au début : les
+premières secondes sont presque toujours noires, et une bibliothèque de
+rectangles noirs ne sert à rien.
+
+**Ouvrir un film déclare son dossier.** Demander à l'utilisateur de le
+désigner une seconde fois serait de la paperasse.
+
+### Deux pièges de GTK 4 payés au passage
+
+- **`GtkFileChooserWidget` n'a plus de signal `file-activated`** — il est
+  parti avec les signaux de l'interface `GtkFileChooser`. S'y abonner vaut un
+  « signal is invalid for instance » au premier lancement, et un double-clic
+  qui ne fait rien. On l'écoute soi-même, en phase de capture et sans
+  réclamer l'événement.
+- **Convertir un pointeur de fonction n'est pas l'adapter.**
+  `GdkPixbufDestroyNotify` et `GClosureNotify` ne prennent pas les mêmes
+  arguments que `g_free` : le cast compile, marche sur cette machine, et est
+  un comportement indéfini. Deux adaptateurs de trois lignes.
+
+### Et le faux mouvement de souris
+
+Les commandes ne disparaissaient jamais en plein écran. Montrer ou cacher la
+capsule **déplace les widgets sous le pointeur**, et GTK signale ce
+déplacement comme un mouvement : le retrait provoquait le rappel, qui
+provoquait le retrait. On compare désormais la position — en deçà de deux
+pixels, ce n'est pas la main de l'utilisateur, c'est notre propre mise en
+page.
+
 ## 11.8 Pistes, sous-titres, reprise — phase 3
 
 Un menu dans la capsule liste les **pistes audio** et les **sous-titres**,

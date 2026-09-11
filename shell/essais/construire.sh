@@ -86,6 +86,7 @@ for c in "${CIBLES[@]}"; do
 			    -DSHELL_DATA_DIR="\"$DATA_DIR\"" \
 			    "$ICI/../src/video.c" "$ICI/../src/video-moteur.c" \
 			    "$ICI/../src/video-image.c" "$ICI/../src/video-audio.c" \
+			    "$ICI/../src/video-bibliotheque.c" \
 			    "$ICI/../src/config.c" "$ICI/../src/visibility.c" \
 			    "$ICI/../src/sysfs.c" "$ICI/../src/modes-energie.c" \
 			    -o "$BUILD/claude-os-video" \
