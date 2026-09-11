@@ -2,6 +2,13 @@
  * ici, le detail et les pieges.
  */
 
+/* O_CLOEXEC n'existe pas sous -std=c11 STRICT : __STRICT_ANSI__ le masque,
+ * et meson compile en c11 la ou le banc compilait en gnu11. Resultat, le
+ * 11 septembre 2026 : le banc compilait, meson NON, et six installations de
+ * suite ont recopie le meme vieux binaire sans que personne ne le voie.
+ * _GNU_SOURCE doit venir AVANT le premier include. */
+#define _GNU_SOURCE 1
+
 #include "video-moteur.h"
 #include "video-audio.h"
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Claude OS — Construction des programmes d'essai du lecteur vidéo
+# Claude OS — Construction des programmes d'essai (lecteur vidéo, dock)
 #
 # Ces programmes ne sont PAS installés sur la machine et ne figurent pas dans
 # meson.build : ce sont des instruments de banc, pas des composants du bureau.
@@ -20,7 +20,13 @@ mkdir -p "$BUILD"
 
 # -O2 et non -Os : ces programmes mesurent des chemins de décodage, et une
 # construction bridée fausserait la mesure qu'ils servent à faire.
-COMMUN=(-std=gnu11 -O2 -g -Wall -Wextra -Wno-unused-parameter)
+# LE MEME DIALECTE QUE MESON, ET C'EST IMPORTANT.
+#
+# Le banc compilait en gnu11 la ou meson compile en c11 : un code qui passait
+# ici echouait la, et comme l'echec n'etait pas lu, on a installe six fois de
+# suite un binaire perime. Un banc qui ne compile pas comme la cible ne
+# prouve rien.
+COMMUN=(-std=c11 -O2 -g -Wall -Wextra -Wno-unused-parameter)
 
 # LES DEUX DETECTEURS, ET ILS NE CHERCHENT PAS LA MEME CHOSE.
 #
@@ -55,10 +61,10 @@ construire() {
 flags() { pkg-config --cflags --libs "$@" || { echo "pkg-config a échoué pour : $*" >&2; exit 1; }; }
 
 CIBLES=("$@")
-[ ${#CIBLES[@]} -gt 0 ] || CIBLES=(fabrique-mire sonde-offload video)
+[ ${#CIBLES[@]} -gt 0 ] || CIBLES=(fabrique-mire sonde-offload video pointeur)
 
 ECHECS=0
-echo "Construction des essais du lecteur vidéo :"
+echo "Construction des programmes d'essai :"
 for c in "${CIBLES[@]}"; do
 	case "$c" in
 		fabrique-mire)
@@ -90,6 +96,20 @@ for c in "${CIBLES[@]}"; do
 		sonde-offload)
 			# shellcheck disable=SC2046
 			construire sonde-offload $(flags gtk4 libavcodec libavformat libavutil libswscale libdrm) || ECHECS=$((ECHECS+1))
+			;;
+		pointeur)
+			# Le pointeur virtuel du banc du dock. Le protocole n'est
+			# empaquete nulle part dans Debian (pas de wlr-protocols) : le
+			# XML est verse dans shell/protocols/, comme foreign-toplevel.
+			XML="$ICI/../protocols/wlr-virtual-pointer-unstable-v1.xml"
+			if wayland-scanner client-header "$XML" "$BUILD/wlr-virtual-pointer-unstable-v1-client-protocol.h" \
+			   && wayland-scanner private-code "$XML" "$BUILD/wlr-virtual-pointer-protocol.c"; then
+				# shellcheck disable=SC2046
+				construire pointeur -I"$BUILD" "$BUILD/wlr-virtual-pointer-protocol.c" \
+				    $(flags wayland-client) || ECHECS=$((ECHECS+1))
+			else
+				echo "  pointeur : wayland-scanner a échoué" >&2; ECHECS=$((ECHECS+1))
+			fi
 			;;
 		*)
 			echo "  cible inconnue : $c" >&2; ECHECS=$((ECHECS+1)) ;;

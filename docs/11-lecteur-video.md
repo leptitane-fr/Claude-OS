@@ -441,6 +441,57 @@ surfaces VA-API échangerait une saccade contre un blocage.
   quinze images jetées et 450 ms d'écart de synchronisation. Une lecture
   locale ordinaire est passée de 15 images sautées à **1**.
 
+### SIX INSTALLATIONS D'UN BINAIRE PÉRIMÉ — 11 septembre
+
+**La faute la plus coûteuse de tout le chantier, et c'est une faute de
+méthode, pas de code.**
+
+`video-moteur.c` utilise `O_CLOEXEC`. Sous `-std=c11` **strict**,
+`__STRICT_ANSI__` le masque — et `meson.build` compile en `c11` là où
+`shell/essais/construire.sh` compilait en `gnu11`. Le banc compilait donc,
+et meson **non**.
+
+Ce n'aurait dû coûter qu'une minute. Mais la vérification était :
+
+```sh
+ninja -C build claude-os-video 2>&1 | grep -c "warning:"      # → 0
+```
+
+Zéro avertissement a été lu comme « tout va bien ». Il voulait dire **« la
+compilation est morte avant d'en produire un »**. Six installations de suite
+ont donc recopié le même binaire d'il y a trois heures, et l'utilisateur a
+jugé — et rejeté — du travail qui n'était pas sur sa machine : les deux fils,
+la cadence, le panneau. Ses mesures disaient 590 images sautées là où les
+nôtres en donnaient 2 ; les deux étaient justes, sur deux binaires
+différents.
+
+**C'est l'invariant n°4 mot pour mot** : *une commande qui peut échouer doit
+parler, et son code de retour doit être lu*. Un compteur de lignes n'est pas
+un code de retour.
+
+Trois choses en sortent, et elles valent pour tout le dépôt :
+
+- **Lire `$?`, jamais un `grep -c`.** Ce qui compte est le code de retour.
+- **Le banc compile désormais dans le MÊME dialecte que meson** (`c11`). Un
+  banc qui ne compile pas comme la cible ne prouve rien de la cible.
+- **Vérifier ce qui est en place, pas ce qu'on a lancé.** Une installation se
+  contrôle par une empreinte, avant et après :
+
+  ```sh
+  md5sum /usr/bin/claude-os-video build/claude-os-video
+  ```
+
+### Et le sélecteur derrière le masque
+
+L'utilisateur a trouvé la cause du « gel » que trois diagnostics avaient
+manquée : la boîte de sélection passait **derrière la fenêtre du lecteur**,
+qui est transparente et sans décoration. Sans vidéo chargée, cette fenêtre
+est entièrement invisible — et une surface invisible avale les clics tout
+aussi bien qu'une surface peinte. Le dock le disait pourtant : deux entrées,
+« Vidéo » et « Ouverture de fichier ».
+
+C'est exactement ce que le panneau supprime : il n'y a plus deux fenêtres.
+
 ## 11.8 Pistes, sous-titres, reprise — phase 3
 
 Un menu dans la capsule liste les **pistes audio** et les **sous-titres**,
