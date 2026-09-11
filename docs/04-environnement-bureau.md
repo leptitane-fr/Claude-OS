@@ -61,11 +61,74 @@ dessous. L'inverse la ferait se redimensionner à chaque appui sur la touche
 Loupe — mesuré : 1920×1114 dock affiché, 1920×1200 dock masqué. Le réglage
 existe pour qui préfère l'autre comportement.
 
+### Quand le dock et la barre sont à l'écran
+
+Depuis le 11 septembre 2026, ils **sortent de l'écran par le bas** dès qu'on
+travaille dans une application, et ne reviennent qu'à la demande :
+
+| Ce qui se passe | Effet |
+|---|---|
+| une fenêtre est activée — clic dessus, application qui s'ouvre, Alt-Tab | le dock et la barre descendent hors de l'écran |
+| touche **Loupe** | ils remontent ; un second appui les renvoie |
+| court **glisser du doigt** depuis le bord bas (5 mm suffisent) | ils remontent |
+| clic **à côté** alors qu'on les a rappelés par-dessus une application | ils repartent — ce clic-là n'atteint pas l'application |
+| clic sur l'icône de l'application déjà active | ils repartent |
+| **plus aucune fenêtre active** — bureau vide, tout réduit | le dock revient seul : c'est le seul moyen d'aller ailleurs |
+| une **notification** arrive pendant qu'ils sont partis | la barre seule remonte le temps de la bannière |
+
+Le dock mène : lui seul suit les fenêtres, et il dit à la barre « afficher »
+ou « masquer » sur le bus. La règle et ses trois états sont dans
+`shell/src/visibility.h`, la mécanique dans `shell/src/dock.c` (« À l'écran
+ou non »).
+
+Quatre limites connues, toutes voulues :
+
+- **La bande du bord prend les dix derniers pixels** de l'écran (1,6 mm)
+  quand le dock est caché : un appui qui commence là ne va plus à
+  l'application dessous. C'est le prix du geste — labwc 0.8.3 n'a pas de
+  geste de bord, un client ne voit que les doigts posés sur ses propres
+  surfaces.
+- **Rappelé par-dessus une application, un clic à côté est consommé** : il
+  renvoie le dock, il ne clique pas dans l'application. C'est le geste du
+  panneau qu'on ferme en cliquant à côté. Si la Console est ouverte, le
+  premier clic la ferme, le second renvoie le reste.
+- **Dans la bande basse (86 px), un clic à côté n'est pas consommé** : il
+  atteint l'application sans renvoyer le dock. C'est ce qui garde la barre
+  touchable quel que soit l'ordre dans lequel le compositeur a empilé les
+  deux processus.
+- **Le dock et la barre sont en couche OVERLAY**, au-dessus du plein écran.
+  En TOP, labwc les éteignait sous une fenêtre plein écran — mesuré au banc —
+  et ni la Loupe ni le doigt n'auraient pu les rappeler pendant une vidéo.
+
 ### La barre d'état
 
-En bas à droite, dans la même pilule. Réseau, batterie, heure. Au clic, un
-panneau : bascules Wi-Fi et Bluetooth avec leurs listes, carte batterie avec
-la **consommation instantanée en watts**, et l'accès aux Réglages.
+En bas à droite, dans la même pilule : l'icône du **mode de veille** en
+vigueur, réseau, batterie, et **la date au-dessus de l'heure** — deux lignes
+qui donnent à la pilule la hauteur d'une cible qu'on touche au doigt. À sa
+gauche, la **cloche** des notifications, ronde, exactement de la hauteur de la
+pilule.
+
+**Toute la pilule ouvre la Console**, bords compris. Jusqu'au 11 septembre
+2026, seul son centre répondait : le retrait intérieur était posé sur le
+contour, qui se dessinait comme la pilule sans se cliquer.
+
+La Console, de haut en bas :
+
+| Rangée | Ce qu'elle fait |
+|---|---|
+| Son, luminosité | curseurs, relus en continu tant que la Console est ouverte |
+| Wi-Fi, Bluetooth | un **bouton** qui ouvre le volet de détail à gauche, et sous lui un **interrupteur** qui allume ou éteint le module ; éteint, le bouton est grisé et ne répond plus |
+| Batterie | pourcentage, état, **consommation instantanée en watts**, autonomie |
+| Réglages | ouvre le panneau complet |
+| Travail · Automatique · Nomade | les trois modes de veille, chacun avec son icône — compteur, balance, feuille — qui est aussi celle de la barre |
+| Alimentation | cinq icônes : verrouiller, fermer la session, veille, redémarrer, éteindre. Toutes sauf verrouiller demandent un second appui : le bouton passe au rouge et montre une coche, puis retombe seul après quatre secondes |
+
+Le titre « Veille de l'écran » et sa roue crantée ont disparu : la roue
+ouvrait les Réglages, que le bouton du dessus ouvre déjà.
+
+**Fermer la session** arrête labwc (comme `labwc --exit`) et rend l'écran de
+connexion ; les applications ouvertes se ferment avec lui. **Verrouiller**
+monte l'écran de verrouillage sans rien fermer.
 
 Discipline d'énergie, parce que c'est le composant qui risque le plus de
 réveiller la machine :
@@ -75,6 +138,13 @@ réveiller la machine :
 - le réseau ne consulte rien — il réagit aux signaux D-Bus de NetworkManager ;
 - la minuterie des watts ne tourne **que** pendant que le panneau est ouvert ;
 - les services ne sont contactés qu'à la première ouverture du panneau.
+
+### Le centre de notifications
+
+La cloche l'ouvre, au-dessus de la Console si elle est ouverte — les deux
+coexistent. **Un clic à côté le ferme** : une surface transparente, la
+« nappe », recueille ce clic, et laisse passer ceux qui visent la barre
+elle-même. La cloche, allumée à l'accent, signale du non-lu.
 
 ### Le lanceur
 

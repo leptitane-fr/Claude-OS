@@ -128,11 +128,20 @@ typedef struct {
     int             duree_essai;
     gboolean        plein;
     gboolean        scenario;
+    gboolean        sans_offload;   /* banc : pour mesurer ce qu'il coute  */
     gboolean        revele;         /* --revele : banc, pour la capture     */
     gboolean        avec_st;        /* --sous-titres : banc, active la 1re  */
     int             etape;
     gint64          depart;
     gint64          battements;
+    /* LA CADENCE REELLE : combien de rafraichissements d'ecran chaque image
+     * reste affichee. A 23,976 im/s sur 60 Hz, la suite correcte est
+     * 3,2,3,2,3... Toute autre suite se voit, meme sans perdre une image. */
+    int             depuis_image;
+    gint64          derniere_image;
+    gint64          cadence[16];
+    int             dernier_seau;
+    gint64          alternances, repetitions;
 } App;
 
 static void bilan(App *a, const char *quand);
@@ -298,7 +307,60 @@ static gboolean sur_battement(GtkWidget *w, GdkFrameClock *horloge, gpointer u)
         return G_SOURCE_REMOVE;
     }
 
-    AVFrame *trame = video_moteur_image_due(a->moteur);
+    a->depuis_image++;
+
+    /* QUAND CETTE IMAGE SERA-T-ELLE VRAIMENT A L'ECRAN ?
+     *
+     * GTK le sait : l'horloge d'images porte l'instant de balayage prevu et
+     * la periode de rafraichissement. On decide donc pour CET instant-la,
+     * decale d'un demi-rafraichissement -- ce qui revient a choisir l'image
+     * la plus proche du balayage plutot que la derniere qui soit deja due.
+     *
+     * Sans cela, une gigue d'une milliseconde sur l'horloge audio suffit a
+     * faire basculer une image d'un rafraichissement au suivant. Mesure sur
+     * une mire a 30 im/s : 268 images tenues deux rafraichissements, 143
+     * trois, 30 quatre -- alors que « deux » partout est la seule reponse
+     * juste. Aucune image perdue, et pourtant cela se voit. */
+    gint64 intervalle = 0, presentation = 0;
+    gint64 maintenant_us = g_get_monotonic_time();
+    gdk_frame_clock_get_refresh_info(horloge, maintenant_us,
+                                     &intervalle, &presentation);
+    if (intervalle <= 0) intervalle = 16667;     /* 60 Hz, a defaut de mieux */
+
+    double avance = 0.0;
+    if (presentation > 0) {
+        double d = (presentation - maintenant_us) / 1e6;
+        /* Un ecart absurde -- horloge pas encore etablie -- ne doit pas
+         * propulser la lecture en avant. */
+        if (d > -0.1 && d < 0.2) avance = d;
+    }
+    /* Un demi-rafraichissement : cela revient a choisir l'image la PLUS
+     * PROCHE du balayage, plutot que la derniere qui soit deja due. Sans
+     * cela, une image dont l'echeance tombe a un cheveu du balayage bascule
+     * au rafraichissement suivant, et l'intervalle passe de 33 a 50 ms. */
+    avance += intervalle / 2e6;
+
+    AVFrame *trame = video_moteur_image_due(a->moteur, avance);
+    if (trame) {
+        /* L'INTERVALLE ENTRE DEUX IMAGES AFFICHEES, en millisecondes. C'est
+         * lui qui se voit : pour une video a 30 im/s il doit valoir 33 ms a
+         * chaque fois. Compter les battements ne dit rien -- l'horloge de
+         * GTK en glisse de parasites a deux millisecondes d'intervalle. */
+        gint64 now2 = g_get_monotonic_time();
+        if (a->derniere_image)
+            a->cadence[CLAMP((int)((now2 - a->derniere_image) / 1000 / 8), 0, 15)]++;
+        if (a->derniere_image) {
+            int ms = (int)((now2 - a->derniere_image) / 1000);
+            int seau = (ms < 42) ? 2 : 3;          /* 2 ou 3 rafraichissements */
+            if (a->dernier_seau) {
+                if (seau == a->dernier_seau) a->repetitions++;
+                else                         a->alternances++;
+            }
+            a->dernier_seau = seau;
+        }
+        a->derniere_image = now2;
+        a->depuis_image = 0;
+    }
 
     /* IMAGE_DUE PEUT AVOIR TOUT DEMOLI SOUS NOS PIEDS.
      *
@@ -719,6 +781,16 @@ static void bilan(App *a, const char *quand)
               video_moteur_ecart_moyen(a->moteur) * 1000.0,
               video_moteur_ecart_max(a->moteur) * 1000.0,
               sec > 0 ? a->battements / sec : 0.0);
+
+    GString *c = g_string_new("video : intervalles entre images (ms) --");
+    for (int i = 0; i < 16; i++)
+        if (a->cadence[i])
+            g_string_append_printf(c, " %d-%d:%ld", i * 8, i * 8 + 7,
+                                   (long)a->cadence[i]);
+    g_string_append_printf(c, "  |  alternances %ld, répétitions %ld",
+                           (long)a->alternances, (long)a->repetitions);
+    g_message("%s", c->str);
+    g_string_free(c, TRUE);
 }
 
 static void sur_fin(gpointer u)
@@ -1311,7 +1383,9 @@ static void construire(App *a)
      * est pose tel quel, il n'y a materiellement rien autour. */
     a->offload = gtk_graphics_offload_new(a->image);
     gtk_graphics_offload_set_enabled(GTK_GRAPHICS_OFFLOAD(a->offload),
-                                     GTK_GRAPHICS_OFFLOAD_ENABLED);
+                                     a->sans_offload
+                                        ? GTK_GRAPHICS_OFFLOAD_DISABLED
+                                        : GTK_GRAPHICS_OFFLOAD_ENABLED);
 
     /* Le sous-titre par-dessus l'image. Cache tant qu'il n'y a rien a dire. */
     a->st_texte = gtk_label_new("");
@@ -1713,6 +1787,8 @@ int main(int argc, char **argv)
             a.scenario = TRUE;
         } else if (!strcmp(argv[i], "--sous-titres")) {
             a.avec_st = TRUE;
+        } else if (!strcmp(argv[i], "--sans-offload")) {
+            a.sans_offload = TRUE;
         } else if (!strcmp(argv[i], "--revele")) {
             /* Mode de banc : sans pointeur, le survol ne peut pas etre
              * joue ; on montre la glissiere pour pouvoir la regarder. */

@@ -81,7 +81,16 @@ gboolean     video_moteur_materiel(VideoMoteur *m);
  * montrer. A appeler depuis le frame clock, et de nulle part ailleurs.
  * L'appelant devient proprietaire de la trame rendue et doit la liberer par
  * av_frame_free(). */
-AVFrame     *video_moteur_image_due(VideoMoteur *m);
+/* L'IMAGE A AFFICHER, decidee pour l'instant ou elle sera REELLEMENT a
+ * l'ecran -- « avance » est le delai, en secondes, entre maintenant et ce
+ * moment-la. L'appelant le tient de son horloge d'images ; le moteur, lui,
+ * ne connait pas l'ecran.
+ *
+ * Decider pour « maintenant » plutot que pour l'instant de balayage fait
+ * basculer une image d'un rafraichissement a l'autre au gre d'une gigue de
+ * une milliseconde : la cadence devient irreguliere sans qu'aucune image ne
+ * soit perdue, et c'est exactement ce que l'oeil appelle une saccade. */
+AVFrame     *video_moteur_image_due(VideoMoteur *m, double avance);
 
 /* Combien d'images ont ete sautees parce qu'elles arrivaient trop tard.
  * Zero est la seule valeur acceptable en regime etabli ; c'est le premier

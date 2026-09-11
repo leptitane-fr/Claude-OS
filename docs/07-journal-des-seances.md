@@ -971,6 +971,147 @@ sur MADOO** : balayage, double appui, pincement et rotation.
 
 ---
 
+## 11 septembre 2026 — le dock qui sort de l'écran
+
+Demande : le dock et la barre sortent de l'écran par le bas dès qu'on
+travaille dans une application — clic sur une fenêtre, lancement — et
+reviennent par la touche Loupe ou par un court glisser du doigt depuis le
+bord bas. Jusque-là, la Loupe les masquait et les rendait, rien de plus.
+
+### Ce qui a été livré
+
+- `visibility.c` réécrit en **automate à trois états** — caché, bureau,
+  convoqué —, qui ne vit plus que dans le dock. La barre reçoit « afficher »
+  ou « masquer » sur le bus : deux bascules indépendantes, une par processus,
+  finissaient par se contredire.
+- `glissiere.c` : un conteneur qui translate son enfant vers le bas, puis
+  retire la fenêtre. 220 ms, cubique.
+- Une **bande de 10 px** au ras du bord, toujours affichée, qui guette le
+  doigt ; seuil de 32 px, soit 5 mm sur cette dalle (310 mm pour 1920 px
+  d'après l'EDID — et c'est **1920×1080**, pas 1920×1200 comme l'écrivent
+  quelques commentaires plus anciens).
+- La **nappe** : rappelé par-dessus une application, le dock tend sa fenêtre
+  à tout l'écran pour recevoir le clic à côté.
+- `claude-os-shell-basculer` ne s'adresse plus qu'au dock, se rabat sur la
+  barre s'il ne répond pas, et ne jette plus rien dans `/dev/null`.
+- La barre remonte le temps d'une bannière. Et une omission réparée au
+  passage : la nappe du **centre de notifications** n'était jamais déployée
+  (seul l'appel à `FALSE` existait depuis le 8 septembre), donc le clic à
+  côté ne fermait pas le centre.
+
+### Trois constats qui ont fixé la conception
+
+**labwc ne dit rien quand on revient à la fenêtre déjà active.** Le clavier
+qui passe à une surface layer-shell ne désactive pas la fenêtre
+(`focus_change_notify`, seat.c de labwc 0.8.3). Recliquer ensuite l'application
+ne produit donc aucun événement foreign-toplevel. D'où la nappe — et son
+prix : le clic à côté est consommé.
+
+**labwc éteint la couche TOP sous le plein écran.** Lu dans
+`desktop_update_top_layer_visibility`, puis **vu au banc** : un dock en TOP
+disparaît sous `foot --fullscreen`. Le commentaire de l'ancien
+`visibility.h`, qui affirmait le contraire « constaté sur la machine », était
+donc faux ou décrivait autre chose. Dock, barre et bande passent en OVERLAY.
+
+**Une fenêtre GTK entièrement transparente et vide ne reçoit aucun appui.**
+La bande, écrite avec la classe `shell` des autres surfaces, ne voyait
+passer aucun geste — et labwc ouvrait son menu racine à la place. Bissection
+au banc : fond `transparent`, rien ; fond à 1 %, l'appui et tout le glisser
+arrivent. Encore une défaillance muette. La règle est écrite dans `dock.c`,
+pas dans la feuille de style, pour qu'aucune harmonisation ne la défasse.
+
+### Le banc
+
+Un pointeur virtuel, `shell/essais/pointeur.c` (protocole
+`wlr-virtual-pointer`), permet désormais de cliquer et de glisser pour de vrai
+dans le labwc sans écran. `shell/essais/banc-dock.sh` joue tout le parcours
+et vérifie l'état du dock après chaque geste — douze étapes, rejouables à
+chaque retouche.
+
+Un faux échec en est sorti, à retenir : **un clic sur le fond ouvre le menu
+racine de labwc**, et le clic suivant sert à le refermer. Un scénario qui
+clique sur le bureau puis ailleurs mesure le menu, pas le shell.
+
+### Éprouvé
+
+Au banc, sous AddressSanitizer et UBSan, trois cycles complets — Loupe en
+rafale, survol, Console, bannière, clic à côté, glisser, icône de
+l'application active, fermeture de toutes les fenêtres — sans un rapport.
+`banc-dock.sh` : 12 étapes sur 12.
+Plein écran : la Loupe et le glisser font paraître dock et barre par-dessus.
+Au repos, **aucun commit** de surface du dock ni de la barre pendant trois
+secondes ; une quinzaine par mouvement.
+
+**Pas encore vu sur MADOO**, et c'est là que tout reste à juger : le glisser
+**au doigt** — le banc n'a qu'un pointeur —, la hauteur de la bande face à un
+doigt venu du cadre, et l'impression que laisse le mouvement.
+
+---
+
+## 11 septembre 2026, suite — la barre, le centre, la Console
+
+Dix demandes : la date au-dessus de l'heure, une cloche à la hauteur de la
+pilule, toute la pilule cliquable ; le centre de notifications qui sautait à
+gauche, et qui devait se fermer au clic à côté ; des icônes pour les trois
+modes, reprises dans la barre ; Wi-Fi et Bluetooth refaits en bouton plus
+interrupteur ; la roue crantée retirée ; l'alimentation en icônes, avec
+verrouiller et fermer la session en plus. Toutes livrées — voir `docs/04`
+§4.2 pour ce que cela donne à l'écran.
+
+### Le saut du centre : causé par la correction de la veille
+
+La nappe du centre avait été « réparée » le matin même en ajoutant l'appel
+qui la déployait — une ligne. Déployer, c'était étirer la fenêtre de la barre
+à tout l'écran. Trace Wayland au banc : la surface passe de 216×42 à
+1920×1080, GTK redemande la position du popover (`anchor_rect(1740, 1038)`),
+et labwc 0.8.3 répond `configure(-151, …)` — il calcule depuis l'ancienne
+origine de la surface. Le centre, et la Console si elle était ouverte,
+partaient à gauche, en partie hors de l'écran.
+
+**Règle, qui vaut pour tout le shell : on ne redimensionne jamais une
+surface qui porte un popover ouvert.** La nappe est désormais sa propre
+fenêtre, plein écran, dont la zone d'entrée laisse la barre dehors. Le dock,
+qui s'étire lui aussi pour sa nappe, ferme ses listes au survol avant.
+
+### Trois autres constats
+
+- **Sous GTK 4, `gtk_widget_set_size_request` englobe les marges CSS.** La
+  cloche demandait la hauteur de la pilule ; ses marges (10 px à droite,
+  12 en bas) étaient prises dessus, et elle se peignait en 30×28. Les deux
+  hauteurs ne coïncidaient jusque-là que par hasard. Les marges sont passées
+  sur un socle, et la hauteur mesurée est la hauteur peinte
+  (`gtk_widget_compute_bounds`, 44 px), pas `get_height` (42, sans bordure).
+- **Retirer une fenêtre pendant un appui fâche GTK.** La nappe se retirait
+  dès l'appui ; le relâchement ne lui parvenait jamais, et le journal disait
+  « Broken accounting of active state ». Elle se retire à la fin du geste.
+- **Papirus dessine les trois profils d'énergie comme trois cadrans** dont
+  seule l'aiguille change. À 18 px on ne les distingue pas. Les icônes des
+  modes sont prises chez Adwaita — compteur, balance, feuille —, recolorées
+  comme toute icône symbolique.
+
+Et une fragilité relevée au banc, **hors de ce chantier** :
+`claude-os-verrou` demande un clavier sans vérifier que le siège en a un. Le
+siège du banc n'en a pas ; le compositeur coupe la connexion pour erreur de
+protocole. Sur MADOO le clavier existe toujours, mais un verrou qui meurt
+une fois l'écran verrouillé laisserait la session inaccessible.
+
+### Éprouvé
+
+Au banc, pointeur virtuel à l'appui : les quatre bords de la pilule ouvrent
+la Console ; le centre s'ouvre à droite et y reste, se ferme au clic à côté,
+coexiste avec la Console ; le bouton Wi-Fi ouvre et referme son volet ; le
+Bluetooth éteint est grisé ; Éteindre s'arme puis se désarme ; Verrouiller
+lance bien `claude-os-verrou` ; l'icône de la barre suit un changement de
+mode écrit dans `shell.conf`. Thème sombre vérifié. AddressSanitizer et
+UBSan : aucun rapport. `banc-dock.sh` : 12 sur 12.
+
+**Au banc, jamais les interrupteurs ni l'alimentation hors aperçu** : le bus
+système y est le vrai, ils piloteraient le vrai Wi-Fi et la vraie machine.
+Fermer la session n'a donc pas été éprouvé ; sur MADOO, `LABWC_PID` est bien
+posé dans l'environnement de la barre et désigne labwc.
+
+---
+
 ## Ce qui reste à faire — au 10 septembre 2026
 
 Par ordre d'importance.

@@ -124,6 +124,29 @@ struct _VideoMoteur {
     double            rattrapage;      /* -1 : rien a rattraper            */
     gboolean          rattrape_v, rattrape_a;
 
+    /* L'HORLOGE LISSEE, ET POURQUOI ELLE EST INDISPENSABLE.
+     *
+     * L'horloge audio est juste EN MOYENNE mais gigue de une a deux
+     * millisecondes d'un appel a l'autre : elle est extrapolee d'un
+     * instantane que PipeWire ne rafraichit qu'une fois par cycle. Decider
+     * a chaque battement « cette image est-elle due ? » contre une horloge
+     * qui tremble fait basculer l'image d'un rafraichissement au suivant
+     * des qu'elle tombe pres de la frontiere.
+     *
+     * Mesure sur une mire a 30 im/s, ou l'intervalle doit valoir 33 ms :
+     * 309 images a 33 ms, mais 17 a 16-23 ms et 16 a 40-47 ms. Aucune image
+     * perdue -- et pourtant cela se voit, parce qu'une image a 16 ms suivie
+     * d'une a 50 ms est precisement ce que l'oeil appelle une saccade.
+     *
+     * On garde donc le DECALAGE entre l'horloge du film et l'horloge
+     * monotone, lisse par une moyenne glissante. Le temps qui passe est
+     * alors donne par l'horloge monotone -- parfaitement reguliere -- et le
+     * decalage ne sert qu'a suivre lentement la derive de la carte son.
+     * Un ecart brutal -- un saut, une reprise -- repose le decalage d'un
+     * coup au lieu de le lisser sur plusieurs secondes. */
+    double            decalage;      /* media - monotone, en secondes      */
+    gboolean          decalage_pret;
+
     double            pts_dernier;   /* derniere image montree             */
     double            horloge_secours;   /* quand il n'y a pas d'audio     */
     gint64            depart_secours;    /* monotonic, us                  */
@@ -526,6 +549,7 @@ static void executer_saut(VideoMoteur *m, double cible)
     /* Le fil de decodage vide ses decodeurs en voyant ce numero changer :
      * lui seul a le droit d'y toucher. */
     m->generation++;
+    m->decalage_pret = FALSE;   /* le film a bouge : on ne lisse pas par-dessus */
     horloge_poser(m, cible);
     g_cond_broadcast(&m->cond);
     g_mutex_unlock(&m->verrou);
@@ -1398,14 +1422,33 @@ void video_moteur_choisir_piste(VideoMoteur *m, VideoTypePiste type, int index)
 
 /* ------------------------------------------------- l'image due maintenant */
 
-AVFrame *video_moteur_image_due(VideoMoteur *m)
+AVFrame *video_moteur_image_due(VideoMoteur *m, double avance)
 {
     if (!m || !m->dec_v) return NULL;
 
     AVFrame *choisie = NULL;
 
     g_mutex_lock(&m->verrou);
-    double maintenant = horloge(m);
+
+    /* L'heure qu'il sera quand l'image sera a l'ecran, et non l'heure qu'il
+     * est -- et lue sur une horloge qui ne tremble pas. */
+    double mono = g_get_monotonic_time() / 1e6;
+    double brut = horloge(m);
+    double ecart = brut - mono;
+
+    if (!m->decalage_pret || fabs(ecart - m->decalage) > 0.25) {
+        /* Premier appel, ou saut : on se recale d'un coup. */
+        m->decalage = ecart;
+        m->decalage_pret = TRUE;
+    } else {
+        /* Constante de temps d'environ une seconde a 60 images par
+         * seconde : assez lent pour effacer la gigue, assez vif pour
+         * suivre la derive entre l'horloge du systeme et celle de la
+         * carte son. */
+        m->decalage += (ecart - m->decalage) * 0.02;
+    }
+
+    double maintenant = mono + m->decalage + avance;
     if (g_queue_is_empty(m->images) && m->etat == VIDEO_LIT && !m->demux_fini)
         m->famines++;
 
