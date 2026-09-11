@@ -89,8 +89,12 @@ window.shell {
 .status {
   background-color: @surface;
   border: 1px solid @border;
-  border-radius: 18px;
-  padding: 6px 14px;
+  border-radius: 20px;
+  /* AUCUN RETRAIT ICI : il est porté par le bouton intérieur, plus bas.
+     Posé sur le menubutton, il entourait le bouton d'une bordure de 6 et
+     14 px qui se dessinait comme la pilule mais ne se cliquait pas — seul
+     le centre ouvrait la Console. Signalé à l'usage le 11 septembre 2026. */
+  padding: 0;
   margin: 0 12px 12px 0;
   box-shadow: 0 8px 28px @shadow,
               0 2px  6px @shadow-close;
@@ -101,12 +105,20 @@ window.shell {
   margin: 0 5px;
 }
 
-/* L'heure porte le regard : elle est le seul élément qu'on lit vraiment,
-   les autres se consultent d'un coup d'œil. */
+/* La date au-dessus de l'heure : deux lignes serrées, qui donnent à la
+   pilule la hauteur d'une cible qu'on touche au doigt. L'heure porte le
+   regard, la date se consulte. */
+.status-temps { margin: 0 4px 0 8px; }
+
+.status-date {
+  font-size: 11px;
+  color: @text-dim;
+}
+
 .status-clock {
-  font-weight: 500;
-  font-size: 13px;
-  margin-left: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  color: @text;
 }
 
 /* Le pourcentage de batterie, plus discret que l'heure. */
@@ -133,7 +145,10 @@ menubutton.status > button {
   border: none;
   box-shadow: none;
   outline: none;
-  padding: 0;
+  /* Le retrait de la pilule, ici et nulle part ailleurs : tout ce qui se
+     dessine comme la barre se clique comme elle. */
+  padding: 5px 12px;
+  border-radius: 20px;
   margin: 0;
   min-width: 0;
   min-height: 0;
@@ -142,6 +157,9 @@ menubutton.status > button {
 /* Retour au survol : assez pour dire « ceci se clique », assez discret pour
    ne pas transformer une zone d'information en bouton criard. */
 menubutton.status:hover   { background-color: @surface-alt; }
+menubutton.status > button:hover,
+menubutton.status > button:active,
+menubutton.status > button:checked { background: none; }
 /* :checked = panneau ouvert. GTK pose cet état sur le menubutton tant que
    son popover est affiché ; on s'en sert pour montrer d'où sort le
    panneau. */
@@ -281,6 +299,17 @@ popover.qs-popover > contents {
 .qs-alim image      { color: @text; }
 .qs-alim-nom        { font-size: 12px; font-weight: 500; color: @text; }
 
+/* Le mode en vigueur : l'icône et le nom passent en couleur de contraste
+   avec l'accent. Le nom porte sa propre couleur (.qs-alim-nom) : sans cette
+   règle, il resterait sombre sur l'accent. */
+.qs-mode { padding: 8px 4px 6px 4px; }
+.qs-mode:checked image,
+.qs-mode:checked .qs-alim-nom { color: @on-accent; }
+
+/* Les boutons d'alimentation, icônes seules depuis le 11 septembre 2026.
+   Plus bas que les modes : on les vise moins souvent, et de propos délibéré. */
+.qs-alim-icone { padding: 8px 0; min-height: 20px; }
+
 /* --- Bascules ----------------------------------------------------------- */
 
 .qs-tile {
@@ -288,11 +317,15 @@ popover.qs-popover > contents {
      peint les boutons avec un background-IMAGE, qui recouvre tout
      background-color qu'on poserait dessous. Sans cette remise à zéro les
      deux pastilles restent blanches quoi qu'on écrive ensuite — constaté à
-     l'écran, puis mesuré au pixel. */
+     l'écran, puis mesuré au pixel.
+
+     40 px et non plus 56 : la pastille n'est plus qu'un bouton qui ouvre
+     le volet, l'interrupteur est dessous. L'ensemble ne devait pas prendre
+     plus de place qu'avant. */
   background: none;
   background-color: @surface-alt;
-  min-height: 56px;
-  padding: 8px 12px;
+  min-height: 40px;
+  padding: 6px 12px;
   border: none;
   border-radius: 16px;
   box-shadow: none;
@@ -301,19 +334,34 @@ popover.qs-popover > contents {
 
 .qs-tile:hover { background-color: @surface-sunk; }
 
-/* Activé : le seul endroit du panneau où l'accent apparaît. Une bascule se
-   lit d'un coup d'œil ou elle ne sert à rien. */
-.qs-tile.on       { background-color: @accent; }
-.qs-tile.on:hover { background-color: @accent-hover; }
-
-/* La pastille ne porte plus qu'une icône : les libellés « Wi-Fi » et
-   « Activé » ont été retirés, l'icône disant la fonction et l'accent
-   l'état. Les règles qui les coloraient sur accent sont parties avec eux.
-   « .qs-tile-name » et « .qs-tile-state » servent encore, plus bas, à la
-   ligne « Réglages ». */
-.qs-tile.on .qs-tile-icon { color: @on-accent; }
-
+/* L'état ne se lit plus à la couleur de la pastille mais à l'interrupteur
+   dessous : la pastille est devenue un bouton de navigation, et un bouton
+   de navigation à l'accent se lirait comme « sélectionné ». Module éteint,
+   elle est grisée et ne répond plus. */
 .qs-tile:disabled { opacity: 0.42; }
+
+/* L'interrupteur sous chaque pastille. Aucun style n'existait : GTK
+   dessinait celui d'Adwaita, en bleu, étranger au thème. */
+switch.qs-interrupteur {
+  background: none;
+  background-color: @surface-sunk;
+  border: none;
+  border-radius: 999px;
+  min-width: 44px;
+  min-height: 22px;
+}
+switch.qs-interrupteur:checked { background-color: @accent; }
+switch.qs-interrupteur > slider {
+  background: none;
+  background-color: @on-accent;
+  border: none;
+  border-radius: 999px;
+  min-width: 18px;
+  min-height: 18px;
+  margin: 2px;
+  box-shadow: 0 1px 3px @shadow-close;
+}
+switch.qs-interrupteur:disabled { opacity: 0.42; }
 
 .qs-tile-icon  { color: @text; }
 .qs-tile-name  { font-size: 13px; font-weight: 500; color: @text; }
@@ -542,34 +590,8 @@ window.reglages { background-color: @surface-alt; }
 
 .qs-retour:hover { background-color: @surface-alt; }
 
-/* Le chevron est collé à la pastille : les deux forment un objet, mais deux
-   zones cliquables. */
-/* Le chevron est POSÉ SUR la pastille, plus à côté d'elle : son fond doit
-   donc être transparent pour laisser passer la couleur de la pastille —
-   @surface-alt quand elle est éteinte, l'accent quand elle est allumée. */
-.qs-chevron {
-  background: none;
-  background-color: transparent;
-  border: none;
-  box-shadow: none;
-  min-width: 24px;
-  min-height: 24px;
-  padding: 0;
-  margin-left: 8px;
-  border-radius: 12px;
-  color: @text-dim;
-  transition: background-color 120ms ease-out;
-}
-
-.qs-chevron:hover { background-color: @surface-sunk; color: @text; }
-
-/* Pastille allumée : le chevron n'est plus descendant du bouton, il ne peut
-   plus hériter de « .qs-tile.on .qs-tile-icon ». Sa classe lui est posée
-   depuis tile_apply. Le survol s'éclaircit à partir de la couleur de
-   contraste, faute de quoi il retomberait sur un gris qui jure sur l'accent. */
-.qs-chevron.sur-accent        { color: @on-accent; }
-.qs-chevron.sur-accent:hover  { background-color: alpha(@on-accent, 0.20);
-                                color: @on-accent; }
+/* Le chevron posé sur la pastille a disparu le 11 septembre 2026 : c'est
+   la pastille entière qui ouvre désormais le volet (panel.c, tile_build). */
 
 .qs-vide { font-size: 13px; color: @text-dim; }
 
@@ -1523,10 +1545,14 @@ window.images { background-color: @surface; }
      donc ronde quelle que soit la valeur mesurée. */
   padding: 0;
   border-radius: 999px;
-  /* L'écart avec la pilule, et le même retrait du bord bas qu'elle. */
-  margin: 0 10px 12px 0;
+  /* AUCUNE MARGE : sous GTK 4 la taille demandée les englobe, et la
+     cloche se peignait plus petite que la pilule. Elles sont sur le socle. */
+  margin: 0;
   transition: background-color 140ms ease-out, color 140ms ease-out;
 }
+
+/* L'écart avec la pilule, et le même retrait du bord bas qu'elle. */
+.cloche-socle { margin: 0 10px 12px 0; }
 
 .cloche:hover { background-color: @surface-alt; color: @text; }
 
@@ -1738,6 +1764,19 @@ window.images { background-color: @surface; }
 .video-bouton:hover    { background-color: @surface-alt; }
 .video-bouton:active   { background-color: @surface-sunk; }
 .video-bouton:disabled { opacity: 0.35; }
+
+/* L'ACCUEIL : la seule chose visible d'une fenêtre sans film. Elle flotte
+   sur un fond transparent, donc elle porte son propre fond. */
+.video-accueil {
+  background-color: alpha(@surface, 0.92);
+  border: 1px solid @border;
+  border-radius: 22px;
+  padding: 12px 24px;
+  font-size: 15px;
+  color: @text;
+  box-shadow: 0 4px 18px alpha(#000000, 0.45);
+}
+.video-accueil:hover { background-color: @surface-alt; }
 
 /* LA CROIX DE FERMETURE, dans le coin de l'image.
    Sans barre de titre, c'est la seule sortie à la souris : elle doit se voir

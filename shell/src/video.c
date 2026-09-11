@@ -86,6 +86,8 @@ typedef struct {
     GtkWidget      *commandes;     /* zone + capsule, flottant au bas     */
     GtkWidget      *racine;        /* la GtkOverlay qui porte tout        */
     GtkWidget      *rev_fermer;    /* la croix, au survol de l'image      */
+    GtkWidget      *accueil;       /* « Ouvrir une vidéo… », fenetre vide */
+    GtkWidget      *selecteur;     /* la boite d'ouverture, s'il y en a   */
     guint           retrait_fermer;
 
     GtkWidget      *b_lecture;
@@ -214,6 +216,38 @@ static void reprise_ecrire(const char *fichier, double position, double duree)
         g_message("video : reprise non enregistrée (%s)", e ? e->message : "?");
         g_clear_error(&e);
     }
+}
+
+/* LE DERNIER DOSSIER OUVERT, garde a cote des reprises.
+ *
+ * Sans lui, la boite s'ouvre sur « Recents » -- qui, sur cette machine, ne
+ * contient que deux entrees sans rapport -- et il faut retraverser toute
+ * l'arborescence a chaque fois. Un lecteur video s'ouvre la ou etait le
+ * dernier film. */
+static void dernier_dossier_ecrire(const char *chemin)
+{
+    g_autofree gchar *f = chemin_reprises();
+    g_autoptr(GKeyFile) kf = g_key_file_new();
+    g_key_file_load_from_file(kf, f, G_KEY_FILE_NONE, NULL);
+
+    g_autoptr(GFile) fic = g_file_new_for_path(chemin);
+    g_autoptr(GFile) dir = g_file_get_parent(fic);
+    if (!dir) return;
+    g_autofree gchar *d = g_file_get_path(dir);
+    if (!d) return;
+
+    g_key_file_set_string(kf, "reprises", "dernier-dossier", d);
+    g_autofree gchar *dossier = g_path_get_dirname(f);
+    g_mkdir_with_parents(dossier, 0700);
+    g_key_file_save_to_file(kf, f, NULL);
+}
+
+static gchar *dernier_dossier_lire(void)
+{
+    g_autofree gchar *f = chemin_reprises();
+    g_autoptr(GKeyFile) kf = g_key_file_new();
+    if (!g_key_file_load_from_file(kf, f, G_KEY_FILE_NONE, NULL)) return NULL;
+    return g_key_file_get_string(kf, "reprises", "dernier-dossier", NULL);
 }
 
 static double reprise_lire(const char *fichier)
@@ -1329,6 +1363,8 @@ static gboolean sur_position_flottant(GtkOverlay *o, GtkWidget *enfant,
         return TRUE;
     }
 
+    if (enfant == a->accueil) return FALSE;   /* centre, GTK s'en charge */
+
     if (enfant == a->rev_fermer) {
         gtk_widget_measure(a->rev_fermer, GTK_ORIENTATION_HORIZONTAL, -1,
                            &min, &nat_l, NULL, NULL);
@@ -1431,12 +1467,22 @@ static void construire(App *a)
     gtk_revealer_set_child(GTK_REVEALER(a->rev_fermer), croix);
     gtk_revealer_set_reveal_child(GTK_REVEALER(a->rev_fermer), FALSE);
 
+    /* L'ACCUEIL : ce que montre une fenetre sans film. Sans lui, il ne
+     * resterait a l'ecran qu'une capsule flottante aux boutons eteints, sur
+     * un fond transparent -- rien qui dise quoi faire. */
+    a->accueil = gtk_button_new_with_label("Ouvrir une vidéo…");
+    gtk_widget_add_css_class(a->accueil, "video-accueil");
+    gtk_widget_set_halign(a->accueil, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(a->accueil, GTK_ALIGN_CENTER);
+    g_signal_connect(a->accueil, "clicked", G_CALLBACK(act_ouvrir), a);
+
     a->racine = gtk_overlay_new();
     gtk_widget_add_css_class(a->racine, "video-pile");
     gtk_overlay_set_child(GTK_OVERLAY(a->racine), a->offload);
     gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->st_texte);
     gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->commandes);
     gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->rev_fermer);
+    gtk_overlay_add_overlay(GTK_OVERLAY(a->racine), a->accueil);
     g_signal_connect(a->racine, "get-child-position",
                      G_CALLBACK(sur_position_flottant), a);
 
@@ -1492,6 +1538,8 @@ static void ouvrir_fichier(App *a, const char *chemin)
         gtk_window_close(GTK_WINDOW(a->fenetre));
         return;
     }
+
+    gtk_widget_set_visible(a->accueil, FALSE);
 
     double duree = video_moteur_duree(a->moteur);
     g_message("video : %s -- %s %dx%d, %s, %.1f s",
@@ -1640,6 +1688,12 @@ static void sur_reponse_selecteur(GtkDialog *d, int reponse, gpointer u);
  *    mais capable, et on le dit plutot que de le subir. */
 static void demander_fichier(App *a)
 {
+    /* Deja ouverte : on la remonte plutot que d'en ouvrir une seconde. */
+    if (a->selecteur) {
+        gtk_window_present(GTK_WINDOW(a->selecteur));
+        return;
+    }
+
     G_GNUC_BEGIN_IGNORE_DEPRECATIONS
     GtkWidget *d = gtk_file_chooser_dialog_new(
         "Ouvrir une vidéo", GTK_WINDOW(a->fenetre),
@@ -1671,46 +1725,53 @@ static void demander_fichier(App *a)
         }
     }
 
-    const char *videos_dir = g_get_user_special_dir(G_USER_DIRECTORY_VIDEOS);
-    if (videos_dir && g_file_test(videos_dir, G_FILE_TEST_IS_DIR)) {
-        g_autoptr(GFile) f = g_file_new_for_path(videos_dir);
-        gtk_file_chooser_set_current_folder(ch, f, NULL);
-    }
-
-    /* Ouvrir sur le dossier du film precedent, quand il y en a un : c'est
-     * presque toujours la ou se trouve le suivant. */
+    /* OUVRIR SUR UN VRAI DOSSIER, ET JAMAIS SUR « RECENTS ».
+     *
+     * C'est le mode par defaut de GTK, et sur cette machine il ne montre que
+     * deux entrees sans rapport : la boite a l'air vide, donc cassee. On
+     * ouvre sur le dossier du film courant, sinon sur le dernier visite,
+     * sinon sur le dossier personnel. */
+    g_autofree gchar *depart = NULL;
     if (a->fichier) {
         g_autoptr(GFile) f = g_file_new_for_path(a->fichier);
         g_autoptr(GFile) dir = g_file_get_parent(f);
-        if (dir) gtk_file_chooser_set_current_folder(ch, dir, NULL);
+        if (dir) depart = g_file_get_path(dir);
     }
+    if (!depart) depart = dernier_dossier_lire();
+    if (!depart || !g_file_test(depart, G_FILE_TEST_IS_DIR)) {
+        g_free(depart);
+        depart = g_strdup(g_get_home_dir());
+    }
+    g_autoptr(GFile) fdep = g_file_new_for_path(depart);
+    gtk_file_chooser_set_current_folder(ch, fdep, NULL);
     G_GNUC_END_IGNORE_DEPRECATIONS
 
-    /* LA FENETRE PARENTE D'ABORD. Une boite modale posee sur une fenetre
-     * qui n'est pas au premier plan se glisse DERRIERE ses voisines : son
-     * « Annuler » devient alors hors d'atteinte, et comme la fenetre dessous
-     * est modale elle aussi, plus rien ne repond. C'est l'enfermement
-     * constate le 10 septembre 2026. */
-    gtk_window_present(GTK_WINDOW(a->fenetre));
-
+    /* PAS MODALE, ET C'EST DELIBERE.
+     *
+     * Une boite modale sur une fenetre SANS BARRE DE TITRE est un piege :
+     * le 10 septembre 2026, elle s'est glissee derriere une autre
+     * application, son « Annuler » est passe hors de vue, et la fenetre
+     * dessous -- inerte parce que modale -- n'offrait plus rien a cliquer.
+     * Non modale, la croix de fermeture du lecteur reste atteignable quoi
+     * qu'il arrive. Elle reste transitoire, donc au-dessus de son parent. */
     gtk_window_set_default_size(GTK_WINDOW(d), 900, 600);
-    gtk_window_set_modal(GTK_WINDOW(d), TRUE);
     gtk_window_set_transient_for(GTK_WINDOW(d), GTK_WINDOW(a->fenetre));
     gtk_window_set_destroy_with_parent(GTK_WINDOW(d), TRUE);
     g_signal_connect(d, "response", G_CALLBACK(sur_reponse_selecteur), a);
+    a->selecteur = d;
     gtk_window_present(GTK_WINDOW(d));
 }
 
 static void sur_reponse_selecteur(GtkDialog *d, int reponse, gpointer u)
 {
     App *a = u;
+    a->selecteur = NULL;
 
     if (reponse != GTK_RESPONSE_ACCEPT) {
+        /* Annuler ne ferme plus l'application : la fenetre reste, avec son
+         * invitation a ouvrir. Fermer d'autorite au moindre « Annuler »
+         * etait brutal -- et l'utilisateur n'avait rien demande de tel. */
         gtk_window_destroy(GTK_WINDOW(d));
-        /* Annule alors qu'aucun film n'est ouvert : il n'y a rien a
-         * montrer, on referme. Une fenetre transparente et vide serait plus
-         * deroutante qu'utile. */
-        if (!a->moteur) gtk_window_close(GTK_WINDOW(a->fenetre));
         return;
     }
 
@@ -1724,17 +1785,8 @@ static void sur_reponse_selecteur(GtkDialog *d, int reponse, gpointer u)
     g_autofree gchar *uri    = g_file_get_uri(f);
     g_free(a->fichier);
     a->fichier = g_strdup(chemin ? chemin : uri);
+    if (chemin) dernier_dossier_ecrire(chemin);
     ouvrir_fichier(a, a->fichier);
-}
-
-/* La boite d'ouverture n'est demandee qu'une fois la fenetre AFFICHEE :
- * creee avant, elle n'a rien au-dessus de quoi se placer et se retrouve
- * derriere. Une seule fois -- « map » revient a chaque re-affichage. */
-static void sur_fenetre_affichee(GtkWidget *w, gpointer u)
-{
-    App *a = u;
-    g_signal_handlers_disconnect_by_func(w, G_CALLBACK(sur_fenetre_affichee), a);
-    demander_fichier(a);
 }
 
 static void sur_demarrage(GtkApplication *app, gpointer cfg)
@@ -1759,21 +1811,27 @@ static void sur_activation(GApplication *app, gpointer u)
     a->rang = -1;
     video_image_init(&a->images);
     construire(a);
-    /* LE RAPPEL AVANT L'AFFICHAGE, ET NON APRES.
+    /* LANCEE SANS FICHIER, L'APPLICATION N'OUVRE PLUS RIEN D'AUTORITE.
      *
-     * gtk_window_present() affiche la fenetre TOUT DE SUITE : « map » est
-     * emis pendant l'appel. S'y abonner ensuite, c'est s'abonner a un signal
-     * deja passe -- la boite d'ouverture n'arrivait jamais, et l'application
-     * restait sur une fenetre vide. Constate sur MADOO le 10 septembre 2026,
-     * a la capture d'ecran. */
-    if (!a->fichier)
-        g_signal_connect(a->fenetre, "map",
-                         G_CALLBACK(sur_fenetre_affichee), a);
-
+     * Elle affichait aussitot la boite de selection. Ce n'est pas ce qu'on
+     * attend d'une application qui s'ouvre : elle montre desormais son
+     * invitation -- « Ouvrir une vidéo… » -- et c'est l'utilisateur qui
+     * decide. */
     if (a->plein) gtk_window_fullscreen(GTK_WINDOW(a->fenetre));
     gtk_window_present(GTK_WINDOW(a->fenetre));
 
-    if (a->fichier) ouvrir_fichier(a, a->fichier);
+    if (a->fichier) {
+        ouvrir_fichier(a, a->fichier);
+    } else {
+        /* Sans film, la croix reste affichee : c'est la seule sortie d'une
+         * fenetre sans barre de titre, et elle ne doit pas dependre d'un
+         * mouvement de souris qui n'a peut-etre pas eu lieu. */
+        gtk_revealer_set_reveal_child(GTK_REVEALER(a->rev_fermer), TRUE);
+        if (a->retrait_fermer) {
+            g_source_remove(a->retrait_fermer);
+            a->retrait_fermer = 0;
+        }
+    }
 }
 
 int main(int argc, char **argv)
