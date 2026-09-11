@@ -22,6 +22,7 @@
 #include <math.h>
 
 #include "config.h"
+#include "clavier-ecran.h"
 #include "glissiere.h"
 #include "rotation.h"
 #include "tablette.h"
@@ -602,13 +603,25 @@ on_lanceur_clicked (GtkButton *button, gpointer data)
         g_warning ("lanceur indisponible : %s", error->message);
 }
 
+/* Le bouton du clavier à l'écran, en mode tablette seulement : pour les
+ * applications qui ne signalent pas leurs champs de texte, et pour le
+ * rappeler après l'avoir renvoyé. Le dock se retire aussitôt — il couvrirait
+ * le bas du clavier. */
+static void
+on_clavier_clicked (GtkButton *button, gpointer data)
+{
+    (void) button; (void) data;
+    shell_clavier_ecran_basculer ();
+    shell_visibility_congedier ();
+}
+
+/* Un outil du dock : une icône symbolique, sans application derrière. */
 static GtkWidget *
-build_lanceur_item (void)
+build_outil_item (const char *icone, const char *repli, const char *classe,
+                  const char *infobulle, GCallback sur_clic)
 {
     GtkIconTheme *theme = gtk_icon_theme_get_for_display (gdk_display_get_default ());
-    const char *nom = gtk_icon_theme_has_icon (theme, "view-app-grid-symbolic")
-                    ? "view-app-grid-symbolic"
-                    : "applications-other";
+    const char *nom = gtk_icon_theme_has_icon (theme, icone) ? icone : repli;
 
     GtkWidget *image = gtk_image_new_from_icon_name (nom);
     gtk_image_set_pixel_size (GTK_IMAGE (image), DOCK_ICON_SIZE - 6);
@@ -616,9 +629,9 @@ build_lanceur_item (void)
     GtkWidget *button = gtk_button_new ();
     gtk_button_set_child (GTK_BUTTON (button), image);
     gtk_widget_add_css_class (button, "dock-item");
-    gtk_widget_add_css_class (button, "dock-lanceur");
-    gtk_widget_set_tooltip_text (button, "Applications");
-    g_signal_connect (button, "clicked", G_CALLBACK (on_lanceur_clicked), NULL);
+    gtk_widget_add_css_class (button, classe);
+    gtk_widget_set_tooltip_text (button, infobulle);
+    g_signal_connect (button, "clicked", sur_clic, NULL);
 
     /* Meme enveloppe verticale que les autres entrees, point d'etat compris
      * mais invisible : sans elle le bouton ne serait pas aligne sur la meme
@@ -631,6 +644,14 @@ build_lanceur_item (void)
     gtk_box_append (GTK_BOX (box), button);
     gtk_box_append (GTK_BOX (box), dot);
     return box;
+}
+
+static GtkWidget *
+build_lanceur_item (void)
+{
+    return build_outil_item ("view-app-grid-symbolic", "applications-other",
+                             "dock-lanceur", "Applications",
+                             G_CALLBACK (on_lanceur_clicked));
 }
 
 /* -------------------------------------------------------------------------
@@ -852,6 +873,18 @@ dock_rebuild (void)
         app_state (w->app_id, &running, &active);
         gtk_box_append (GTK_BOX (D.box),
                         build_dock_item (w->app_id, running, active, FALSE));
+    }
+
+    /* Le clavier à l'écran en dernier, en mode tablette seulement : capot
+     * ouvert, il y a un vrai clavier sous les doigts. */
+    if (shell_tablette_active ()) {
+        GtkWidget *sep = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_add_css_class (sep, "dock-separator");
+        gtk_box_append (GTK_BOX (D.box), sep);
+        gtk_box_append (GTK_BOX (D.box),
+                        build_outil_item ("input-keyboard-symbolic", "input-keyboard",
+                                          "dock-clavier", "Clavier à l'écran",
+                                          G_CALLBACK (on_clavier_clicked)));
     }
 }
 
@@ -1336,7 +1369,17 @@ on_action_rotation (GSimpleAction *a, GVariant *p, gpointer d)
     on_action_rotation_etat (a, g_variant_new_boolean (!shell_rotation_verrouillee ()), d);
 }
 
+/* Le clavier à l'écran, sur demande — pour le banc d'essai et pour un
+ * raccourci éventuel. Sans effet hors du mode tablette. */
+static void
+on_action_clavier (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    shell_clavier_ecran_basculer ();
+}
+
 static const GActionEntry actions[] = {
+    { "clavier",  on_action_clavier,  NULL, NULL, NULL, { 0 } },
     { "basculer", on_action_basculer, NULL, NULL, NULL, { 0 } },
     { "afficher", on_action_afficher, NULL, NULL, NULL, { 0 } },
     { "masquer",  on_action_masquer,  NULL, NULL, NULL, { 0 } },
@@ -1354,6 +1397,8 @@ on_tablette (gboolean tablette, gpointer data)
     GAction *a = g_action_map_lookup_action (G_ACTION_MAP (D.app), "tablette");
     g_simple_action_set_state (G_SIMPLE_ACTION (a), g_variant_new_boolean (tablette));
     shell_rotation_suivre (tablette);
+    shell_clavier_ecran_tablette (tablette);
+    dock_rebuild ();   /* l'icône du clavier n'existe qu'en mode tablette */
 }
 
 /* -------------------------------------------------------------------------
@@ -1484,6 +1529,10 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     shell_visibility_init (on_etat, NULL);
     shell_toplevels_init (on_windows_changed, NULL);
+
+    /* Le clavier avant le mode tablette, que on_tablette lui transmet ; et
+     * après la fenêtre du dock, pour être au-dessus de lui dans la couche. */
+    shell_clavier_ecran_init (app);
 
     /* Après les actions : on_tablette pose l'état de l'une d'elles. */
     shell_tablette_init (on_tablette, NULL);

@@ -1511,6 +1511,36 @@ window.images { background-color: @surface; }
   border-radius: 14px;
 }
 
+/* Le clavier à l'écran de la SESSION (clavier-ecran.c), en mode tablette.
+   Mêmes touches que ceux de la connexion, dans un bandeau au bas de
+   l'écran. Plus hautes : on y écrit des phrases, pas six chiffres, et une
+   rangée de plus (les accents) tient encore sous 400 px — 37 % d'un écran
+   de 1080. Le fond couvre toute la largeur ; les touches, 1440 px au plus. */
+.clavier-ecran {
+  background-color: @surface;
+  border-top: 1px solid @border;
+  padding: 8px 8px 12px 8px;
+}
+
+.clavier-ecran .clavier-touche {
+  min-height: 56px;
+  font-size: 20px;
+}
+
+.clavier-ecran .clavier-touche.speciale { font-size: 17px; }
+
+.clavier-ecran .clavier-touche.espace   { color: @text-dim; font-size: 15px; }
+
+/* La barre du haut — flèches, tabulation, ⌄ — plus basse : on s'en sert
+   moins, et chaque pixel pris ici l'est à la fenêtre au-dessus. */
+.clavier-ecran .clavier-barre .clavier-touche { min-height: 38px; }
+
+/* Maj verrouillée : distincte de Maj « une lettre ». Sans différence, on
+   ne sait pas si la prochaine lettre sera la dernière en majuscule. */
+.clavier-touche.speciale.verrouille {
+  box-shadow: inset 0 -3px 0 0 @on-accent;
+}
+
 .connexion-heure {
   font-size: 34px;
   font-weight: 300;

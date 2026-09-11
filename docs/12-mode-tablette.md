@@ -11,7 +11,7 @@ reste une limite. Ce qui n'est pas établi y est écrit comme tel.
 | Détection du mode tablette | **Faite, vue fonctionner sur MADOO** |
 | Rotation de l'écran (paysage / chevalet) | **Faite, vue fonctionner sur MADOO** |
 | Tactile et stylet alignés sur l'écran tourné | **Fait** — doigt vu juste en portrait ; stylet non essayé |
-| Clavier AZERTY à l'écran | À faire — voir §12.6 |
+| Clavier AZERTY à l'écran | **Première version vue fonctionner sur MADOO** — voir §12.6 |
 | Déplacer Claude Desktop au doigt | **Impossible sous labwc 0.8.3** — voir §12.5 |
 
 ---
@@ -132,11 +132,38 @@ Les boutons de barre de titre ont d'abord paru ne pas répondre, écran en
 portrait. Revus capot ouvert, ils répondent. **Non établi** : leur réponse au
 doigt écran en chevalet (180°).
 
-## 12.6 Le clavier à l'écran — à faire
+## 12.6 Le clavier à l'écran — `clavier-ecran.c`, `saisie.c`
 
 Choix de l'utilisateur : un clavier Claude OS, et non squeekboard ou wvkbd.
-Les protocoles nécessaires existent (§12.1) : `input-method-v2` pour
-apparaître quand un champ prend le focus, `virtual-keyboard-v1` pour frapper.
+**Vu fonctionner sur MADOO le 11 septembre 2026**, première version :
+apparition au focus d'un champ, disparition à sa perte, renvoi par ⌄,
+rappel par l'icône du dock, accents, Maj, Maj+↵ dans Claude Desktop, ⌫ tenu.
+
+**Deux protocoles, chacun pour ce qu'il fait bien** (§12.1) :
+
+- `input-method-v2` ne sert que de SIGNAL : un champ prend le focus, le
+  perd, attend des chiffres. Mesuré dans le journal : clavier montré 2 à
+  56 ms après la prise de focus, masqué 150 ms après sa perte (délai voulu,
+  pour qu'un passage de champ en champ ne fasse pas clignoter).
+- `virtual-keyboard-v1` sert à FRAPPER : de vrais événements clavier, que
+  toute application comprend. La disposition XKB est **fabriquée** au
+  démarrage — une touche par caractère, sans modificateur, « é » et « É »
+  chacun la sienne — et **vérifiée par xkbcommon** avant d'être envoyée :
+  wlroots n'en dirait rien si elle était refusée, les touches ne feraient
+  rien. Seul Maj existe vraiment, pour Maj+Entrée.
+
+Les XML des deux protocoles sont ceux de wlroots 0.18.2 (la version de
+labwc), versés dans `shell/protocols/`.
+
+**Claude Desktop et Chromium ne signalent pas leurs champs** : Chromium ne
+parle `text-input-v3` que sur option. Le clavier n'y apparaît donc pas seul ;
+l'icône « clavier » que le dock porte en mode tablette le fait venir, et il
+y écrit normalement. Les options `--enable-wayland-ime` n'ont pas été
+essayées.
+
+Le clavier est une surface layer-shell OVERLAY en bas de l'écran, en zone
+réservée (les fenêtres agrandies raccourcissent), qui ne prend jamais le
+focus clavier (`KEYBOARD_MODE_NONE`).
 
 ## 12.7 Ce qui n'est pas établi
 

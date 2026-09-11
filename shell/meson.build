@@ -109,11 +109,39 @@ add_project_arguments(
   '-DSHELL_DATA_DIR="' + data_dir + '"',
   language : 'c')
 
+# Le clavier à l'écran de la session (clavier-ecran.c, saisie.c) : deux
+# protocoles de wlroots 0.18.2, la version de labwc, versés dans le dépôt
+# comme les autres — aucun paquet Debian ne les porte. clavier.c est celui
+# de l'écran de connexion, dont le dock reprend le pavé numérique.
+im_xml = 'protocols/input-method-unstable-v2.xml'
+vk_xml = 'protocols/virtual-keyboard-unstable-v1.xml'
+
+im_header = custom_target('im-header',
+  input   : im_xml,
+  output  : 'input-method-unstable-v2-client-protocol.h',
+  command : [wlscanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+im_code = custom_target('im-code',
+  input   : im_xml,
+  output  : 'input-method-unstable-v2-protocol.c',
+  command : [wlscanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
+vk_header = custom_target('vk-header',
+  input   : vk_xml,
+  output  : 'virtual-keyboard-unstable-v1-client-protocol.h',
+  command : [wlscanner, 'client-header', '@INPUT@', '@OUTPUT@'])
+
+vk_code = custom_target('vk-code',
+  input   : vk_xml,
+  output  : 'virtual-keyboard-unstable-v1-protocol.c',
+  command : [wlscanner, 'private-code', '@INPUT@', '@OUTPUT@'])
+
 executable('claude-os-dock',
   'src/dock.c', 'src/toplevels.c', 'src/visibility.c', 'src/glissiere.c',
   'src/tablette.c', 'src/rotation.c',
-  ftl_header, ftl_code, commun,
-  dependencies : [gtk, layershell, giounix, wlclient, pangocairo, m_dep],
+  'src/clavier-ecran.c', 'src/clavier.c', 'src/saisie.c',
+  ftl_header, ftl_code, im_header, im_code, vk_header, vk_code, commun,
+  dependencies : [gtk, layershell, giounix, wlclient, pangocairo, xkb, m_dep],
   install : true)
 
 # La barre d'etat accueille aussi le module d'energie -- comme elle accueille
