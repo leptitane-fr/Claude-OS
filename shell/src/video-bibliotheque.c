@@ -13,10 +13,18 @@
 
 #include <string.h>
 
-/* Seize neuvièmes, et une taille fixe : une grille dont les cases changent de
- * taille selon l'image qu'elles portent est illisible. */
+/* UNE LARGEUR FIXE, UNE HAUTEUR LIBRE.
+ *
+ * La premiere version imposait 280 x 158 a toutes les vignettes : un film en
+ * 2.39:1 s'y retrouvait etire en hauteur, ce qui est pire que de le rogner.
+ * On fixe donc la largeur -- une grille dont les colonnes bougent est
+ * illisible -- et on laisse la hauteur suivre le format de la video. */
 #define VIGNETTE_L 280
-#define VIGNETTE_H 158
+#define VIGNETTE_H_MAX 200
+
+/* Le nom du cache porte une version : changer la facon de fabriquer les
+ * vignettes doit les refaire, pas reutiliser les anciennes. */
+#define VIGNETTE_VERSION "v2"
 
 /* Au-dela, on arrete de parcourir : un dossier personnel entier mis dans la
  * bibliotheque ne doit pas faire enfler la memoire sans fin. */
@@ -28,7 +36,36 @@ typedef struct {
     gchar   *titre;
     gint64   vue;          /* horodatage de la derniere lecture, 0 sinon */
     double   duree;
+    int      largeur, hauteur;
+    gchar   *codec;
+    gint64   octets;
 } Entree;
+
+/* LES TROIS VUES.
+ *
+ *   VIGNETTES  l'image, le titre, la duree -- pour parcourir
+ *   DETAILS    l'image et tout ce qu'on sait -- pour choisir en connaissance
+ *   AFFICHES   les affiches officielles -- demande un service en ligne,
+ *              donc une cle et l'accord de l'utilisateur. Pas encore fait.
+ */
+typedef enum { VUE_VIGNETTES = 0, VUE_DETAILS = 1 } Vue;
+
+/* Ce qu'on apprend d'un fichier en lui prenant une vignette : l'ouvrir
+ * coute un aller-retour, autant tout relever d'un coup. */
+typedef struct {
+    gchar  *titre;
+    double  duree;
+    int     largeur, hauteur;     /* de la video                          */
+    gchar  *codec;
+    gint64  octets;
+} Fiche;
+
+static void fiche_nettoyer(Fiche *f)
+{
+    g_clear_pointer(&f->titre, g_free);
+    g_clear_pointer(&f->codec, g_free);
+}
+
 
 struct _VideoBib {
     VideoBibChoix   choix;
@@ -46,6 +83,9 @@ struct _VideoBib {
     GKeyFile       *cat;           /* le catalogue, sur le disque          */
     GPtrArray      *dossiers;      /* gchar*                               */
     GHashTable     *connues;       /* chemin -> Entree*, tout le catalogue */
+
+    Vue             vue;
+    GtkWidget      *choix_vue;
 
     GCancellable   *annulation;
 
@@ -88,7 +128,7 @@ static gchar *chemin_vignette(const char *fichier)
 {
     g_autofree gchar *somme = g_compute_checksum_for_string(G_CHECKSUM_SHA256,
                                                             fichier, -1);
-    g_autofree gchar *nom = g_strconcat(somme, ".png", NULL);
+    g_autofree gchar *nom = g_strconcat(somme, "-", VIGNETTE_VERSION, ".png", NULL);
     return g_build_filename(g_get_user_cache_dir(), "claude-os", "video",
                             "vignettes", nom, NULL);
 }
@@ -101,6 +141,7 @@ static void entree_libre(gpointer p)
     Entree *e = p;
     g_free(e->chemin);
     g_free(e->titre);
+    g_free(e->codec);
     g_free(e);
 }
 
@@ -149,22 +190,22 @@ static void dossier_ajouter(VideoBib *b, const char *dossier)
 }
 
 static gchar *duree_texte(double s);
+static gchar *detail_texte(const Entree *e);
 
 /* -------------------------------------------------------- les vignettes */
 
 typedef struct {
-    VideoBib *bib;
-    gchar    *chemin;
+    VideoBib  *bib;
+    gchar     *chemin;
     GtkWidget *image;      /* la carte a mettre a jour, ou NULL            */
-    GtkWidget *duree_vue;  /* l'etiquette de duree, remplie apres coup      */
-    gchar    *titre;       /* rempli par le fil                            */
-    double    duree;
+    GtkWidget *info;       /* l'etiquette a completer, remplie apres coup  */
+    Fiche      fiche;      /* rempli par le fil                            */
 } Tache;
 
 static void tache_libre(Tache *t)
 {
     g_free(t->chemin);
-    g_free(t->titre);
+    fiche_nettoyer(&t->fiche);
     g_free(t);
 }
 
@@ -175,20 +216,25 @@ static void tache_libre(Tache *t)
  * presque toujours noires, et une bibliotheque de rectangles noirs ne sert
  * a rien. */
 static gboolean vignette_fabriquer(const char *fichier, const char *sortie,
-                                   gchar **titre, double *duree)
+                                   Fiche *fiche)
 {
     AVFormatContext *fmt = NULL;
     if (avformat_open_input(&fmt, fichier, NULL, NULL) < 0) return FALSE;
     if (avformat_find_stream_info(fmt, NULL) < 0) { avformat_close_input(&fmt); return FALSE; }
 
-    if (fmt->duration != AV_NOPTS_VALUE) *duree = (double)fmt->duration / AV_TIME_BASE;
+    if (fmt->duration != AV_NOPTS_VALUE)
+        fiche->duree = (double)fmt->duration / AV_TIME_BASE;
 
     AVDictionaryEntry *t = av_dict_get(fmt->metadata, "title", NULL, 0);
-    if (t && t->value && *t->value) *titre = g_strdup(t->value);
+    if (t && t->value && *t->value) fiche->titre = g_strdup(t->value);
 
     const AVCodec *codec = NULL;
     int piste = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, &codec, 0);
     if (piste < 0 || !codec) { avformat_close_input(&fmt); return FALSE; }
+
+    fiche->codec   = g_strdup(codec->name);
+    fiche->largeur = fmt->streams[piste]->codecpar->width;
+    fiche->hauteur = fmt->streams[piste]->codecpar->height;
 
     AVCodecContext *dec = avcodec_alloc_context3(codec);
     if (!dec) { avformat_close_input(&fmt); return FALSE; }
@@ -201,8 +247,8 @@ static gboolean vignette_fabriquer(const char *fichier, const char *sortie,
         avcodec_free_context(&dec); avformat_close_input(&fmt); return FALSE;
     }
 
-    if (*duree > 20.0) {
-        int64_t ou = (int64_t)(*duree * 0.1 * AV_TIME_BASE);
+    if (fiche->duree > 20.0) {
+        int64_t ou = (int64_t)(fiche->duree * 0.1 * AV_TIME_BASE);
         if (avformat_seek_file(fmt, -1, INT64_MIN, ou, ou, 0) >= 0)
             avcodec_flush_buffers(dec);
     }
@@ -215,13 +261,30 @@ static gboolean vignette_fabriquer(const char *fichier, const char *sortie,
     while (!ok && tours++ < 400 && av_read_frame(fmt, pk) >= 0) {
         if (pk->stream_index == piste && avcodec_send_packet(dec, pk) >= 0) {
             while (avcodec_receive_frame(dec, tr) == 0) {
+                /* LE FORMAT DE LA VIDEO, PAS LE NOTRE. On tient compte du
+                 * rapport d'aspect des pixels quand il n'est pas carre --
+                 * un DVD anamorphose serait sinon rendu trop etroit. */
+                double rapport = (double)tr->width / MAX(tr->height, 1);
+                if (tr->sample_aspect_ratio.num > 0 &&
+                    tr->sample_aspect_ratio.den > 0)
+                    rapport *= (double)tr->sample_aspect_ratio.num /
+                               tr->sample_aspect_ratio.den;
+
+                int vl = VIGNETTE_L;
+                int vh = (int)(vl / MAX(rapport, 0.1) + 0.5);
+                if (vh > VIGNETTE_H_MAX) {          /* format tres vertical */
+                    vh = VIGNETTE_H_MAX;
+                    vl = (int)(vh * rapport + 0.5);
+                }
+                vh = MAX(vh, 2); vl = MAX(vl, 2);
+
                 struct SwsContext *sws = sws_getContext(
                     tr->width, tr->height, tr->format,
-                    VIGNETTE_L, VIGNETTE_H, AV_PIX_FMT_RGB24,
+                    vl, vh, AV_PIX_FMT_RGB24,
                     SWS_BILINEAR, NULL, NULL, NULL);
                 if (sws) {
-                    int pas = VIGNETTE_L * 3;
-                    guchar *pix = g_malloc((gsize)pas * VIGNETTE_H);
+                    int pas = vl * 3;
+                    guchar *pix = g_malloc((gsize)pas * vh);
                     uint8_t *plans[4] = { pix, NULL, NULL, NULL };
                     int      pass[4]  = { pas, 0, 0, 0 };
                     sws_scale(sws, (const uint8_t * const *)tr->data,
@@ -230,7 +293,7 @@ static gboolean vignette_fabriquer(const char *fichier, const char *sortie,
 
                     GdkPixbuf *pb = gdk_pixbuf_new_from_data(
                         pix, GDK_COLORSPACE_RGB, FALSE, 8,
-                        VIGNETTE_L, VIGNETTE_H, pas,
+                        vl, vh, pas,
                         liberer_pixels, NULL);
                     if (pb) {
                         g_autofree gchar *dossier = g_path_get_dirname(sortie);
@@ -272,26 +335,49 @@ static gboolean vignette_posee(gpointer p)
             }
         }
 
-        /* LA DUREE N'EST CONNUE QU'APRES COUP : elle vient de l'ouverture
-         * du fichier, que seule la fabrication de la vignette fait. La
-         * carte existait deja ; on la complete plutot que de la refaire. */
-        if (t->duree > 0 && t->duree_vue && GTK_IS_LABEL(t->duree_vue)) {
-            g_autofree gchar *d = duree_texte(t->duree);
-            gtk_label_set_text(GTK_LABEL(t->duree_vue), d);
-            gtk_widget_set_visible(t->duree_vue, TRUE);
-        }
-
+        /* CE QU'ON APPREND N'EST CONNU QU'APRES COUP : durée, définition,
+         * codec viennent de l'ouverture du fichier, que seule la fabrication
+         * de la vignette fait. La carte existait déjà ; on la complète
+         * plutôt que de la refaire. */
+        Fiche *f = &t->fiche;
         g_autofree gchar *cle = cle_de(t->chemin);
         gboolean neuf = FALSE;
-        if (t->titre && *t->titre) {
-            g_key_file_set_string(b->cat, "titres", cle, t->titre);
+
+        if (f->titre && *f->titre) {
+            g_key_file_set_string(b->cat, "titres", cle, f->titre); neuf = TRUE;
+        }
+        if (f->duree > 0) {
+            g_key_file_set_double(b->cat, "durees", cle, f->duree); neuf = TRUE;
+        }
+        if (f->largeur > 0 && f->hauteur > 0) {
+            g_key_file_set_integer(b->cat, "largeurs", cle, f->largeur);
+            g_key_file_set_integer(b->cat, "hauteurs", cle, f->hauteur);
             neuf = TRUE;
         }
-        if (t->duree > 0) {
-            g_key_file_set_double(b->cat, "durees", cle, t->duree);
-            neuf = TRUE;
+        if (f->codec) {
+            g_key_file_set_string(b->cat, "codecs", cle, f->codec); neuf = TRUE;
         }
         if (neuf) catalogue_ecrire(b);
+
+        if (t->info && GTK_IS_LABEL(t->info)) {
+            /* On met a jour l'entree en memoire aussi : le prochain
+             * changement de vue doit savoir ce qu'on vient d'apprendre. */
+            Entree tampon = { 0 };
+            Entree *e = g_hash_table_lookup(b->connues, t->chemin);
+            if (!e) e = &tampon;
+
+            if (f->duree > 0)   e->duree   = f->duree;
+            if (f->largeur > 0) e->largeur = f->largeur;
+            if (f->hauteur > 0) e->hauteur = f->hauteur;
+            if (f->codec) { g_free(e->codec); e->codec = g_strdup(f->codec); }
+
+            g_autofree gchar *txt = (b->vue == VUE_DETAILS)
+                                  ? detail_texte(e) : duree_texte(e->duree);
+            gtk_label_set_text(GTK_LABEL(t->info), txt);
+            gtk_widget_set_visible(t->info, *txt != '\0');
+
+            if (e == &tampon) g_free(tampon.codec);
+        }
     }
 
     tache_libre(t);
@@ -308,7 +394,7 @@ static gpointer fil_vignettes(gpointer data)
 
         g_autofree gchar *v = chemin_vignette(t->chemin);
         if (!g_file_test(v, G_FILE_TEST_EXISTS))
-            vignette_fabriquer(t->chemin, v, &t->titre, &t->duree);
+            vignette_fabriquer(t->chemin, v, &t->fiche);
 
         g_idle_add(vignette_posee, t);
     }
@@ -329,7 +415,7 @@ static void sur_carte_affichee(GtkWidget *image, gpointer u)
     t->bib = b;
     t->chemin = g_strdup(chemin);
     t->image = image;
-    t->duree_vue = g_object_get_data(G_OBJECT(image), "duree");
+    t->info = g_object_get_data(G_OBJECT(image), "info");
     g_async_queue_push(b->file, t);
 }
 
@@ -346,6 +432,39 @@ static gchar *duree_texte(double s)
     return g_strdup_printf("%d s", total);
 }
 
+/* CE QU'ON DIT D'UN FILM EN VUE DÉTAILLÉE. On ne montre que ce qu'on SAIT :
+ * une ligne pleine de tirets pour des informations pas encore lues serait
+ * moins utile qu'une ligne courte. */
+static gchar *detail_texte(const Entree *e)
+{
+    GString *g = g_string_new(NULL);
+
+    g_autofree gchar *d = duree_texte(e->duree);
+    if (*d) g_string_append(g, d);
+
+    if (e->largeur > 0 && e->hauteur > 0) {
+        if (g->len) g_string_append(g, "  ·  ");
+        /* Le nom d'usage plutot que le compte de pixels : « 4K » parle,
+         * « 3840 x 1604 » se dechiffre. On donne les deux. */
+        const char *nom = e->largeur >= 3000 ? "4K"
+                        : e->largeur >= 1900 ? "1080p"
+                        : e->largeur >= 1250 ? "720p" : "SD";
+        g_string_append_printf(g, "%s (%d × %d)", nom, e->largeur, e->hauteur);
+    }
+
+    if (e->codec && *e->codec) {
+        if (g->len) g_string_append(g, "  ·  ");
+        g_string_append(g, e->codec);
+    }
+
+    if (e->octets > 0) {
+        if (g->len) g_string_append(g, "  ·  ");
+        g_autofree gchar *o = g_format_size(e->octets);
+        g_string_append(g, o);
+    }
+    return g_string_free(g, FALSE);
+}
+
 static void sur_carte_activee(GtkFlowBox *b, GtkFlowBoxChild *enfant, gpointer u)
 {
     (void) b;
@@ -354,16 +473,25 @@ static void sur_carte_activee(GtkFlowBox *b, GtkFlowBoxChild *enfant, gpointer u
     if (chemin && bib->choix) bib->choix(chemin, bib->usager);
 }
 
+/* DEUX MISES EN PAGE POUR LA MEME CARTE.
+ *
+ *   vignettes  l'image au-dessus, le titre et la duree dessous : on parcourt
+ *   details    l'image a gauche, tout ce qu'on sait a droite : on choisit
+ *
+ * La vignette garde sa LARGEUR dans les deux, jamais sa hauteur : c'est le
+ * format de la video qui la fixe, et l'imposer deformerait l'image. */
 static GtkWidget *carte_nouvelle(VideoBib *b, const Entree *e)
 {
-    GtkWidget *boite = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_add_css_class(boite, "video-carte");
+    gboolean details = (b->vue == VUE_DETAILS);
 
     GtkWidget *image = gtk_picture_new();
     gtk_widget_add_css_class(image, "video-carte-image");
-    gtk_widget_set_size_request(image, VIGNETTE_L, VIGNETTE_H);
-    gtk_picture_set_content_fit(GTK_PICTURE(image), GTK_CONTENT_FIT_COVER);
+    gtk_picture_set_content_fit(GTK_PICTURE(image), GTK_CONTENT_FIT_CONTAIN);
     gtk_picture_set_can_shrink(GTK_PICTURE(image), TRUE);
+    gtk_widget_set_size_request(image, details ? 200 : VIGNETTE_L, -1);
+    gtk_widget_set_hexpand(image, FALSE);
+    gtk_widget_set_halign(image, GTK_ALIGN_START);
+    gtk_widget_set_valign(image, GTK_ALIGN_START);
     g_object_set_data(G_OBJECT(image), "bib", b);
 
     /* La vignette n'est demandee qu'a l'apparition de la carte. */
@@ -376,19 +504,29 @@ static GtkWidget *carte_nouvelle(VideoBib *b, const Entree *e)
     gtk_label_set_lines(GTK_LABEL(titre), 2);
     gtk_label_set_wrap(GTK_LABEL(titre), TRUE);
     gtk_label_set_xalign(GTK_LABEL(titre), 0.0);
-    gtk_widget_set_size_request(titre, VIGNETTE_L, -1);
 
-    g_autofree gchar *d = duree_texte(e->duree);
+    g_autofree gchar *d = details ? detail_texte(e) : duree_texte(e->duree);
     GtkWidget *sous = gtk_label_new(d);
     gtk_widget_add_css_class(sous, "video-carte-duree");
     gtk_label_set_xalign(GTK_LABEL(sous), 0.0);
-
-    g_object_set_data(G_OBJECT(image), "duree", sous);
+    gtk_label_set_wrap(GTK_LABEL(sous), TRUE);
+    g_object_set_data(G_OBJECT(image), "info", sous);
     gtk_widget_set_visible(sous, *d != '\0');
 
+    GtkWidget *textes = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_hexpand(textes, TRUE);
+    gtk_widget_set_valign(textes, details ? GTK_ALIGN_CENTER : GTK_ALIGN_START);
+    gtk_box_append(GTK_BOX(textes), titre);
+    gtk_box_append(GTK_BOX(textes), sous);
+
+    GtkWidget *boite = gtk_box_new(details ? GTK_ORIENTATION_HORIZONTAL
+                                           : GTK_ORIENTATION_VERTICAL,
+                                   details ? 14 : 0);
+    gtk_widget_add_css_class(boite, "video-carte");
+    if (details) gtk_widget_add_css_class(boite, "video-carte-large");
+    else         gtk_widget_set_size_request(boite, VIGNETTE_L, -1);
     gtk_box_append(GTK_BOX(boite), image);
-    gtk_box_append(GTK_BOX(boite), titre);
-    gtk_box_append(GTK_BOX(boite), sous);
+    gtk_box_append(GTK_BOX(boite), textes);
 
     GtkWidget *enfant = gtk_flow_box_child_new();
     gtk_flow_box_child_set_child(GTK_FLOW_BOX_CHILD(enfant), boite);
@@ -401,6 +539,31 @@ static GtkWidget *carte_nouvelle(VideoBib *b, const Entree *e)
 typedef struct { VideoBib *bib; int profondeur; } Parcours;
 
 static void parcourir(VideoBib *b, GFile *dir, int profondeur);
+
+/* Tout ce que le catalogue sait deja d'un fichier. Les champs absents
+ * restent a zero : la vue n'affiche que ce qu'on sait. */
+static Entree *entree_du_catalogue(VideoBib *b, const char *chemin)
+{
+    Entree *e = g_new0(Entree, 1);
+    e->chemin = g_strdup(chemin);
+
+    g_autofree gchar *cle = cle_de(chemin);
+    e->titre   = g_key_file_get_string(b->cat, "titres", cle, NULL);
+    e->duree   = g_key_file_get_double(b->cat, "durees", cle, NULL);
+    e->largeur = g_key_file_get_integer(b->cat, "largeurs", cle, NULL);
+    e->hauteur = g_key_file_get_integer(b->cat, "hauteurs", cle, NULL);
+    e->codec   = g_key_file_get_string(b->cat, "codecs", cle, NULL);
+    e->vue     = g_key_file_get_int64(b->cat, "vues", cle, NULL);
+
+    if (!e->titre || !*e->titre) {
+        g_free(e->titre);
+        g_autofree gchar *base = g_path_get_basename(chemin);
+        gchar *point = strrchr(base, '.');
+        if (point && point != base) *point = '\0';
+        e->titre = g_strdup(base);
+    }
+    return e;
+}
 
 static void sur_lot(GObject *src, GAsyncResult *res, gpointer u)
 {
@@ -439,19 +602,10 @@ static void sur_lot(GObject *src, GAsyncResult *res, gpointer u)
         if (g_hash_table_size(b->connues) >= MAX_ENTREES) break;
         if (g_hash_table_contains(b->connues, chemin)) continue;
 
-        Entree *ent = g_new0(Entree, 1);
-        ent->chemin = g_strdup(chemin);
-        g_autofree gchar *cle = cle_de(chemin);
-        ent->titre = g_key_file_get_string(b->cat, "titres", cle, NULL);
-        if (!ent->titre || !*ent->titre) {
-            g_free(ent->titre);
-            g_autofree gchar *base = g_path_get_basename(chemin);
-            gchar *point = strrchr(base, '.');
-            if (point && point != base) *point = '\0';
-            ent->titre = g_strdup(base);
-        }
-        ent->duree = g_key_file_get_double(b->cat, "durees", cle, NULL);
-        ent->vue   = g_key_file_get_int64(b->cat, "vues", cle, NULL);
+        Entree *ent = entree_du_catalogue(b, chemin);
+        /* Le poids vient de l'enumeration : le demander au fichier une
+         * seconde fois serait un aller-retour reseau de plus. */
+        ent->octets = g_file_info_get_size(info);
 
         g_hash_table_insert(b->connues, g_strdup(chemin), ent);
         gtk_flow_box_append(GTK_FLOW_BOX(b->grille_bib), carte_nouvelle(b, ent));
@@ -495,6 +649,7 @@ static void parcourir(VideoBib *b, GFile *dir, int profondeur)
         G_FILE_ATTRIBUTE_STANDARD_NAME ","
         G_FILE_ATTRIBUTE_STANDARD_TYPE ","
         G_FILE_ATTRIBUTE_STANDARD_CONTENT_TYPE ","
+        G_FILE_ATTRIBUTE_STANDARD_SIZE ","
         G_FILE_ATTRIBUTE_STANDARD_IS_HIDDEN,
         G_FILE_QUERY_INFO_NONE, G_PRIORITY_LOW, b->annulation,
         sur_enumeration, p);
@@ -523,19 +678,7 @@ static void remplir_recents(VideoBib *b)
         g_autofree gchar *chemin = g_uri_unescape_string(cles[i], NULL);
         if (!chemin || !g_file_test(chemin, G_FILE_TEST_EXISTS)) continue;
 
-        Entree *e = g_new0(Entree, 1);
-        e->chemin = g_strdup(chemin);
-        e->vue    = g_key_file_get_int64(b->cat, "vues", cles[i], NULL);
-        e->duree  = g_key_file_get_double(b->cat, "durees", cles[i], NULL);
-        e->titre  = g_key_file_get_string(b->cat, "titres", cles[i], NULL);
-        if (!e->titre || !*e->titre) {
-            g_free(e->titre);
-            g_autofree gchar *base = g_path_get_basename(chemin);
-            gchar *point = strrchr(base, '.');
-            if (point && point != base) *point = '\0';
-            e->titre = g_strdup(base);
-        }
-        g_ptr_array_add(liste, e);
+        g_ptr_array_add(liste, entree_du_catalogue(b, chemin));
     }
 
     g_ptr_array_sort(liste, comparer_vues);
@@ -606,6 +749,38 @@ static void sur_dossier_choisi(GObject *src, GAsyncResult *res, gpointer u)
         dossier_ajouter(b, chemin);
         video_bib_rafraichir(b);
     }
+}
+
+/* LA VUE EST UN RÉGLAGE, DONC ELLE SE SOUVIENT. Retrouver la vue détaillée
+ * a chaque ouverture est le genre de detail qui fait qu'un lecteur est
+ * « le sien ». */
+static void colonnes_selon_vue(VideoBib *b)
+{
+    /* En vue détaillée une carte est large : deux par ligne au plus, sinon
+     * les informations se chevauchent. */
+    int maxi = (b->vue == VUE_DETAILS) ? 2 : 8;
+    int mini = (b->vue == VUE_DETAILS) ? 1 : 2;
+    GtkWidget *grilles[2] = { b->grille_rec, b->grille_bib };
+    for (int i = 0; i < 2; i++) {
+        if (!grilles[i]) continue;
+        gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(grilles[i]), mini);
+        gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(grilles[i]), maxi);
+    }
+}
+
+static void sur_vue_changee(GObject *liste, GParamSpec *p, gpointer u)
+{
+    (void) p;
+    VideoBib *b = u;
+    guint n = gtk_drop_down_get_selected(GTK_DROP_DOWN(liste));
+    Vue v = (n == 1) ? VUE_DETAILS : VUE_VIGNETTES;
+    if (v == b->vue) return;
+
+    b->vue = v;
+    g_key_file_set_integer(b->cat, "affichage", "vue", (int)v);
+    catalogue_ecrire(b);
+    colonnes_selon_vue(b);
+    video_bib_rafraichir(b);
 }
 
 static void act_ajouter_dossier(GtkButton *bt, gpointer u)
@@ -686,6 +861,15 @@ VideoBib *video_bib_nouveau(VideoBibChoix choix, VideoBibOuvrir ouvrir,
     gtk_widget_set_hexpand(b->compte, TRUE);
     gtk_label_set_xalign(GTK_LABEL(b->compte), 0.0);
 
+    /* Le choix de la vue. « Cinémathèque » -- les affiches officielles --
+     * n'y figure pas encore : elle demande un service en ligne, donc une
+     * cle et l'accord de l'utilisateur. Mieux vaut une entree absente qu'une
+     * entree qui ne fait rien. */
+    const char *vues[] = { "Vignettes", "Détaillée", NULL };
+    b->choix_vue = gtk_drop_down_new_from_strings(vues);
+    gtk_widget_add_css_class(b->choix_vue, "video-bib-vue");
+    gtk_widget_set_tooltip_text(b->choix_vue, "Mode d'affichage");
+
     GtkWidget *ajout = gtk_button_new_with_label("Ajouter un dossier…");
     gtk_widget_add_css_class(ajout, "video-bib-bouton");
     g_signal_connect(ajout, "clicked", G_CALLBACK(act_ajouter_dossier), b);
@@ -696,6 +880,7 @@ VideoBib *video_bib_nouveau(VideoBibChoix choix, VideoBibOuvrir ouvrir,
 
     gtk_box_append(GTK_BOX(barre), titre);
     gtk_box_append(GTK_BOX(barre), b->compte);
+    gtk_box_append(GTK_BOX(barre), b->choix_vue);
     gtk_box_append(GTK_BOX(barre), ajout);
     gtk_box_append(GTK_BOX(barre), fich);
 
@@ -739,6 +924,17 @@ VideoBib *video_bib_nouveau(VideoBibChoix choix, VideoBibOuvrir ouvrir,
     gtk_box_append(GTK_BOX(b->racine), barre);
     gtk_box_append(GTK_BOX(b->racine), b->bascule);
     gtk_box_append(GTK_BOX(b->racine), b->pile);
+
+    /* On relit la vue AVANT de peupler : sinon on batit les cartes dans un
+     * mode, puis on les refait dans l'autre. */
+    g_autofree gchar *fcat = chemin_catalogue();
+    g_key_file_load_from_file(b->cat, fcat, G_KEY_FILE_NONE, NULL);
+    b->vue = (Vue)g_key_file_get_integer(b->cat, "affichage", "vue", NULL);
+    if (b->vue != VUE_DETAILS) b->vue = VUE_VIGNETTES;
+    gtk_drop_down_set_selected(GTK_DROP_DOWN(b->choix_vue), (guint)b->vue);
+    g_signal_connect(b->choix_vue, "notify::selected",
+                     G_CALLBACK(sur_vue_changee), b);
+    colonnes_selon_vue(b);
 
     b->fil = g_thread_new("claude-os-video-vignettes", fil_vignettes, b);
     video_bib_rafraichir(b);

@@ -1970,3 +1970,21 @@ window.images { background-color: @surface; }
 /* La grille ne dessine pas de sélection : la carte a la sienne. */
 .video-grille > flowboxchild        { padding: 0; background: none; }
 .video-grille > flowboxchild:hover  { background: none; }
+
+/* Le choix de la vue, dans la barre de la cinémathèque. */
+.video-bib-vue > button {
+  border-radius: 18px;
+  padding: 4px 10px;
+  font-size: 13px;
+  background-color: @surface-alt;
+  border: 1px solid @border;
+  color: @text;
+}
+.video-bib-vue > button:hover { background-color: @surface-sunk; }
+
+/* La carte de la vue détaillée : l'image à gauche, le texte à droite. Elle
+   prend la largeur qu'on lui donne, là où la carte à vignettes a la sienne. */
+.video-carte-large {
+  padding: 10px;
+  min-width: 420px;
+}

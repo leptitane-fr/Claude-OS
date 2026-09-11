@@ -99,6 +99,7 @@ typedef struct {
     GtkWidget      *b_suiv;
     GtkWidget      *b_plein;
     GtkWidget      *b_ouvrir;
+    GtkWidget      *b_stop;
     GtkWidget      *b_son;
     GtkWidget      *volume;
     GtkWidget      *l_position;
@@ -821,7 +822,7 @@ static void sur_appui(GtkGestureClick *g, int n, double x, double y, gpointer u)
 
 static void rafraichir_bouton_lecture(App *a)
 {
-    gboolean lit = video_moteur_etat(a->moteur) == VIDEO_LIT;
+    gboolean lit = (a->moteur && video_moteur_etat(a->moteur) == VIDEO_LIT);
     gtk_button_set_icon_name(GTK_BUTTON(a->b_lecture),
                              lit ? "media-playback-pause-symbolic"
                                  : "media-playback-start-symbolic");
@@ -933,6 +934,46 @@ static void basculer_plein(App *a)
 }
 
 static void act_plein(GtkButton *b, gpointer u) { (void) b; basculer_plein((App *)u); }
+
+/* ARRETER : fermer le film et revenir a la cinematheque.
+ *
+ * Ce n'est pas « quitter » -- la fenetre reste, et le film qu'on vient de
+ * voir passe en tete des recents. C'est le geste qu'on fait quand on a fini
+ * un episode et qu'on cherche le suivant. */
+static void fermer_film(App *a)
+{
+    if (!a->moteur) return;
+
+    if (a->fichier)
+        reprise_ecrire(a->fichier, video_moteur_position(a->moteur),
+                       video_moteur_duree(a->moteur));
+
+    battement_selon(a, FALSE);
+    g_clear_pointer(&a->moteur, video_moteur_fermer);
+
+    /* On laisse le plein ecran : on revient parcourir, pas regarder. */
+    if (gtk_window_is_fullscreen(GTK_WINDOW(a->fenetre)))
+        gtk_window_unfullscreen(GTK_WINDOW(a->fenetre));
+
+    gtk_picture_set_paintable(GTK_PICTURE(a->image), NULL);
+    gtk_widget_set_visible(a->st_texte, FALSE);
+    gtk_label_set_text(GTK_LABEL(a->l_position), "0:00");
+    gtk_label_set_text(GTK_LABEL(a->l_duree), "0:00");
+    gtk_label_set_text(GTK_LABEL(a->l_codec), "");
+    gtk_range_set_range(GTK_RANGE(a->glissiere), 0.0, 0.1);
+    gtk_window_set_title(GTK_WINDOW(a->fenetre), "Vidéo");
+    a->seconde_affichee = -1;
+
+    gtk_widget_set_visible(a->bib_vue, TRUE);
+    if (a->bib) video_bib_rafraichir(a->bib);
+
+    rafraichir_bouton_lecture(a);
+    rafraichir_navigation(a);
+    gtk_widget_set_sensitive(a->b_stop, FALSE);
+    commandes_montrer(a, FALSE);
+}
+
+static void act_arreter(GtkButton *b, gpointer u) { (void) b; fermer_film((App *)u); }
 
 /* Ouvrir une autre video sans fermer l'application. Ctrl-O fait de meme ;
  * un bouton se voit, un raccourci se devine. */
@@ -1254,6 +1295,11 @@ static GtkWidget *construire_capsule(App *a)
 
     a->b_lecture = bouton("media-playback-start-symbolic", "video-bouton-grand",
                           G_CALLBACK(act_basculer), a);
+    a->b_stop = bouton("media-playback-stop-symbolic", NULL,
+                       G_CALLBACK(act_arreter), a);
+    gtk_widget_set_tooltip_text(a->b_stop, "Arrêter et revenir à la cinémathèque");
+    gtk_widget_set_sensitive(a->b_stop, FALSE);
+
     a->b_prec = bouton("media-skip-backward-symbolic", NULL,
                        G_CALLBACK(act_precedente), a);
     a->b_suiv = bouton("media-skip-forward-symbolic", NULL,
@@ -1300,6 +1346,7 @@ static GtkWidget *construire_capsule(App *a)
     gtk_box_append(GTK_BOX(c), a->b_prec);
     gtk_box_append(GTK_BOX(c), a->b_lecture);
     gtk_box_append(GTK_BOX(c), a->b_suiv);
+    gtk_box_append(GTK_BOX(c), a->b_stop);
     gtk_box_append(GTK_BOX(c), a->b_son);
     gtk_box_append(GTK_BOX(c), a->volume);
     gtk_box_append(GTK_BOX(c), a->l_codec);
@@ -1680,6 +1727,8 @@ static void ouvrir_fichier(App *a, const char *chemin)
     /* Le dossier est relu a chaque ouverture : on peut avoir change de
      * dossier par le selecteur, et le contenu a pu bouger entre-temps. */
     if (g_file_test(chemin, G_FILE_TEST_EXISTS)) dossier_charger(a, chemin);
+
+    gtk_widget_set_sensitive(a->b_stop, TRUE);
 
     a->depart = g_get_monotonic_time();
     a->seconde_affichee = -1;
