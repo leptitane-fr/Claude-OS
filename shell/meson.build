@@ -287,7 +287,9 @@ install_data(
 # français avec leur fréquence, tirées de Lexique 3.83 (CC BY-SA) par
 # tools/fabrique-mots.py. 1,5 Mo, projeté en lecture seule par mots.c — il
 # reste dans le cache de pages, jamais recopié.
-install_data('data/mots-fr.txt', install_dir : data_dir)
+# suites-fr.txt : quel mot suit quel autre (Tatoeba, CC BY 2.0 FR). C'est
+# lui qui fait la différence entre un dictionnaire et un clavier.
+install_data(['data/mots-fr.txt', 'data/suites-fr.txt'], install_dir : data_dir)
 
 install_subdir('style',
   install_dir : data_dir,
