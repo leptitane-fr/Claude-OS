@@ -1574,6 +1574,23 @@ window.images { background-color: @surface; }
 .console-gauche .clavier-touche { min-height: 52px; }
 .console-droite .clavier-touche.speciale { font-size: 18px; }
 
+/* LE CLAVIER ORGANIQUE — la couche des lettres du mode console. Les touches
+   pavent la colonne, sans espacement : un appui entre deux touches n'existe
+   pas. Le jeu visuel est une bordure TRANSPARENTE, qui reçoit l'appui —
+   une marge, elle, sortirait de la touche et créerait la zone morte qu'on
+   veut éviter. background-clip garde le fond en deçà de la bordure. */
+.clavier-organique .clavier-touche {
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 14px;
+  min-height: 0;
+  font-size: 21px;
+}
+
+/* La taille dit la fréquence : autant que l'étiquette le dise aussi. */
+.clavier-organique .clavier-touche.grande { font-size: 25px; }
+.clavier-organique .clavier-touche.petite { font-size: 18px; }
+
 /* Les suggestions, en haut de la colonne gauche. Plates et discrètes : ce
    sont des propositions, pas des touches — on doit les distinguer d'un coup
    d'œil de ce qu'on frappe. Une place vide reste dessinée, pour que la

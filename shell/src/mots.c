@@ -16,13 +16,29 @@
  * doit pas faire cinquante écritures sur l'eMMC. */
 #define DELAI_ECRITURE_S 20
 
-static struct {
+typedef struct {
     GMappedFile *fichier;
-    const char  *texte;      /* le dictionnaire projeté, trié par mot     */
+    const char  *texte;
     gsize        taille;
-    GHashTable  *appris;     /* mot -> compte                             */
-    guint        ecriture;   /* minuterie d'écriture différée             */
+} Table;
+
+static struct {
+    Table       mots;        /* sans accents \t mot \t fréquence          */
+    Table       suites;      /* précédent \t mot \t compte                */
+    GHashTable *appris;      /* mot -> compte                             */
+    guint       ecriture;    /* minuterie d'écriture différée             */
 } M;
+
+/* Ce que pèse une suite face à une fréquence. Les deux échelles n'ont rien
+ * à voir — centièmes de par-million d'un côté, comptes bruts sur 726 000
+ * phrases de l'autre — et ce facteur les rapproche : après « comment »,
+ * « vous » (248 suites) passe devant « voiture », sans que « vous » écrase
+ * tout le dictionnaire dès qu'un mot rare le précède. */
+#define POIDS_SUITE 400
+
+/* QUI TAPE UN ACCENT LE VEUT. « eleve » propose « élève » — on ne tape pas
+ * ses accents quand on cherche un mot au pouce —, mais « él » ne doit plus
+ * proposer « elle » : l'accent tapé devient une exigence, pas un indice. */
 
 /* -------------------------------------------------------------------------
  * Le dictionnaire projeté
@@ -30,11 +46,34 @@ static struct {
 
 /* Début de la ligne qui contient `p`. */
 static const char *
-debut_ligne (const char *p)
+debut_ligne (const Table *t, const char *p)
 {
-    while (p > M.texte && p[-1] != '\n')
+    while (p > t->texte && p[-1] != '\n')
         p--;
     return p;
+}
+
+/* La forme sans accents, en minuscules : la clé de recherche. œ et æ ne se
+ * décomposent pas — ils se transcrivent, comme dans fabrique-mots.py. */
+static char *
+sans_accents (const char *mot)
+{
+    g_autofree char *bas = g_utf8_strdown (mot, -1);
+    g_autofree char *oe = NULL;
+    if (strstr (bas, "œ") != NULL || strstr (bas, "æ") != NULL) {
+        g_auto(GStrv) m1 = g_strsplit (bas, "œ", -1);
+        g_autofree char *t1 = g_strjoinv ("oe", m1);
+        g_auto(GStrv) m2 = g_strsplit (t1, "æ", -1);
+        oe = g_strjoinv ("ae", m2);
+    }
+    g_autofree char *nfd = g_utf8_normalize (oe != NULL ? oe : bas, -1, G_NORMALIZE_NFD);
+    GString *sortie = g_string_new (NULL);
+    for (const char *p = nfd; *p != '\0'; p = g_utf8_next_char (p)) {
+        gunichar c = g_utf8_get_char (p);
+        if (g_unichar_type (c) != G_UNICODE_NON_SPACING_MARK)
+            g_string_append_unichar (sortie, c);
+    }
+    return g_string_free (sortie, FALSE);
 }
 
 /* Compare le début d'une ligne à un préfixe, comme memcmp : <0, 0, >0.
@@ -45,7 +84,10 @@ compare_prefixe (const char *ligne, const char *prefixe, gsize n)
 {
     for (gsize i = 0; i < n; i++) {
         char c = ligne[i];
-        if (c == '\n' || c == '\t')
+        /* Une tabulation ferme le champ — SAUF si le préfixe en cherche une
+         * à cette place : les suites se cherchent par « précédent\t », et
+         * l'oublier faisait que la prédiction ne rendait jamais rien. */
+        if (c == '\n' || (c == '\t' && prefixe[i] != '\t'))
             return -1;                      /* la ligne est plus courte */
         if (c != prefixe[i])
             return (unsigned char) c < (unsigned char) prefixe[i] ? -1 : 1;
@@ -55,24 +97,26 @@ compare_prefixe (const char *ligne, const char *prefixe, gsize n)
 
 /* Première ligne dont le mot commence par `prefixe`, ou NULL. */
 static const char *
-premiere_ligne (const char *prefixe, gsize n)
+premiere_ligne (const Table *t, const char *prefixe, gsize n)
 {
-    gsize bas = 0, haut = M.taille;
+    if (t->texte == NULL)
+        return NULL;
+    gsize bas = 0, haut = t->taille;
     const char *trouve = NULL;
     while (bas < haut) {
         gsize milieu = (bas + haut) / 2;
-        const char *ligne = debut_ligne (M.texte + milieu);
+        const char *ligne = debut_ligne (t, t->texte + milieu);
         int c = compare_prefixe (ligne, prefixe, n);
         if (c < 0) {
             /* avancer à la ligne suivante, sinon on boucle */
-            const char *fin = memchr (ligne, '\n', M.texte + M.taille - ligne);
-            gsize suivante = fin != NULL ? (gsize) (fin + 1 - M.texte) : M.taille;
+            const char *fin = memchr (ligne, '\n', t->texte + t->taille - ligne);
+            gsize suivante = fin != NULL ? (gsize) (fin + 1 - t->texte) : t->taille;
             if (suivante <= bas)
                 break;
             bas = suivante;
         } else {
             trouve = c == 0 ? ligne : trouve;
-            gsize ici = ligne - M.texte;
+            gsize ici = ligne - t->texte;
             if (ici == 0)
                 break;
             haut = ici;
@@ -181,43 +225,111 @@ retenir (Candidat *tete, guint max, const char *mot, gsize n, gint64 poids)
     tete[place].poids = poids;
 }
 
+/* Les suites du mot précédent, dans une table : le bloc fait au plus trente
+ * lignes, on le lit une fois plutôt qu'une dichotomie par candidat. */
+static GHashTable *
+suites_de (const char *precedent)
+{
+    GHashTable *h = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    if (precedent == NULL || *precedent == '\0')
+        return h;
+    g_autofree char *cle = g_strdup_printf ("%s\t", precedent);
+    gsize n = strlen (cle);
+    for (const char *ligne = premiere_ligne (&M.suites, cle, n); ligne != NULL; ) {
+        const char *fin = memchr (ligne, '\n', M.suites.texte + M.suites.taille - ligne);
+        if (fin == NULL || compare_prefixe (ligne, cle, n) != 0)
+            break;
+        const char *mot = ligne + n;
+        const char *tab = memchr (mot, '\t', fin - mot);
+        if (tab != NULL)
+            g_hash_table_insert (h, g_strndup (mot, tab - mot),
+                                 GINT_TO_POINTER (atoi (tab + 1)));
+        ligne = fin + 1;
+        if (ligne >= M.suites.texte + M.suites.taille)
+            break;
+    }
+    return h;
+}
+
+/* La prédiction : rien n'est tapé, on propose ce qui suit d'ordinaire. Le
+ * bloc des suites est déjà trié par compte décroissant — il suffit de le
+ * lire dans l'ordre. */
+static guint
+predire (const char *precedent, char **sortie, guint max)
+{
+    g_autofree char *cle = g_strdup_printf ("%s\t", precedent != NULL ? precedent : "^");
+    gsize n = strlen (cle);
+    guint trouves = 0;
+    for (const char *ligne = premiere_ligne (&M.suites, cle, n);
+         ligne != NULL && trouves < max; ) {
+        const char *fin = memchr (ligne, '\n', M.suites.texte + M.suites.taille - ligne);
+        if (fin == NULL || compare_prefixe (ligne, cle, n) != 0)
+            break;
+        const char *mot = ligne + n;
+        const char *tab = memchr (mot, '\t', fin - mot);
+        if (tab != NULL)
+            sortie[trouves++] = g_strndup (mot, tab - mot);
+        ligne = fin + 1;
+        if (ligne >= M.suites.texte + M.suites.taille)
+            break;
+    }
+    return trouves;
+}
+
 guint
-shell_mots_suggerer (const char *prefixe, char **sortie, guint max)
+shell_mots_suggerer (const char *prefixe, const char *precedent,
+                     char **sortie, guint max)
 {
     for (guint i = 0; i < max; i++)
         sortie[i] = NULL;
-    if (prefixe == NULL || *prefixe == '\0' || M.texte == NULL)
+    if (M.mots.texte == NULL)
         return 0;
+    if (prefixe == NULL || *prefixe == '\0')
+        return predire (precedent, sortie, max);
 
-    g_autofree char *bas = g_utf8_strdown (prefixe, -1);
-    gsize n = strlen (bas);
+    g_autofree char *tape = g_utf8_strdown (prefixe, -1);
+    g_autofree char *cle = sans_accents (prefixe);
+    gsize n = strlen (cle), n_tape = strlen (tape);
+    gboolean accentue = strcmp (tape, cle) != 0;
+    g_autoptr(GHashTable) suites = suites_de (precedent);
     g_autofree Candidat *tete = g_new0 (Candidat, max);
 
-    /* Les mots appris d'abord : ils sont peu nombreux, et leur poids doit
-     * pouvoir dépasser celui du dictionnaire. */
+    /* Les mots appris d'abord : leur poids doit pouvoir dépasser celui du
+     * dictionnaire. Eux se comparent sur la forme tapée, accents compris. */
     GHashTableIter it;
-    gpointer cle, val;
+    gpointer c, v;
     g_hash_table_iter_init (&it, M.appris);
-    while (g_hash_table_iter_next (&it, &cle, &val)) {
-        const char *mot = cle;
-        if (strncmp (mot, bas, n) == 0 && strcmp (mot, bas) != 0)
+    while (g_hash_table_iter_next (&it, &c, &v)) {
+        const char *mot = c;
+        g_autofree char *sans = sans_accents (mot);
+        if (strncmp (sans, cle, n) == 0 && strcmp (mot, tape) != 0)
             retenir (tete, max, mot, strlen (mot),
-                     (gint64) GPOINTER_TO_INT (val) * POIDS_APPRIS);
+                     (gint64) GPOINTER_TO_INT (v) * POIDS_APPRIS);
     }
 
-    for (const char *ligne = premiere_ligne (bas, n); ligne != NULL; ) {
-        const char *fin = memchr (ligne, '\n', M.texte + M.taille - ligne);
-        if (fin == NULL)
+    for (const char *ligne = premiere_ligne (&M.mots, cle, n); ligne != NULL; ) {
+        const char *fin = memchr (ligne, '\n', M.mots.texte + M.mots.taille - ligne);
+        if (fin == NULL || compare_prefixe (ligne, cle, n) != 0)
             break;
-        if (compare_prefixe (ligne, bas, n) != 0)
-            break;
-        const char *tab = memchr (ligne, '\t', fin - ligne);
-        if (tab != NULL && (gsize) (tab - ligne) != n) {     /* pas le mot déjà tapé */
-            gint64 poids = g_ascii_strtoll (tab + 1, NULL, 10);
-            retenir (tete, max, ligne, tab - ligne, poids);
+
+        /* sans-accents \t mot \t fréquence */
+        const char *t1 = memchr (ligne, '\t', fin - ligne);
+        const char *mot = t1 != NULL ? t1 + 1 : NULL;
+        const char *t2 = mot != NULL ? memchr (mot, '\t', fin - mot) : NULL;
+        if (t2 != NULL) {
+            gsize taille_mot = t2 - mot;
+            gint64 poids = g_ascii_strtoll (t2 + 1, NULL, 10);
+            g_autofree char *copie = g_strndup (mot, taille_mot);
+            poids += (gint64) POIDS_SUITE
+                   * GPOINTER_TO_INT (g_hash_table_lookup (suites, copie));
+            gboolean pareil = taille_mot >= n_tape && strncmp (mot, tape, n_tape) == 0;
+            if (accentue && !pareil)
+                poids = 0;                 /* l'accent tapé est une exigence */
+            if (poids > 0 && !(taille_mot == n_tape && pareil))
+                retenir (tete, max, mot, taille_mot, poids);
         }
         ligne = fin + 1;
-        if (ligne >= M.texte + M.taille)
+        if (ligne >= M.mots.texte + M.mots.taille)
             break;
     }
 
@@ -228,20 +340,32 @@ shell_mots_suggerer (const char *prefixe, char **sortie, guint max)
     return n_sorties;
 }
 
+static gboolean
+projeter (Table *t, const char *nom)
+{
+    g_autofree char *chemin = g_build_filename (SHELL_DATA_DIR, nom, NULL);
+    g_autoptr(GError) err = NULL;
+    t->fichier = g_mapped_file_new (chemin, FALSE, &err);
+    if (t->fichier == NULL) {
+        g_warning ("suggestions : %s — le clavier écrira sans elles", err->message);
+        return FALSE;
+    }
+    t->texte = g_mapped_file_get_contents (t->fichier);
+    t->taille = g_mapped_file_get_length (t->fichier);
+    return TRUE;
+}
+
 gboolean
 shell_mots_init (void)
 {
     lire_appris ();
 
-    g_autofree char *chemin = g_build_filename (SHELL_DATA_DIR, "mots-fr.txt", NULL);
-    g_autoptr(GError) err = NULL;
-    M.fichier = g_mapped_file_new (chemin, FALSE, &err);
-    if (M.fichier == NULL) {
-        g_warning ("suggestions : %s — le clavier écrira sans elles", err->message);
+    if (!projeter (&M.mots, "mots-fr.txt"))
         return FALSE;
-    }
-    M.texte = g_mapped_file_get_contents (M.fichier);
-    M.taille = g_mapped_file_get_length (M.fichier);
-    g_message ("suggestions : dictionnaire projeté, %.1f Mo", M.taille / 1048576.0);
+    /* Les suites sont un confort, pas une condition : sans elles le clavier
+     * propose encore, mais sans tenir compte de ce qui précède. */
+    projeter (&M.suites, "suites-fr.txt");
+    g_message ("suggestions : %.1f Mo de mots, %.1f Mo de suites",
+               M.mots.taille / 1048576.0, M.suites.taille / 1048576.0);
     return TRUE;
 }

@@ -14,10 +14,17 @@
  *
  * De Lexique 3.83 (CC BY-SA), 119 688 formes du français avec leur
  * fréquence d'usage, préparées par tools/fabrique-mots.py et installées en
- * mots-fr.txt. Le fichier est trié : on y cherche un préfixe par
- * DICHOTOMIE, dans une projection en lecture seule — rien n'est recopié en
- * mémoire, et les 1,5 Mo restent dans le cache de pages, partagés, sur une
- * machine qui n'a que 4 Go.
+ * mots-fr.txt. Le fichier est trié SUR LA FORME SANS ACCENTS, et on y
+ * cherche un préfixe par DICHOTOMIE, dans une projection en lecture seule —
+ * rien n'est recopié en mémoire, et les Mo restent dans le cache de pages,
+ * partagés, sur une machine qui n'a que 4 Go.
+ *
+ * ET DES SUITES DE MOTS
+ *
+ * Un dictionnaire de mots isolés ne sait pas que « vous » suit « comment ».
+ * Les suites viennent de Tatoeba (CC BY 2.0 FR), 726 280 phrases françaises
+ * — de la langue parlée, celle qu'on écrit sur une tablette. Préparées elles
+ * aussi par tools/fabrique-mots.py, en suites-fr.txt.
  *
  * ET DE CE QUE L'ON ÉCRIT
  *
@@ -34,10 +41,17 @@
  * manque : le clavier marche alors sans suggestions, et le dit. */
 gboolean shell_mots_init (void);
 
-/* Les meilleures suggestions pour ce début de mot, dans l'ordre. Rend leur
- * nombre (au plus `max`), et remplit `sortie` de chaînes à libérer. Le
- * préfixe est comparé en minuscules ; la casse est rendue à l'appelant. */
-guint shell_mots_suggerer (const char *prefixe, char **sortie, guint max);
+/* Les meilleures suggestions, dans l'ordre. Rend leur nombre (au plus
+ * `max`) et remplit `sortie` de chaînes à libérer.
+ *
+ *   prefixe    ce qui est tapé du mot en cours. Comparé SANS ACCENTS :
+ *              « eleve » propose « élève ». Un préfixe vide demande une
+ *              prédiction : quels mots suivent d'ordinaire le précédent.
+ *   precedent  le mot d'avant, ou NULL au début d'une phrase. C'est lui
+ *              qui fait la différence entre un dictionnaire et un clavier :
+ *              après « comment », « vous » passe devant « voiture ». */
+guint shell_mots_suggerer (const char *prefixe, const char *precedent,
+                           char **sortie, guint max);
 
 /* Retient un mot choisi. L'écriture sur disque est différée : on ne touche
  * pas l'eMMC à chaque mot. */

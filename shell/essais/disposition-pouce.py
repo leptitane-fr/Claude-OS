@@ -1,182 +1,222 @@
 #!/usr/bin/python3
 # =========================================================================
-# Claude OS — calcule la disposition du clavier gauche du mode console.
+# Claude OS — calcule la disposition ORGANIQUE du clavier gauche (console).
+#
+#   python3 shell/essais/disposition-pouce.py Lexique383.tsv [pouces.csv]
 #
 # L'AZERTY vient des machines à écrire ; un pouce seul sur un écran obéit à
-# autre chose. Ce script refait le calcul qui a produit la disposition de
-# shell/src/clavier-ecran.c (tables CL0..CL5 et CA0..CA5), le 12 septembre
-# 2026. Il est ici pour que ce calcul soit REFAISABLE : changer une mesure,
-# une fréquence ou une contrainte, et relancer.
+# autre chose. Ce script produit les tables de shell/src/clavier-ecran.c.
+# Démarche de BÉPO pour les fréquences, de Metropolis (Zhai, 2000) pour le
+# pointeur unique, et de KALQ (2013) pour la frappe au pouce sur tablette.
 #
-# CE QU'IL LUI FAUT
+# TROISIÈME VERSION, 13 septembre 2026, après essai au doigt. L'utilisateur
+# a demandé « un design plus organique, avec les lettres les moins utilisées
+# plus petites que les autres, et non nécessairement un 5x5 bien aligné »,
+# et « une diagonale haut-gauche bas-droit à la trajectoire légèrement
+# arrondie, pour suivre le mouvement du pouce ». Il a aussi rappelé que
+# l'absence de lettres (k et w avaient été relégués) est problématique.
 #
-#   Lexique383.tsv   les fréquences du français, 142 000 formes, CC BY-SA.
-#                    http://www.lexique.org/databases/Lexique383/Lexique383.tsv
-#   pouces.csv       la sortie de sonde-pouces.c : les appuis mesurés,
-#                    tablette tenue à deux mains. FACULTATIF : sans lui, on
-#                    repart de l'ellipse de la mesure du 11 septembre 2026,
-#                    inscrite plus bas. Le fichier brut de cette mesure a été
-#                    perdu dans un redémarrage — il était dans /tmp, faute à
-#                    ne pas refaire : une mesure se verse au dépôt le jour
-#                    même.
+# CE QUI EN DÉCOULE
 #
-#   python3 shell/essais/disposition-pouce.py Lexique383.tsv pouces.csv
+#   - 27 touches : les 26 lettres et é, plus la barre d'espace ;
+#   - des rangées qui PAVENT la colonne, sans trou : aucun appui perdu
+#     entre deux touches, ce qu'une grille à espacement ne garantit pas ;
+#   - dans une rangée, la touche est d'autant plus LARGE qu'elle est proche
+#     de l'arc du pouce ; les rangées sont d'autant plus HAUTES qu'elles
+#     sont au cœur de la zone atteinte ;
+#   - l'arc lui-même : la droite d'inertie du nuage d'appuis (70°, du coin
+#     haut-gauche au coin bas-droit), légèrement bombée.
 #
-# LA MÉTHODE, en trois temps
+# Et l'optimisation n'a plus besoin qu'on lui dise de mettre les lettres
+# fréquentes sur les grandes touches : la loi de Fitts le lui dit, puisque
+# la largeur de la cible entre dans le temps d'atteinte.
 #
-#   1. Fréquences : lettres, é et apostrophe d'après Lexique, pondérées par
-#      l'usage (freqfilms2 + freqlivres) ; enchaînements de deux lettres
-#      dans le mot ; virgule et point mesurés sur la prose du dépôt (1,51 et
-#      1,40 % des lettres) car un dictionnaire n'en contient pas.
-#   2. Zone du pouce : ellipse ajustée sur les appuis (axes principaux).
-#      Son centre a été REMONTÉ à y = 330 après le premier essai au doigt —
-#      « la ligne du bas est trop basse » : le retour d'usage corrige la
-#      sonde, où l'on tape plus bas qu'en écrivant.
-#   3. Coût d'une frappe = inconfort de la place (distance à l'ellipse) +
-#      trajet depuis la lettre précédente (loi de Fitts), pondérés par les
-#      fréquences ; minimisé par recuit simulé.
-#
-# NE PAS S'ÉTONNER QUE CE SCRIPT NE REDONNE PAS LES TABLES DU DÉPÔT : elles
-# viennent d'un tirage antérieur, à 1,964, et un nouveau tirage tombe à
-# 1,970 avec des places différentes. C'est la nature du problème, pas un
-# défaut — voir ci-dessous.
-#
-# CE QU'IL FAUT SAVOIR DU RÉSULTAT : l'optimum est PLAT. Quatre tirages
-# donnent le même coût à 0,3 % près avec des places différentes. Ce qui est
-# stable, c'est la hiérarchie — e à la meilleure place, puis s, a, i, t, n.
-# Le détail se choisit donc sur d'autres critères sans rien perdre.
+# Les mesures qui fondent la géométrie (136 appuis du pouce gauche, sonde
+# du 11 septembre 2026) sont dans MESURE ci-dessous ; le fichier brut a été
+# perdu dans un redémarrage, il était dans /tmp.
 # =========================================================================
 import collections, csv, json, math, os, random, sys
 
 LEXIQUE = sys.argv[1] if len(sys.argv) > 1 else 'Lexique383.tsv'
-APPUIS  = sys.argv[2] if len(sys.argv) > 2 else 'pouces.csv'
 
-JEU = list("esaitnrudolpmcvébfgqhjxzyk") + ["'", "w", ",", "."]
-PONCT = {',': 1.51, '.': 1.40}          # % des lettres, mesuré sur docs/*.md
+# --- la colonne, et la zone du pouce --------------------------------------
+LARGEUR = 288            # 300 px de colonne moins 2 x 6 de marge
+HAUT = 176               # au-dessus, le pouce n'atteint plus
+MESURE = dict(cx=145.0, cy=330.0, angle=70.0, su=76.0, sv=61.0)
+BOMBE = 14               # l'arc n'est pas droit : il se bombe de 14 px
 
-# --- 1. les fréquences ----------------------------------------------------
-lettres, bigrammes, fin = collections.Counter(), collections.Counter(), collections.Counter()
-with open(LEXIQUE, encoding='utf-8') as f:
-    for row in csv.DictReader(f, delimiter='\t'):
-        poids = (float(row['freqfilms2'] or 0) + float(row['freqlivres'] or 0)) / 2
-        mot = row['ortho'].lower()
-        if poids <= 0 or not mot:
-            continue
-        for i, c in enumerate(mot):
-            lettres[c] += poids
-            if i:
-                bigrammes[(mot[i-1], mot[i])] += poids
-        fin[mot[-1]] += poids
+# Cinq rangées de lettres, puis la barre d'espace. Le nombre de touches par
+# rangée et la hauteur des rangées sont choisis ici ; tout le reste se
+# calcule. 5+6+6+5+5 = 27 touches, et 52+56+60+56+56 = 280 px — la même
+# hauteur que les cinq rangées des autres calques, pour que la barre
+# d'espace tombe au même endroit quand on bascule.
+RANGEES = [(5, 52), (6, 56), (6, 60), (5, 56), (5, 56)]
+ESPACE_H = 56
 
-tot = sum(lettres.values())
-freq = {c: 100 * lettres[c] / tot for c in JEU}
-freq.update(PONCT)
-n1 = sum(freq.values())
-p1 = {c: freq[c] / n1 for c in JEU}
-
-bt = sum(bigrammes.values())
-bi = collections.Counter()
-for (a, b), v in bigrammes.items():
-    if a in JEU and b in JEU:
-        bi[(a, b)] += 0.80 * v / bt      # ~80 % des caractères suivent une lettre du même mot
-ft = sum(fin.values())
-for x, v in fin.items():                 # « mot, » et « mot. » : la ponctuation suit la dernière lettre
-    if x in JEU:
-        for signe in PONCT:
-            bi[(x, signe)] += p1[signe] * v / ft
-
-# --- 2. la zone du pouce --------------------------------------------------
-# La mesure du 11 septembre 2026 : 136 appuis du pouce gauche, ellipse
-# ajustée dessus. Sert quand le fichier brut n'est pas là.
-MESURE_2026_09_11 = dict(n=136, mx=145.0, th=math.radians(70), su=76.0, sv=61.0)
-
-pts = []
-for r in (csv.reader(open(APPUIS)) if os.path.exists(APPUIS) else []):
-    if r[1] != 'appui':
-        continue
-    # les premières sondes écrivaient la virgule décimale (locale fr)
-    x, y = (float(r[3] + '.' + r[4]), float(r[5] + '.' + r[6])) if len(r) > 5 else (float(r[3]), float(r[4]))
-    if x < 960:
-        pts.append((x, y))
-n = len(pts)
-if n < 20:
-    m = MESURE_2026_09_11
-    n, mx, th, su, sv = m['n'], m['mx'], m['th'], m['su'], m['sv']
-    print(f'{APPUIS} absent ou trop court : ellipse du 11 septembre 2026')
-else:
-  mx = sum(x for x, _ in pts) / n
-  sxx = sum((x - mx) ** 2 for x, _ in pts) / n
-  my = sum(y for _, y in pts) / n
-  syy = sum((y - my) ** 2 for _, y in pts) / n
-  sxy = sum((x - mx) * (y - my) for x, y in pts) / n
-  tr, det = sxx + syy, sxx * syy - sxy * sxy
-  l1, l2 = tr / 2 + math.sqrt(tr * tr / 4 - det), tr / 2 - math.sqrt(tr * tr / 4 - det)
-  th = 0.5 * math.atan2(2 * sxy, sxx - syy)
-  su, sv = math.sqrt(l1), math.sqrt(l2)
-cx, cy = mx, 330.0                       # centre remonté : voir l'en-tête
-print(f'{n} appuis — axe {math.degrees(th):.0f}°, écarts-types {su:.0f} / {sv:.0f} px')
+def arc_x(y):
+    """L'abscisse du cœur de l'arc à cette hauteur."""
+    dy = y - MESURE['cy']
+    return (MESURE['cx'] + dy / math.tan(math.radians(MESURE['angle']))
+            + BOMBE * max(0.0, 1 - (dy / 150.0) ** 2))
 
 def inconfort(x, y):
-    u = (x - cx) * math.cos(th) + (y - cy) * math.sin(th)
-    v = -(x - cx) * math.sin(th) + (y - cy) * math.cos(th)
-    return (u / su) ** 2 + (v / sv) ** 2
+    th = math.radians(MESURE['angle'])
+    u = (x - MESURE['cx']) * math.cos(th) + (y - MESURE['cy']) * math.sin(th)
+    v = -(x - MESURE['cx']) * math.sin(th) + (y - MESURE['cy']) * math.cos(th)
+    return (u / MESURE['su']) ** 2 + (v / MESURE['sv']) ** 2
 
-# --- 3. les places, et le recuit -----------------------------------------
-# Grille 5 x 6 de la colonne gauche : touches de 52 px au pas de 56 en
-# hauteur, 54 px au pas de 58,4 en largeur (300 px de colonne).
-POS = [(33.2 + 58.4 * j, 190 + 56 * r) for r in range(6) for j in range(5)]
-LARGEUR_TOUCHE, CONFORT = 54.4, 0.5
+def geometrie():
+    """Les cellules : elles pavent la colonne, sans trou ni recouvrement."""
+    cellules, y = [], HAUT
+    for n, h in RANGEES:
+        centre = arc_x(y + h / 2)
+        largeurs = [LARGEUR / n] * n
+        for _ in range(30):                     # point fixe : largeur <-> position
+            x, centres = 0, []
+            for l in largeurs:
+                centres.append(x + l / 2)
+                x += l
+            poids = [1 + 0.55 * math.exp(-((c - centre) / 95.0) ** 2) for c in centres]
+            total = sum(poids)
+            largeurs = [LARGEUR * p / total for p in poids]
+        x = 0
+        for l in largeurs:
+            cellules.append(dict(x=round(x), y=y, l=round(l), h=h))
+            x += l
+        cellules[-1]['l'] = LARGEUR - cellules[-1]['x']   # le reste, au pixel près
+        y += h
+    return cellules, y
+
+# --- les fréquences -------------------------------------------------------
+JEU = list("esaitnrudolpmcvébfgqhjxzykw")
+lettres, bg, fin, deb = (collections.Counter() for _ in range(4))
+with open(LEXIQUE, encoding='utf-8') as f:
+    for row in csv.DictReader(f, delimiter='\t'):
+        w = (float(row['freqfilms2'] or 0) + float(row['freqlivres'] or 0)) / 2
+        m = row['ortho'].lower()
+        if w <= 0 or not m:
+            continue
+        for i, c in enumerate(m):
+            lettres[c] += w
+            if i:
+                bg[(m[i-1], m[i])] += w
+        fin[m[-1]] += w
+        deb[m[0]] += w
+
+tot = sum(lettres.values())
+mots = sum(fin.values())
+p_esp = 1.0 / (tot / mots)                      # une espace par mot
+p1 = {c: lettres[c] / tot for c in JEU}
+n1 = sum(p1.values()) + p_esp
+p1 = {c: v / n1 for c, v in p1.items()}
+P_ESP = p_esp / n1
+bt = sum(bg.values())
+bi = collections.Counter()
+for (a, b), v in bg.items():
+    if a in JEU and b in JEU:
+        bi[(a, b)] += 0.80 * v / bt
+for x, v in fin.items():
+    if x in JEU:
+        bi[(x, '␣')] += P_ESP * v / mots
+for x, v in deb.items():
+    if x in JEU:
+        bi[('␣', x)] += P_ESP * v / mots
+
+# --- le coût --------------------------------------------------------------
+CONFORT = 0.5
+cellules, bas = geometrie()
+ESPACE = dict(x=0, y=bas, l=LARGEUR, h=ESPACE_H)
+assert len(cellules) == len(JEU), f'{len(cellules)} cellules pour {len(JEU)} lettres'
+
+def centre(c):
+    return c['x'] + c['l'] / 2, c['y'] + c['h'] / 2
+
+def cible(c):
+    """La taille utile de la cible : la moyenne géométrique de ses côtés."""
+    return math.sqrt(c['l'] * c['h'])
 
 def fitts(a, b):
-    d = math.hypot(a[0] - b[0], a[1] - b[1])
-    return 0 if d < 1 else math.log2(d / LARGEUR_TOUCHE + 1)
+    (xa, ya), (xb, yb) = centre(a), centre(b)
+    d = math.hypot(xa - xb, ya - yb)
+    return 0 if d < 1 else math.log2(d / cible(b) + 1)
+
+# Tout ce qui ne dépend pas de l'affectation est calculé UNE fois : le
+# confort de chaque cellule, et le trajet de chaque cellule à chaque autre.
+# Sans cela, le recuit passe son temps à refaire les mêmes racines carrées.
+CELL = cellules + [ESPACE]
+ESP = len(cellules)
+CONF = [CONFORT * inconfort(*centre(c)) for c in CELL]
+TRAJET = [[fitts(a, b) for b in CELL] for a in CELL]
+# Les enchaînements, par lettre : le recuit n'a besoin que de ceux qui
+# touchent les deux lettres échangées.
+VOISINS = collections.defaultdict(list)
+BI = []
+for (a, b), v in bi.items():
+    ia = ESP if a == '␣' else None
+    ib = ESP if b == '␣' else None
+    BI.append((a, b, v))
+for i, (a, b, v) in enumerate(BI):
+    if a != '␣':
+        VOISINS[a].append(i)
+    if b != '␣' and b != a:
+        VOISINS[b].append(i)
+
+def ou(aff, c):
+    return ESP if c == '␣' else aff[c]
 
 def cout(aff):
-    c = sum(p1[l] * CONFORT * inconfort(*POS[aff[l]]) for l in JEU)
-    t = sum(v * fitts(POS[aff[a]], POS[aff[b]]) for (a, b), v in bi.items())
+    c = sum(p1[l] * CONF[aff[l]] for l in JEU) + P_ESP * CONF[ESP]
+    t = sum(v * TRAJET[ou(aff, a)][ou(aff, b)] for a, b, v in BI)
     return c + t, c, t
 
-def recuit(graine, iters=150000):
+def cout_partiel(aff, lettres_touchees):
+    """Ce que coûtent les seuls termes qui changent quand on déplace ces
+    lettres : le recuit ne recalcule que cela."""
+    vus = set()
+    for l in lettres_touchees:
+        vus.update(VOISINS[l])
+    c = sum(p1[l] * CONF[aff[l]] for l in lettres_touchees)
+    t = sum(BI[i][2] * TRAJET[ou(aff, BI[i][0])][ou(aff, BI[i][1])] for i in vus)
+    return c + t
+
+def recuit(graine, iters=200000):
     random.seed(graine)
     ordre = sorted(JEU, key=lambda l: -p1[l])
-    places = sorted(range(len(POS)), key=lambda i: inconfort(*POS[i]))
-    aff = {l: places[i] for i, l in enumerate(ordre)}     # départ : fréquence -> confort
+    places = sorted(range(len(cellules)),
+                    key=lambda i: inconfort(*centre(cellules[i])) - cible(cellules[i]) / 40)
+    aff = {l: places[i] for i, l in enumerate(ordre)}
     cur = cout(aff)[0]
     best, bestc, T = dict(aff), cur, 0.05
     for _ in range(iters):
         a, b = random.sample(JEU, 2)
+        avant = cout_partiel(aff, (a, b))
         aff[a], aff[b] = aff[b], aff[a]
-        nouveau = cout(aff)[0]
-        if nouveau < cur or random.random() < math.exp((cur - nouveau) / T):
-            cur = nouveau
+        delta = cout_partiel(aff, (a, b)) - avant
+        if delta < 0 or random.random() < math.exp(-delta / T):
+            cur += delta
+            if cur < bestc:
+                bestc, best = cur, dict(aff)
         else:
             aff[a], aff[b] = aff[b], aff[a]
-        if cur < bestc:
-            bestc, best = cur, dict(aff)
         T *= 0.99998
     return best
 
-meilleur, meilleur_cout = None, None
-for graine in range(1, 5):
+meilleur, mc = None, None
+for graine in range(1, 4):
     aff = recuit(graine)
     c = cout(aff)
     print(f'graine {graine} : coût {c[0]:.3f} (confort {c[1]:.3f} + trajets {c[2]:.3f})')
-    if meilleur_cout is None or c[0] < meilleur_cout:
-        meilleur, meilleur_cout = aff, c[0]
+    if mc is None or c[0] < mc:
+        meilleur, mc = aff, c[0]
 
 inv = {v: k for k, v in meilleur.items()}
-print('\ndisposition retenue :')
-for r in range(6):
-    print('  ' + '  '.join(inv[r * 5 + j] for j in range(5)))
-
-# Les accents, à la même grille : par fréquence sur les places les plus
-# confortables, puis la typographie française.
-acc = sorted("àèêçùôîûâïëüœæÿ", key=lambda c: -lettres.get(c, 0))
-suite = ["«", "»", "…", "–", "—", "“", "”", "‘", "’", "°", "ö", "ä", "ñ", "ß", "ã"]
-places = sorted(range(len(POS)), key=lambda i: inconfort(*POS[i]))
-g = [None] * len(POS)
-for i, c in enumerate((acc + suite)[:len(POS)]):
-    g[places[i]] = c
-print('\naccents :')
-for r in range(6):
-    print('  ' + '  '.join(g[r * 5 + j] for j in range(5)))
+print(f'\n{len(cellules)} touches, de {min(cible(c) for c in cellules):.0f} '
+      f'à {max(cible(c) for c in cellules):.0f} px de côté utile ; '
+      f'espace {ESPACE["l"]}x{ESPACE["h"]} à y={ESPACE["y"]}')
+print('\n/* Table pour clavier-ecran.c */')
+for i, c in enumerate(cellules):
+    print(f'    {{ "{inv[i]}", {c["x"]:3d}, {c["y"]:3d}, {c["l"]:3d}, {c["h"]:3d} }},')
+print(f'    /* espace */ {{ NULL, {ESPACE["x"]:3d}, {ESPACE["y"]:3d}, '
+      f'{ESPACE["l"]:3d}, {ESPACE["h"]:3d} }},')
+json.dump({'cellules': [dict(c, lettre=inv[i]) for i, c in enumerate(cellules)],
+           'espace': ESPACE}, open('/tmp/disposition-organique.json', 'w'), ensure_ascii=False)
