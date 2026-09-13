@@ -139,7 +139,7 @@ vk_code = custom_target('vk-code',
 executable('claude-os-dock',
   'src/dock.c', 'src/toplevels.c', 'src/visibility.c', 'src/glissiere.c',
   'src/tablette.c', 'src/rotation.c',
-  'src/clavier-ecran.c', 'src/clavier.c', 'src/saisie.c',
+  'src/clavier-ecran.c', 'src/clavier.c', 'src/saisie.c', 'src/mots.c',
   ftl_header, ftl_code, im_header, im_code, vk_header, vk_code, commun,
   dependencies : [gtk, layershell, giounix, wlclient, pangocairo, xkb, m_dep],
   install : true)
@@ -282,6 +282,12 @@ install_data(
 install_data(
   'data/icons/hicolor/scalable/status/claude-os-cloche-symbolic.svg',
   install_dir : data_dir / 'icons' / 'hicolor' / 'scalable' / 'status')
+
+# Le dictionnaire des suggestions du clavier à l'écran : 119 688 formes du
+# français avec leur fréquence, tirées de Lexique 3.83 (CC BY-SA) par
+# tools/fabrique-mots.py. 1,5 Mo, projeté en lecture seule par mots.c — il
+# reste dans le cache de pages, jamais recopié.
+install_data('data/mots-fr.txt', install_dir : data_dir)
 
 install_subdir('style',
   install_dir : data_dir,

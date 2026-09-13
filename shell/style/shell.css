@@ -1574,6 +1574,24 @@ window.images { background-color: @surface; }
 .console-gauche .clavier-touche { min-height: 52px; }
 .console-droite .clavier-touche.speciale { font-size: 18px; }
 
+/* Les suggestions, en haut de la colonne gauche. Plates et discrètes : ce
+   sont des propositions, pas des touches — on doit les distinguer d'un coup
+   d'œil de ce qu'on frappe. Une place vide reste dessinée, pour que la
+   colonne ne saute pas de hauteur à chaque lettre. */
+.clavier-suggestion {
+  background: none;
+  background-color: @surface-alt;
+  border: 1px solid @border;
+  border-radius: 9px;
+  color: @text;
+  font-size: 16px;
+  padding: 0 4px;
+  min-height: 44px;
+}
+
+.clavier-suggestion:disabled { background-color: alpha(@surface-alt, 0.35); border-color: alpha(@border, 0.5); }
+.clavier-suggestion:active   { background-color: @accent; color: @on-accent; }
+
 /* Une bascule verrouillée — chiffres, ou accents au double appui — se
    distingue d'une bascule « une frappe », comme Maj. */
 .clavier-touche.speciale.active.verrouille { box-shadow: inset 0 -3px 0 0 @on-accent; }

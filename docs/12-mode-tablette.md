@@ -14,6 +14,7 @@ reste une limite. Ce qui n'est pas établi y est écrit comme tel.
 | Clavier AZERTY à l'écran, plein format | **Vu fonctionner sur MADOO** — voir §12.6 |
 | Mode console (deux colonnes, écran recadré) | **En service pour un essai de plusieurs jours** — voir §12.7 |
 | Disposition de la colonne gauche | **Calculée** : fréquences du français + zone du pouce mesurée — §12.7 |
+| Suggestions de mots, espace et majuscule automatiques | **Écrites le 13 septembre 2026** — §12.8 |
 | Déplacer Claude Desktop au doigt | **Impossible sous labwc 0.8.3** — voir §12.5 |
 
 ---
@@ -247,14 +248,51 @@ Le calcul est refaisable : `shell/essais/disposition-pouce.py`.
 **En service depuis le 13 septembre 2026**, pour un essai de plusieurs jours
 avant d'ajuster.
 
-## 12.8 Ce qui n'est pas établi
+## 12.8 Les suggestions de mots — `mots.c`
+
+Demandées par l'utilisateur : « n'importe quel clavier tactile de taille
+réduite serait laborieux à l'utilisation sans cette fonction ». Elles
+rendent aussi ce qu'on a retiré du calque gauche — l'apostrophe, k, w, les
+accents rares : « aujourd » propose « aujourd'hui ».
+
+- **Le dictionnaire** : Lexique 3.83 (CC BY-SA), 119 688 formes du français
+  avec leur fréquence d'usage, préparées par `tools/fabrique-mots.py` et
+  installées en `mots-fr.txt` (1,5 Mo). Le fichier est trié : `mots.c` y
+  cherche un préfixe **par dichotomie dans une projection en lecture seule**
+  — rien n'est recopié, les pages restent partagées. Sur 4 Go soudés, cela
+  compte.
+- **Il apprend** : tout mot choisi est retenu avec son compte dans
+  `~/.local/state/claude-os/mots-appris.ini`, et remonte dans la liste. Un
+  mot absent du dictionnaire finit par être proposé. L'écriture est différée
+  de 20 s : taper cinquante mots ne fait pas cinquante écritures sur l'eMMC.
+- **Le mot en cours est celui qu'on a TAPÉ**, pas celui qui est à l'écran :
+  le clavier se souvient de ce qu'il a envoyé depuis la dernière espace. Un
+  doigt posé ailleurs dans le texte le trompe jusqu'au mot suivant. C'est la
+  limite assumée ; elle tomberait si les applications transmettaient leur
+  texte alentour (`surrounding_text`, que Chromium n'offre pas sans option).
+- **Choisir un mot** efface ce qui a été tapé (autant de ⌫) et écrit le mot
+  entier, puis une espace. C'est la seule façon qui marche partout.
+
+**Trois automatismes**, demandés avec la fonction :
+
+| Geste | Ce qui se passe |
+|---|---|
+| Mot choisi | une **espace** est posée |
+| Ponctuation juste après | elle **remplace** cette espace, et une espace la suit : « mot . » devient « mot. » |
+| Après `.`, `!`, `?`, une entrée, ou à l'entrée dans un champ | la **majuscule s'arme** seule (sauf mot de passe et champ numérique) |
+| Espace tapée après une espace automatique | **ignorée** — la double espace serait une faute à corriger |
+
+## 12.9 Ce qui n'est pas établi
 
 - le stylet sur écran tourné ;
 - **la vitesse de frappe réelle du mode console**, et le temps qu'il faut
   pour s'habituer à une disposition qui ne ressemble à rien de connu. C'est
   l'objet de l'essai en cours ;
-- la disposition de la colonne DROITE, qui n'a pas encore été retravaillée ;
-- les suggestions de mots, prévues en haut de la colonne gauche ;
+- **les suggestions à l'usage** : leur utilité réelle, la place de la rangée
+  (au-dessus de la zone que le pouce atteint, faute de mieux dans la
+  colonne), et si l'apprentissage remonte les bons mots ;
+- **l'accent à l'aveugle** : « eleve » ne propose pas « élève », la
+  recherche étant exacte. À reprendre si cela gêne ;
 - les boutons de barre de titre au doigt, écran en chevalet ;
 - la scrutation de la rotation écran éteint : elle continue, deux commandes à
   l'EC par seconde, tant que la machine est en mode tablette. Coût non mesuré.

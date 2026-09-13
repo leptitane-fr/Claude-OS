@@ -4,9 +4,11 @@
 #include "clavier-ecran.h"
 
 #include <errno.h>
+#include <string.h>
 #include <gtk4-layer-shell.h>
 
 #include "clavier.h"
+#include "mots.h"
 #include "saisie.h"
 
 /* Un champ qui perd le focus pour un autre en gagne un dans le même
@@ -56,6 +58,14 @@
  * haut que la rangée qui gênait. 158 = 190 - 26 (demi-touche) - 6 (marge
  * de la fenêtre). */
 #define HAUT_GAUCHE     158
+
+/* La rangée des suggestions coiffe la colonne gauche. Elle est au-dessus de
+ * la zone mesurée du pouce (y = 180 au mieux), mais c'est la seule place
+ * libre dans la colonne, et une cible large se vise mieux qu'une touche.
+ * 112 : de quoi poser 44 px de suggestions et 8 d'écart avant la première
+ * rangée, centrée sur 190. */
+#define HAUT_SUGGESTIONS 112
+#define HAUTEUR_SUGGESTION 44
 
 /* Les bascules du mode console : un calque « une frappe » revient aux
  * lettres après un caractère ; un calque « tient » reste jusqu'au prochain
@@ -161,75 +171,95 @@ static const Touche Q4[] = {
  * UNE DISPOSITION CALCULÉE POUR CE POUCE, et non l'AZERTY replié. L'AZERTY
  * vient des machines à écrire ; un pouce seul sur un écran obéit à autre
  * chose. Démarche de BÉPO pour les fréquences, de Metropolis (Zhai, 2000)
- * pour le pointeur unique — le 11 septembre 2026 :
+ * pour le pointeur unique. Le calcul est dans
+ * shell/essais/disposition-pouce.py, refaisable.
  *
- *   - fréquences du français : Lexique 3.83 (freqfilms2 + freqlivres),
- *     lettres, é, apostrophe, et enchaînements dans le mot ; virgule et
- *     point mesurés sur la prose du dépôt (1,5 et 1,4 % des lettres) ;
- *   - zone du pouce : les 136 appuis de la sonde (sonde-pouces.c), ellipse
- *     d'axe 70° — l'arc du coin haut-gauche au coin bas-droit que décrit
- *     l'utilisateur —, centre REMONTÉ à y = 330 d'après son retour d'usage :
- *     « la ligne du bas est trop basse », « le N quasi inaccessible » ;
- *   - coût d'une frappe : inconfort de la place (distance à l'ellipse) +
- *     trajet depuis la lettre précédente (loi de Fitts), pondérés par la
- *     fréquence ; recuit simulé.
+ *   - fréquences du français : Lexique 3.83 pondéré par l'usage ;
+ *   - zone du pouce : ellipse ajustée sur 136 appuis mesurés (sonde-pouces),
+ *     centre remonté d'après le retour d'usage ;
+ *   - coût = inconfort de la place + trajet depuis la frappe précédente
+ *     (loi de Fitts), pondérés ; recuit simulé.
  *
- * Résultat : 39 % de coût en moins que l'AZERTY replié. L'optimum est
- * PLAT — quatre tirages tombent au même coût à 0,3 % près avec des places
- * différentes — mais la hiérarchie est stable : e à la meilleure place,
- * puis s, puis a, i, t, n. q est sous u (« que », « qui »). Les coins de
- * l'étirement (haut-droite) et du repli (bas-gauche) vont à k et y.
+ * DEUXIÈME VERSION, 13 septembre 2026, après essai au doigt. L'utilisateur
+ * a demandé moins de touches et une rangée du bas moins basse :
  *
- * Grille 5 x 6, rangées de y = 190 à 470 (voir HAUT_GAUCHE). Dix colonnes. */
-static const Touche CL0[] = { L("w"), L("f"), L("'"), L("z"), L("k"), FIN };
-static const Touche CL1[] = { L("j"), L("l"), L("r"), L("d"), L("g"), FIN };
-static const Touche CL2[] = { L("p"), L("a"), L("e"), L("t"), L("."), FIN };
-static const Touche CL3[] = { L("v"), L("i"), L("s"), L("n"), L("é"), FIN };
-static const Touche CL4[] = { L("b"), L("m"), L("o"), L("u"), L(","), FIN };
-static const Touche CL5[] = { L("y"), L("h"), L("c"), L("q"), L("x"), FIN };
+ *   - la ponctuation passe à droite ; l'apostrophe avec elle — les
+ *     suggestions écrivent « l'ami » et « aujourd'hui » ;
+ *   - la rangée du bas devient la BARRE D'ESPACE. Elle reste aussi à
+ *     droite : l'espace vaut 19,4 % des frappes, mesuré (4,26 lettres par
+ *     mot), et c'est la seule touche qui mérite d'être des deux côtés ;
+ *   - k et w quittent le calque (0,02 % et 0,004 % du français) et vivent
+ *     avec les accents.
+ *
+ * L'espace étant désormais sous le pouce gauche, le calcul compte AUSSI les
+ * trajets « fin de mot -> espace » et « espace -> début du mot suivant »,
+ * ce qu'il ne faisait pas : les lettres fréquentes se rapprochent donc du
+ * bas. Grille 5 x 5, rangées de y = 190 à 414, espace à 470. */
+static const Touche CL0[] = { L("y"), L("f"), L("q"), L("x"), L("z"), FIN };
+static const Touche CL1[] = { L("h"), L("o"), L("u"), L("m"), L("g"), FIN };
+static const Touche CL2[] = { L("c"), L("n"), L("i"), L("r"), L("v"), FIN };
+static const Touche CL3[] = { L("é"), L("t"), L("e"), L("a"), L("p"), FIN };
+static const Touche CL4[] = { L("j"), L("d"), L("s"), L("l"), L("b"), FIN };
+static const Touche CL5[] = { {"espace", NULL, T_ESPACE, 10, 0, 0}, FIN };
 
-/* Les accents : à la même grille, placés par fréquence sur les places les
- * plus confortables (à 0,49 %, è 0,33, ê 0,24, ç 0,19 — Lexique), puis la
- * typographie française. é n'y est pas : il est sur le calque des lettres,
- * plus fréquent que f, b, g, h, q ou j. */
-static const Touche CA0[] = { L("ä"), L("…"), L("«"), L("°"), L("ã"), FIN };
-static const Touche CA1[] = { L("–"), L("â"), L("û"), L("ü"), L("ö"), FIN };
-static const Touche CA2[] = { L("œ"), L("ê"), L("è"), L("ù"), L("“"), FIN };
-static const Touche CA3[] = { L("ÿ"), L("ç"), L("à"), L("ô"), L("»"), FIN };
-static const Touche CA4[] = { L("’"), L("ë"), L("î"), L("ï"), L("”"), FIN };
-static const Touche CA5[] = { L("ß"), L("‘"), L("æ"), L("—"), L("ñ"), FIN };
+/* Les accents, les chiffres, les symboles : même grille de 5 x 5, et la
+ * même barre d'espace en bas — elle ne doit pas disparaître quand on
+ * bascule de calque. k et w sont ici : 0,02 % et 0,004 % du français, ils
+ * ne méritaient pas une place sous le pouce. Les accents sont rangés par
+ * fréquence sur les places les plus confortables (à 0,49 %, è 0,33,
+ * ê 0,24, ç 0,19 — Lexique) ; é reste sur le calque des lettres, plus
+ * fréquent que f, b, g, h, q ou j.
+ *
+ * Ce que le mode console n'a pas et que le plein format garde : | ` ^ £ §.
+ * Vingt-cinq places par calque, il a fallu choisir. */
+static const Touche CA0[] = { L("”"), L("«"), L("k"), L("°"), L("’"), FIN };
+static const Touche CA1[] = { L("»"), L("â"), L("û"), L("ü"), L("“"), FIN };
+static const Touche CA2[] = { L("œ"), L("ê"), L("è"), L("î"), L("…"), FIN };
+static const Touche CA3[] = { L("æ"), L("ç"), L("à"), L("ù"), L("w"), FIN };
+static const Touche CA4[] = { L("—"), L("ë"), L("ô"), L("ï"), L("–"), FIN };
+static const Touche CA5[] = { {"espace", NULL, T_ESPACE, 10, 0, 0}, FIN };
 
-/* Les chiffres : un pavé de calcul — 7 en haut, comme sur un clavier —,
- * les opérateurs à sa droite, et ce qui accompagne un nombre en dessous. */
+/* Le pavé de calcul, 7 en haut, comme sur un clavier. */
 static const Touche CC0[] = { L("7"), L("8"), L("9"), L("+"), L("-"), FIN };
 static const Touche CC1[] = { L("4"), L("5"), L("6"), L("*"), L("/"), FIN };
 static const Touche CC2[] = { L("1"), L("2"), L("3"), L("="), L("%"), FIN };
 static const Touche CC3[] = { L("0"), L(","), L("."), L("€"), L("$"), FIN };
 static const Touche CC4[] = { L("("), L(")"), L(":"), L(";"), L("#"), FIN };
-static const Touche CC5[] = { L("<"), L(">"), L("@"), L("&"), L("_"), FIN };
+static const Touche CC5[] = { {"espace", NULL, T_ESPACE, 10, 0, 0}, FIN };
 
 static const Touche CS0[] = { L("!"), L("?"), L(";"), L(":"), L("\""), FIN };
 static const Touche CS1[] = { L("("), L(")"), L("["), L("]"), L("{"), FIN };
 static const Touche CS2[] = { L("}"), L("<"), L(">"), L("/"), L("\\"), FIN };
 static const Touche CS3[] = { L("@"), L("#"), L("&"), L("_"), L("-"), FIN };
-static const Touche CS4[] = { L("+"), L("="), L("*"), L("%"), L("|"), FIN };
-static const Touche CS5[] = { L("~"), L("`"), L("^"), L("£"), L("§"), FIN };
+static const Touche CS4[] = { L("+"), L("="), L("*"), L("%"), L("~"), FIN };
+static const Touche CS5[] = { {"espace", NULL, T_ESPACE, 10, 0, 0}, FIN };
 
-/* --- Console, à droite : l'espace, les fonctions, les bascules ----------
+/* --- Console, à droite : la ponctuation, les fonctions, les bascules ----
  *
- * Douze colonnes : six places de 2, ou trois de 4. L'espace, la touche la
- * plus frappée, au cœur de la bande que le pouce droit atteint (médiane
- * mesurée : 164 px du bord, y ≈ 380) ; ce qui sert le moins, en haut. */
+ * Douze colonnes : trois places de 4, quatre de 3, ou une pleine. L'ordre
+ * suit l'usage, du moins fréquent en haut au plus fréquent au milieu de la
+ * bande que le pouce droit atteint (médiane mesurée : 164 px du bord,
+ * y ≈ 380) :
+ *
+ *   ⇥ ⇆ ⌄        ce dont on se sert le moins
+ *   éà 123 #&    les bascules du clavier gauche
+ *   ' , . ?      la ponctuation, retirée du clavier gauche le 13 septembre
+ *   ⇧ ⌫          au cœur de la zone
+ *   espace       19,4 % des frappes — elle est aussi à gauche
+ *   ← → ↵
+ *
+ * Même grille que la gauche : six rangées de y = 190 à 470. */
 static const Touche CD0[] = { {"⇥", NULL, T_TABULATION, 4, 0, 0},
                               {"⇆", NULL, T_MODE, 4, 0, 0},
                               {"⌄", NULL, T_MASQUER, 4, 0, 0}, FIN };
 static const Touche CD1[] = { {"éà", "accents", T_CALQUE, 4, 0, CALQUE_UNE},
                               {"123", "chiffres", T_CALQUE, 4, 0, CALQUE_TIENT},
                               {"#&", "symboles", T_CALQUE, 4, 0, CALQUE_UNE}, FIN };
-static const Touche CD2[] = { {"⇧", NULL, T_MAJ, 4, 0, 0},
+static const Touche CD2[] = { {"'", NULL, T_TEXTE, 3, 0, 0}, {",", NULL, T_TEXTE, 3, 0, 0},
+                              {".", NULL, T_TEXTE, 3, 0, 0}, {"?", "!", T_TEXTE, 3, 0, 0}, FIN };
+static const Touche CD3[] = { {"⇧", NULL, T_MAJ, 4, 0, 0},
                               {"⌫", NULL, T_EFFACER, 8, 0, 0}, FIN };
-static const Touche CD3[] = { {"espace", NULL, T_ESPACE, 12, 2, 0}, FIN };
-static const Touche CD4[] = { {"", NULL, T_VIDE, 12, 0, 0}, FIN };
+static const Touche CD4[] = { {"espace", NULL, T_ESPACE, 12, 0, 0}, FIN };
 static const Touche CD5[] = { {"←", NULL, T_GAUCHE, 3, 0, 0},
                               {"→", NULL, T_DROITE, 3, 0, 0},
                               {"↵", NULL, T_ENTREE, 6, 0, 0}, FIN };
@@ -312,7 +342,18 @@ static struct {
 
     guint      repetition;
     GtkWidget *tenue;           /* la touche qui se répète                */
+
+    /* Les suggestions — mode console, colonne gauche. */
+    gboolean   mots_ok;         /* le dictionnaire est là                 */
+    GtkWidget *suggestions;     /* la rangée, toujours visible            */
+    GtkWidget *sugg[3];
+    GString   *mot;             /* ce qui est tapé du mot en cours        */
+    gboolean   espace_auto;     /* la dernière espace vient d'une suggestion */
 } K;
+
+/* Trois propositions : au-delà, elles deviennent trop étroites pour être
+ * lues d'un coup d'œil, et l'on perd plus à choisir qu'à taper. */
+#define SUGGESTIONS 3
 
 /* =========================================================================
  * Ce qu'écrit une touche, et ce qu'elle montre
@@ -522,6 +563,110 @@ on_calque_annule (GtkGesture *g, GdkEventSequence *s, gpointer data)
 }
 
 /* =========================================================================
+ * Les suggestions, et ce qui les accompagne
+ *
+ * Demandées par l'utilisateur le 13 septembre 2026 : « n'importe quel
+ * clavier tactile de taille réduite serait laborieux sans cette fonction ».
+ * Vingt-cinq touches sous le pouce, c'est peu ; les suggestions rendent
+ * aussi ce qu'on a retiré du calque — l'apostrophe, k, w, les accents
+ * rares : « aujourd » propose « aujourd'hui ».
+ *
+ * LE MOT EN COURS EST CELUI QU'ON A TAPÉ, pas celui qui est à l'écran. Le
+ * clavier ne lit pas le champ : il se souvient de ce qu'il a envoyé depuis
+ * la dernière espace. Un doigt posé ailleurs dans le texte le trompe
+ * jusqu'au mot suivant — c'est la limite assumée, et elle disparaîtra le
+ * jour où les applications transmettront leur texte alentour
+ * (surrounding_text, que Chromium n'offre pas sans option).
+ *
+ * TROIS AUTOMATISMES, demandés eux aussi :
+ *   - une espace est posée après un mot choisi ;
+ *   - une ponctuation tapée juste après remplace cette espace, et se fait
+ *     suivre d'une espace : « mot . » devient « mot. » ;
+ *   - après « . », « ! », « ? » ou une entrée, la majuscule s'arme seule.
+ * ========================================================================= */
+static void
+suggestions_rafraichir (void)
+{
+    if (!K.mots_ok)
+        return;
+    char *mots[SUGGESTIONS] = { NULL };
+    guint n = K.mot->len > 0 ? shell_mots_suggerer (K.mot->str, mots, SUGGESTIONS) : 0;
+    for (guint i = 0; i < SUGGESTIONS; i++) {
+        gtk_button_set_label (GTK_BUTTON (K.sugg[i]), i < n ? mots[i] : "");
+        gtk_widget_set_sensitive (K.sugg[i], i < n);
+        g_object_set_data_full (G_OBJECT (K.sugg[i]), "mot",
+                                i < n ? g_strdup (mots[i]) : NULL, g_free);
+        g_free (mots[i]);
+    }
+}
+
+/* Le mot en cours : on n'y garde que ce qui fait un mot. */
+static void
+mot_ajouter (const char *texte)
+{
+    gunichar c = g_utf8_get_char (texte);
+    if (g_unichar_isalpha (c) || g_str_equal (texte, "'") || g_str_equal (texte, "-"))
+        g_string_append (K.mot, texte);
+    else
+        g_string_truncate (K.mot, 0);
+    suggestions_rafraichir ();
+}
+
+static void
+mot_effacer_dernier (void)
+{
+    if (K.mot->len == 0)
+        return;
+    const char *dernier = g_utf8_find_prev_char (K.mot->str, K.mot->str + K.mot->len);
+    g_string_truncate (K.mot, dernier - K.mot->str);
+    suggestions_rafraichir ();
+}
+
+static void
+mot_fini (void)
+{
+    g_string_truncate (K.mot, 0);
+    suggestions_rafraichir ();
+}
+
+/* Écrit un mot entier, caractère par caractère. */
+static void
+ecrire_mot (const char *mot, gboolean majuscule)
+{
+    for (const char *p = mot; *p != '\0'; p = g_utf8_next_char (p)) {
+        g_autofree char *un = g_strndup (p, g_utf8_next_char (p) - p);
+        if (majuscule && p == mot) {
+            g_autofree char *haut = g_utf8_strup (un, -1);
+            shell_saisie_texte (haut);
+        } else {
+            shell_saisie_texte (un);
+        }
+    }
+}
+
+static void
+on_suggestion (GtkButton *b, gpointer data)
+{
+    (void) data;
+    const char *mot = g_object_get_data (G_OBJECT (b), "mot");
+    if (mot == NULL || *mot == '\0')
+        return;
+
+    /* Effacer ce qui a été tapé du mot, puis écrire le mot entier : c'est la
+     * seule façon qui marche PARTOUT, y compris là où l'application ne dit
+     * rien de son champ. */
+    for (glong i = g_utf8_strlen (K.mot->str, -1); i > 0; i--)
+        shell_saisie_touche (SHELL_TOUCHE_EFFACER, FALSE);
+
+    ecrire_mot (mot, K.maj != MAJ_NON);
+    maj_poser (K.maj == MAJ_VERROU ? MAJ_VERROU : MAJ_NON);
+    shell_saisie_texte (" ");
+    K.espace_auto = TRUE;
+    shell_mots_apprendre (mot);
+    mot_fini ();
+}
+
+/* =========================================================================
  * Frapper
  * ========================================================================= */
 static void appliquer (void);
@@ -575,8 +720,25 @@ frapper (const Touche *t, GtkWidget *bouton)
     switch (t->genre) {
     case T_TEXTE: {
         g_autofree char *libre = NULL;
-        ecrire (sortie (t, &libre));
+        const char *texte = sortie (t, &libre);
+        gboolean ponctuation = strchr (",.;:!?", texte[0]) != NULL && texte[1] == '\0';
+
+        /* Une ponctuation juste après une espace automatique prend sa place :
+         * « mot . » n'est pas ce qu'on voulait écrire. */
+        if (ponctuation && K.espace_auto)
+            shell_saisie_touche (SHELL_TOUCHE_EFFACER, FALSE);
+        K.espace_auto = FALSE;
+
+        ecrire (texte);
+        if (ponctuation) {
+            shell_saisie_texte (" ");
+            K.espace_auto = TRUE;
+        }
         maj_consommer ();
+        /* Fin de phrase : la majuscule s'arme seule. */
+        if (strchr (".!?", texte[0]) != NULL && texte[1] == '\0')
+            maj_poser (MAJ_UNE);
+        mot_ajouter (texte);
         calque_frappe ();
         break;
     }
@@ -594,11 +756,17 @@ frapper (const Touche *t, GtkWidget *bouton)
     }
     case T_ESPACE:
         /* Accent en attente + espace : l'accent seul, sans espace. */
-        if (K.morte != NULL)
+        if (K.morte != NULL) {
             morte_liberer ();
-        else
+        } else if (K.espace_auto) {
+            /* Elle est déjà là : la suggestion vient de la poser. Une
+             * seconde espace ne serait qu'une faute à corriger. */
+            K.espace_auto = FALSE;
+        } else {
             shell_saisie_texte (" ");
+        }
         maj_consommer ();
+        mot_fini ();
         break;
     case T_MAJ: {
         /* Un appui : une lettre. Deux appuis rapprochés : verrou. Un appui
@@ -619,10 +787,13 @@ frapper (const Touche *t, GtkWidget *bouton)
         break;
     case T_EFFACER:
         /* ⌫ sur un accent en attente l'annule, comme sur le physique. */
-        if (K.morte != NULL)
+        if (K.morte != NULL) {
             morte_poser (NULL);
-        else
+        } else {
             shell_saisie_touche (SHELL_TOUCHE_EFFACER, FALSE);
+            K.espace_auto = FALSE;
+            mot_effacer_dernier ();
+        }
         break;
     case T_ENTREE:
         morte_liberer ();
@@ -630,6 +801,9 @@ frapper (const Touche *t, GtkWidget *bouton)
          * des messageries : Maj enclenchée l'envoie comme tel. */
         shell_saisie_touche (SHELL_TOUCHE_ENTREE, K.maj != MAJ_NON);
         maj_consommer ();
+        K.espace_auto = FALSE;
+        mot_fini ();
+        maj_poser (MAJ_UNE);       /* nouvelle ligne, nouvelle phrase */
         break;
     case T_TABULATION:
         morte_liberer ();
@@ -638,10 +812,18 @@ frapper (const Touche *t, GtkWidget *bouton)
     case T_GAUCHE:
         morte_poser (NULL);
         shell_saisie_touche (SHELL_TOUCHE_GAUCHE, FALSE);
+        /* Le curseur a bougé : ce qu'on croyait savoir du mot en cours ne
+         * vaut plus. */
+        K.espace_auto = FALSE;
+        mot_fini ();
         break;
     case T_DROITE:
         morte_poser (NULL);
         shell_saisie_touche (SHELL_TOUCHE_DROITE, FALSE);
+        /* Le curseur a bougé : ce qu'on croyait savoir du mot en cours ne
+         * vaut plus. */
+        K.espace_auto = FALSE;
+        mot_fini ();
         break;
     case T_COUCHE: {
         GtkWidget *pile = gtk_widget_get_ancestor (bouton, GTK_TYPE_STACK);
@@ -1001,6 +1183,12 @@ on_saisie (gboolean actif, ShellSaisieBut but, gpointer data)
     K.champ = TRUE;
     K.but = but;
     K.renvoye = FALSE;
+    /* Un champ neuf : rien n'y est écrit de notre fait, et une phrase
+     * commence. */
+    K.espace_auto = FALSE;
+    mot_fini ();
+    if (but != SHELL_SAISIE_MOT_DE_PASSE && but != SHELL_SAISIE_CHIFFRES)
+        maj_poser (MAJ_UNE);
     appliquer ();
 }
 
@@ -1118,6 +1306,8 @@ shell_clavier_ecran_init (GtkApplication *app)
     K.boutons_verr = g_ptr_array_new ();
     K.boutons_morte = g_ptr_array_new ();
     K.boutons_calque = g_ptr_array_new ();
+    K.mot = g_string_new (NULL);
+    K.mots_ok = shell_mots_init ();
     mode_lire ();
 
     /* Plein format : un bandeau sur toute la largeur, touches centrées. */
@@ -1136,11 +1326,31 @@ shell_clavier_ecran_init (GtkApplication *app)
      * atteignent ; le reste de la colonne est vide. */
     K.gauche_pile = pile_neuve (COUCHES_CONSOLE_G, 4);
     gtk_widget_set_size_request (K.gauche_pile, LARGEUR_CONSOLE - 12, -1);
-    gtk_widget_set_margin_top (K.gauche_pile, HAUT_GAUCHE);
     gtk_widget_set_valign (K.gauche_pile, GTK_ALIGN_START);
     gtk_widget_set_vexpand (K.gauche_pile, FALSE);
+
+    /* Les suggestions par-dessus les touches, dans la même colonne : elles
+     * restent en place quand on change de calque, d'où leur place hors de
+     * la pile. */
+    K.suggestions = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_widget_add_css_class (K.suggestions, "clavier-suggestions");
+    gtk_widget_set_margin_top (K.suggestions, HAUT_SUGGESTIONS);
+    for (guint i = 0; i < SUGGESTIONS; i++) {
+        K.sugg[i] = gtk_button_new_with_label ("");
+        gtk_widget_set_can_focus (K.sugg[i], FALSE);
+        gtk_widget_set_focus_on_click (K.sugg[i], FALSE);
+        gtk_widget_add_css_class (K.sugg[i], "clavier-suggestion");
+        gtk_widget_set_hexpand (K.sugg[i], TRUE);
+        gtk_widget_set_sensitive (K.sugg[i], FALSE);
+        gtk_widget_set_size_request (K.sugg[i], -1, HAUTEUR_SUGGESTION);
+        g_signal_connect (K.sugg[i], "clicked", G_CALLBACK (on_suggestion), NULL);
+        gtk_box_append (GTK_BOX (K.suggestions), K.sugg[i]);
+    }
+    GtkWidget *colonne = gtk_box_new (GTK_ORIENTATION_VERTICAL, 8);
+    gtk_box_append (GTK_BOX (colonne), K.suggestions);
+    gtk_box_append (GTK_BOX (colonne), K.gauche_pile);
     K.gauche = fenetre_neuve (app, TRUE, TRUE, FALSE, 0, "claude-os-clavier-gauche",
-                              "console-gauche", K.gauche_pile);
+                              "console-gauche", colonne);
     GtkWidget *fonctions = pile_neuve (COUCHES_CONSOLE_D, 4);
     gtk_widget_set_size_request (fonctions, LARGEUR_CONSOLE - 12, -1);
     gtk_widget_set_margin_top (fonctions, HAUT_DROITE);
