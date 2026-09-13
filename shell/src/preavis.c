@@ -217,8 +217,16 @@ opacite_appliquer (void)
 
     double a = CLAMP (P.opacite, 5, 100) / 100.0;
 
+    /* g_ascii_formatd ET NON %.3f : en français, printf écrit « 0,850 », et
+     * la virgule coupe alpha() en deux arguments. GTK rejette alors la
+     * règle — « Expected ')' at end of alpha() » dans shell.log — et le
+     * cadran perd sa couleur sans que rien ne s'arrête. Vu le 13 septembre
+     * 2026 ; c'est le piège du commit 2d7f52f, qui ne force le point
+     * décimal que pour les nombres lus, pas pour ceux qu'on écrit. */
+    char nombre[G_ASCII_DTOSTR_BUF_SIZE];
+    g_ascii_formatd (nombre, sizeof nombre, "%.3f", a);
     g_autofree char *css = g_strdup_printf (
-        ".preavis-cadran { color: alpha(@accent, %.3f); }", a);
+        ".preavis-cadran { color: alpha(@accent, %s); }", nombre);
 
     if (P.style == NULL) {
         P.style = gtk_css_provider_new ();
