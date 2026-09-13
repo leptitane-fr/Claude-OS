@@ -213,9 +213,17 @@ inv = {v: k for k, v in meilleur.items()}
 print(f'\n{len(cellules)} touches, de {min(cible(c) for c in cellules):.0f} '
       f'à {max(cible(c) for c in cellules):.0f} px de côté utile ; '
       f'espace {ESPACE["l"]}x{ESPACE["h"]} à y={ESPACE["y"]}')
+# La NUANCE de chaque touche : huit niveaux, de la lettre la plus rare à la
+# plus fréquente. La taille dit déjà l'importance ; la couleur la redit, et
+# c'est ce qui donne au clavier sa lisibilité d'un coup d'œil — on vise « e »
+# sans le lire. Racine 0,55 : sans elle, « e » écraserait tout le reste.
+fmax = max(lettres[c] for c in JEU)
+niveau = {c: min(7, round(7 * (lettres[c] / fmax) ** 0.55)) for c in JEU}
+
 print('\n/* Table pour clavier-ecran.c */')
 for i, c in enumerate(cellules):
-    print(f'    {{ "{inv[i]}", {c["x"]:3d}, {c["y"]:3d}, {c["l"]:3d}, {c["h"]:3d} }},')
+    print(f'    {{ "{inv[i]}", {c["x"]:3d}, {c["y"]:3d}, {c["l"]:3d}, '
+          f'{c["h"]:3d}, {niveau[inv[i]]} }},')
 print(f'    /* espace */ {{ NULL, {ESPACE["x"]:3d}, {ESPACE["y"]:3d}, '
       f'{ESPACE["l"]:3d}, {ESPACE["h"]:3d} }},')
 json.dump({'cellules': [dict(c, lettre=inv[i]) for i, c in enumerate(cellules)],

@@ -197,40 +197,45 @@ static const Touche Q4[] = {
  *
  * Les coordonnées sont en pixels, depuis le coin haut gauche du clavier
  * (soit y = 176 à l'écran, le haut de la zone que le pouce atteint). */
+/* `nuance` : huit niveaux de teinte, de la lettre la plus rare à la plus
+ * fréquente — demandé par l'utilisateur après avoir vu la maquette. La
+ * taille dit déjà l'importance ; la couleur la redit, et c'est ce qui rend
+ * le clavier lisible d'un coup d'œil : on vise « e » sans le lire. */
 typedef struct {
     Touche touche;
     int    x, y, l, h;
+    int    nuance;
 } Place;
 
 static const Place CONSOLE_LETTRES[] = {
-    { L("k"),   0,   0,  59,  52 },
-    { L("f"),  59,   0,  70,  52 },
-    { L("v"), 128,   0,  62,  52 },
-    { L("h"), 191,   0,  51,  52 },
-    { L("w"), 242,   0,  46,  52 },
-    { L("y"),   0,  52,  43,  56 },
-    { L("m"),  43,  52,  51,  56 },
-    { L("i"),  94,  52,  58,  56 },
-    { L("o"), 151,  52,  53,  56 },
-    { L("c"), 204,  52,  44,  56 },
-    { L("x"), 248,  52,  40,  56 },
-    { L("b"),   0, 108,  40,  60 },
-    { L("l"),  40, 108,  45,  60 },
-    { L("a"),  85, 108,  54,  60 },
-    { L("n"), 140, 108,  57,  60 },
-    { L("u"), 197, 108,  49,  60 },
-    { L("q"), 246, 108,  42,  60 },
-    { L("g"),   0, 168,  47,  56 },
-    { L("r"),  47, 168,  53,  56 },
-    { L("e"), 100, 168,  65,  56 },
-    { L("t"), 165, 168,  68,  56 },
-    { L("é"), 233, 168,  55,  56 },
-    { L("z"),   0, 224,  46,  56 },
-    { L("p"),  46, 224,  51,  56 },
-    { L("s"),  97, 224,  62,  56 },
-    { L("d"), 158, 224,  70,  56 },
-    { L("j"), 228, 224,  60,  56 },
-    { {"espace", NULL, T_ESPACE, 0, 0, 0},   0, 280, 288,  56 },
+    { L("k"),   0,   0,  59,  52, 0 },
+    { L("f"),  59,   0,  70,  52, 2 },
+    { L("v"), 128,   0,  62,  52, 2 },
+    { L("h"), 191,   0,  51,  52, 1 },
+    { L("w"), 242,   0,  46,  52, 0 },
+    { L("y"),   0,  52,  43,  56, 1 },
+    { L("m"),  43,  52,  51,  56, 3 },
+    { L("i"),  94,  52,  58,  56, 5 },
+    { L("o"), 151,  52,  53,  56, 4 },
+    { L("c"), 204,  52,  44,  56, 3 },
+    { L("x"), 248,  52,  40,  56, 1 },
+    { L("b"),   0, 108,  40,  60, 2 },
+    { L("l"),  40, 108,  45,  60, 4 },
+    { L("a"),  85, 108,  54,  60, 5 },
+    { L("n"), 140, 108,  57,  60, 5 },
+    { L("u"), 197, 108,  49,  60, 4 },
+    { L("q"), 246, 108,  42,  60, 1 },
+    { L("g"),   0, 168,  47,  56, 1 },
+    { L("r"),  47, 168,  53,  56, 4 },
+    { L("e"), 100, 168,  65,  56, 7 },
+    { L("t"), 165, 168,  68,  56, 5 },
+    { L("é"), 233, 168,  55,  56, 2 },
+    { L("z"),   0, 224,  46,  56, 1 },
+    { L("p"),  46, 224,  51,  56, 3 },
+    { L("s"),  97, 224,  62,  56, 5 },
+    { L("d"), 158, 224,  70,  56, 3 },
+    { L("j"), 228, 224,  60,  56, 1 },
+    { {"espace", NULL, T_ESPACE, 0, 0, 0}, 0, 280, 288, 56, 4 },
 };
 
 /* Les accents, les chiffres, les symboles : même grille de 5 x 5, et la
@@ -1066,6 +1071,8 @@ disposition_organique (void)
             gtk_widget_add_css_class (b, "grande");
         else if (p->l <= 46)
             gtk_widget_add_css_class (b, "petite");
+        g_autofree char *nuance = g_strdup_printf ("nuance-%d", p->nuance);
+        gtk_widget_add_css_class (b, nuance);
         gtk_fixed_put (GTK_FIXED (fixe), b, p->x, p->y);
         bas = MAX (bas, p->y + p->h);
     }

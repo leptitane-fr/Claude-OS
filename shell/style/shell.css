@@ -1518,11 +1518,53 @@ window.images { background-color: @surface; }
      d'un clavier physique (1800 px, 19 mm) ;
    - deux mains : un clavier de téléphone en bas à gauche, un pavé
      numérique en bas à droite, le milieu de l'écran libre. */
+/* LE CLAVIER EST SOMBRE EN PERMANENCE, thème clair ou non — demandé par
+   l'utilisateur : « le fond devrait être noir ou foncé en permanence pour
+   faire ressortir l'écran de travail ». Les colonnes encadrent l'écran ;
+   une bande claire lui volerait l'attention. Les couleurs sont donc
+   écrites ici, et non prises aux jetons du thème — sauf l'accent, qui
+   tient sur du noir dans les quatre thèmes (bleu #4285f4 ou terre
+   #d97757) et garde au clavier la couleur de la maison. */
 .clavier-ecran {
-  background-color: @surface;
-  border-top: 1px solid @border;
+  background-color: #0f1013;
+  color: #e8eaed;
+  border-top: 1px solid alpha(#ffffff, 0.09);
   padding: 8px 8px 12px 8px;
 }
+
+.clavier-ecran .clavier-touche {
+  background-color: alpha(#ffffff, 0.07);
+  border-color: alpha(#ffffff, 0.08);
+  color: #f1f3f4;
+}
+
+.clavier-ecran .clavier-touche.speciale {
+  background-color: alpha(#ffffff, 0.04);
+  color: #b9bdc2;
+}
+
+.clavier-ecran .clavier-touche:active,
+.clavier-ecran .clavier-touche.speciale:active,
+.clavier-ecran .clavier-touche.tenue,
+.clavier-ecran .clavier-touche.speciale.tenue,
+.clavier-ecran .clavier-touche.speciale.active {
+  background-color: @accent;
+  border-color: @accent;
+  color: @on-accent;
+}
+
+/* LES HUIT NUANCES. Chaque touche porte la couleur de la maison, d'autant
+   plus dense que sa lettre est fréquente : « e » saute aux yeux, « k »
+   s'efface. C'est la lecture d'un coup d'œil que l'utilisateur a vue sur la
+   maquette et demandée pour le clavier. */
+.clavier-organique .clavier-touche.nuance-0 { background-color: alpha(@accent, 0.10); }
+.clavier-organique .clavier-touche.nuance-1 { background-color: alpha(@accent, 0.18); }
+.clavier-organique .clavier-touche.nuance-2 { background-color: alpha(@accent, 0.26); }
+.clavier-organique .clavier-touche.nuance-3 { background-color: alpha(@accent, 0.35); }
+.clavier-organique .clavier-touche.nuance-4 { background-color: alpha(@accent, 0.45); }
+.clavier-organique .clavier-touche.nuance-5 { background-color: alpha(@accent, 0.56); }
+.clavier-organique .clavier-touche.nuance-6 { background-color: alpha(@accent, 0.68); }
+.clavier-organique .clavier-touche.nuance-7 { background-color: alpha(@accent, 0.82); }
 
 .clavier-ecran .clavier-touche {
   min-height: 56px;
@@ -1597,16 +1639,16 @@ window.images { background-color: @surface; }
    colonne ne saute pas de hauteur à chaque lettre. */
 .clavier-suggestion {
   background: none;
-  background-color: @surface-alt;
-  border: 1px solid @border;
+  background-color: alpha(#ffffff, 0.09);
+  border: 1px solid alpha(#ffffff, 0.10);
   border-radius: 9px;
-  color: @text;
+  color: #f1f3f4;
   font-size: 16px;
   padding: 0 4px;
   min-height: 44px;
 }
 
-.clavier-suggestion:disabled { background-color: alpha(@surface-alt, 0.35); border-color: alpha(@border, 0.5); }
+.clavier-suggestion:disabled { background-color: alpha(#ffffff, 0.03); border-color: alpha(#ffffff, 0.05); }
 .clavier-suggestion:active   { background-color: @accent; color: @on-accent; }
 
 /* Une bascule verrouillée — chiffres, ou accents au double appui — se
