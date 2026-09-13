@@ -112,6 +112,13 @@ for c in "${CIBLES[@]}"; do
 				echo "  pointeur : wayland-scanner a échoué" >&2; ECHECS=$((ECHECS+1))
 			fi
 			;;
+		sonde-pouces)
+			# La portée des pouces, tablette en main : elle fixe la largeur
+			# des claviers du mode deux mains (docs/12). Sur la machine, pas
+			# au banc — un labwc sans écran n'a pas de doigts.
+			# shellcheck disable=SC2046
+			construire sonde-pouces $(flags gtk4 gtk4-layer-shell-0) -lm || ECHECS=$((ECHECS+1))
+			;;
 		*)
 			echo "  cible inconnue : $c" >&2; ECHECS=$((ECHECS+1)) ;;
 	esac

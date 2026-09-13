@@ -4,14 +4,16 @@
 été mesuré** sur MADOO, ce qui a été décidé avec l'utilisateur, et ce qui
 reste une limite. Ce qui n'est pas établi y est écrit comme tel.
 
-État au 11 septembre 2026 :
+État au 13 septembre 2026 :
 
 | Pièce | État |
 |---|---|
 | Détection du mode tablette | **Faite, vue fonctionner sur MADOO** |
 | Rotation de l'écran (paysage / chevalet) | **Faite, vue fonctionner sur MADOO** |
 | Tactile et stylet alignés sur l'écran tourné | **Fait** — doigt vu juste en portrait ; stylet non essayé |
-| Clavier AZERTY à l'écran | **Première version vue fonctionner sur MADOO** — voir §12.6 |
+| Clavier AZERTY à l'écran, plein format | **Vu fonctionner sur MADOO** — voir §12.6 |
+| Mode console (deux colonnes, écran recadré) | **En service pour un essai de plusieurs jours** — voir §12.7 |
+| Disposition de la colonne gauche | **Calculée** : fréquences du français + zone du pouce mesurée — §12.7 |
 | Déplacer Claude Desktop au doigt | **Impossible sous labwc 0.8.3** — voir §12.5 |
 
 ---
@@ -165,9 +167,94 @@ Le clavier est une surface layer-shell OVERLAY en bas de l'écran, en zone
 réservée (les fenêtres agrandies raccourcissent), qui ne prend jamais le
 focus clavier (`KEYBOARD_MODE_NONE`).
 
-## 12.7 Ce qui n'est pas établi
+## 12.7 Le mode console — deux claviers aux bords, et l'écran recadré
+
+Dessiné par l'utilisateur les 11 et 12 septembre 2026, à la façon d'une
+console portable : deux claviers collés aux bords gauche et droit, sur toute
+la hauteur, et **l'écran recadré entre eux** — labwc rétrécit de lui-même
+les fenêtres agrandies, puisque chaque colonne réserve sa largeur.
+
+**Le mode RESTE en place** tant qu'il est choisi et que la tablette est
+retournée : il ne va pas et vient au gré des champs, sans quoi toutes les
+fenêtres se recadreraient à chaque fois. ⌄ le range jusqu'au champ suivant,
+⇆ repasse au plein format ; le choix est gardé dans
+`~/.local/state/claude-os/clavier.ini`.
+
+**À gauche la frappe, à droite les bascules** — répartition voulue par
+l'utilisateur, gaucher : le pouce gauche ne fait qu'écrire, le droit choisit
+ce qui s'écrit (accents, chiffres, symboles), et porte l'espace, ⇧, ⌫, ↵ et
+les flèches. Une bascule s'utilise de deux façons : **appui bref** (la
+couche s'affiche ; accents et symboles reviennent aux lettres après une
+frappe, double appui pour verrouiller ; les chiffres tiennent) ou **appui
+tenu** (la couche dure le temps qu'on la tient). Les deux se distinguent au
+relâcher, selon qu'une touche a été frappée pendant.
+
+### Les largeurs et la bande sont MESURÉES, pas choisies
+
+`shell/essais/sonde-pouces.c` couvre l'écran d'une surface qui absorbe les
+touchers et enregistre les appuis. L'utilisateur tient la tablette et tape
+du pouce là où c'est confortable. Mesure du 11 septembre 2026, 245 appuis :
+
+| | Pouce gauche | Pouce droit |
+|---|---|---|
+| Portée depuis le bord, médiane | 136 px (22 mm) | 164 px (26 mm) |
+| 95 % des appuis en deçà de | **262 px** | 320 px |
+| Le plus loin | **305 px** | 398 px |
+| Hauteur atteinte | y ≈ 180–535 | y ≈ 200–550 |
+
+D'où **300 px (48 mm) par colonne** : la portée du pouce le plus court —
+règle de l'utilisateur, pour ne jamais étirer le plus limité. Six appuis
+tombaient exactement sur le bord droit, en bas (y ≈ 990) : c'est la main qui
+tient, pas un pouce qui tape. **Aucune touche ne va là.**
+
+**Le fichier brut de cette mesure a été perdu** dans un redémarrage — il
+était dans `/tmp`. Les paramètres qui en sont tirés sont inscrits dans
+`shell/essais/disposition-pouce.py`. Une mesure se verse au dépôt le jour
+même.
+
+### La disposition de gauche est calculée, pas héritée
+
+L'AZERTY vient des machines à écrire de 1870 ; il n'a pas été pensé pour la
+fréquence des lettres, et encore moins pour un pouce. La disposition de la
+colonne gauche a donc été calculée — démarche de BÉPO pour les fréquences,
+de Metropolis (Zhai, 2000) pour le pointeur unique :
+
+- **fréquences réelles du français**, Lexique 3.83 pondéré par l'usage :
+  e 14,7 %, s 8,4, a 8,1, i 7,2, t 7,0, n 6,8… **é 1,70 %, plus fréquent que
+  f, b, g, h, q ou j** — d'où sa place sur le calque des lettres ;
+  apostrophe 1,01 % ; enchaînements dominants es, ai, en, le, ou, re, de ;
+- **virgule et point** mesurés sur la prose du dépôt (1,51 et 1,40 % des
+  lettres) : un dictionnaire n'en contient pas ;
+- **zone du pouce** : ellipse ajustée sur les appuis, axe à 70° — l'arc du
+  coin haut-gauche au coin bas-droit que décrit l'utilisateur ;
+- **coût d'une frappe** = inconfort de la place + trajet depuis la lettre
+  précédente (loi de Fitts), pondérés par les fréquences ; recuit simulé.
+
+**39 % de coût en moins** que l'AZERTY replié en 5 × 6, qui mettait n dans
+le coin du repli. Deux corrections sont venues du doigt, et non du calcul :
+la rangée du bas descendait trop (« mon pouce peine à y descendre »), d'où
+des touches de 52 px et une grille remontée à y = 190…470 ; et le centre de
+confort a été remonté de 352 à 330, car on tape plus bas pendant une sonde
+qu'en écrivant vraiment.
+
+**L'optimum est PLAT** : quatre tirages donnent le même coût à 0,3 % près
+avec des places différentes. Ce qui est stable est la hiérarchie — e à la
+meilleure place, puis s, a, i, t, n. Le détail peut donc se choisir sur
+d'autres critères (mémorisation, repères) sans rien coûter.
+
+Le calcul est refaisable : `shell/essais/disposition-pouce.py`.
+
+**En service depuis le 13 septembre 2026**, pour un essai de plusieurs jours
+avant d'ajuster.
+
+## 12.8 Ce qui n'est pas établi
 
 - le stylet sur écran tourné ;
+- **la vitesse de frappe réelle du mode console**, et le temps qu'il faut
+  pour s'habituer à une disposition qui ne ressemble à rien de connu. C'est
+  l'objet de l'essai en cours ;
+- la disposition de la colonne DROITE, qui n'a pas encore été retravaillée ;
+- les suggestions de mots, prévues en haut de la colonne gauche ;
 - les boutons de barre de titre au doigt, écran en chevalet ;
 - la scrutation de la rotation écran éteint : elle continue, deux commandes à
   l'EC par seconde, tant que la machine est en mode tablette. Coût non mesuré.

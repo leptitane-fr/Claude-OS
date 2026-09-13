@@ -1551,23 +1551,32 @@ window.images { background-color: @surface; }
 
 .clavier-touche.valider:active { background-color: @accent-press; }
 
-/* Deux mains : deux îlots, arrondis du côté de l'écran libre. Plus petits
-   que le plein format — c'est un pouce qui tape, pas dix doigts. */
-.clavier-ecran.clavier-gauche {
-  border-right: 1px solid @border;
-  border-top-right-radius: 16px;
+/* LA CONSOLE : deux colonnes collées aux bords, sur toute la hauteur, 300 px
+   chacune — la portée mesurée du pouce le plus court. Le fond descend
+   jusqu'en bas : c'est lui qui recadre l'écran, les touches n'en occupent
+   que la bande que les pouces atteignent. Padding de 6 px et non 8 : chaque
+   pixel pris ici l'est à la touche. */
+.clavier-ecran.console-gauche,
+.clavier-ecran.console-droite {
+  border-top: none;
+  padding: 6px;
 }
+.clavier-ecran.console-gauche { border-right: 1px solid @border; }
+.clavier-ecran.console-droite { border-left: 1px solid @border; }
 
-.clavier-ecran.clavier-droite {
-  border-left: 1px solid @border;
-  border-top-left-radius: 16px;
+.console-gauche .clavier-touche,
+.console-droite .clavier-touche {
+  min-height: 56px;
+  font-size: 22px;
 }
+/* 52 px à gauche : six rangées entre y = 190 et 470, la bande que le pouce
+   gauche atteint sans descendre (voir HAUT_GAUCHE dans clavier-ecran.c). */
+.console-gauche .clavier-touche { min-height: 52px; }
+.console-droite .clavier-touche.speciale { font-size: 18px; }
 
-.clavier-gauche .clavier-touche,
-.clavier-droite .clavier-touche {
-  min-height: 50px;
-  font-size: 19px;
-}
+/* Une bascule verrouillée — chiffres, ou accents au double appui — se
+   distingue d'une bascule « une frappe », comme Maj. */
+.clavier-touche.speciale.active.verrouille { box-shadow: inset 0 -3px 0 0 @on-accent; }
 
 /* Maj verrouillée : distincte de Maj « une lettre ». Sans différence, on
    ne sait pas si la prochaine lettre sera la dernière en majuscule. */

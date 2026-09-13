@@ -28,11 +28,41 @@
  * normalisé d'un clavier physique, que l'utilisateur voulait retrouver. */
 #define LARGEUR_PLEIN 1800
 
-/* Le mode à deux mains : les lettres sous le pouce gauche, les chiffres
- * sous le droit, et le milieu de l'écran libre. Dix touches en 760 px, 12 mm
- * par touche : un clavier de téléphone un peu large, pour un pouce. */
-#define LARGEUR_GAUCHE 760
-#define LARGEUR_DROITE 400
+/* LE MODE CONSOLE — deux claviers collés aux bords, à la façon des manettes
+ * d'une console portable, et l'écran recadré entre eux. Dessiné par
+ * l'utilisateur le 11 septembre 2026 : à gauche la frappe, sous le pouce
+ * gauche (il est gaucher) ; à droite l'espace, les fonctions et les
+ * BASCULES qui changent ce que le clavier gauche écrit.
+ *
+ * Les dimensions sont MESURÉES (shell/essais/sonde-pouces.c, tablette tenue
+ * à deux mains, 245 appuis) :
+ *
+ *   pouce gauche : portée depuis le bord, 95 % en deçà de 262 px, max 305 ;
+ *   pouce droit  : 95 % en deçà de 320 px, max 398 ;
+ *   hauteur      : les deux pouces travaillent entre y = 180 et 540.
+ *
+ * Les deux claviers ont la largeur du pouce le PLUS COURT — règle de
+ * l'utilisateur, pour ne jamais étirer le pouce le plus limité : 300 px
+ * (48 mm). Et les touches commencent à HAUT_GAUCHE/HAUT_DROITE : au-dessus, le pouce
+ * n'atteint pas ; en dessous de 540, non plus — et c'est là que la main qui
+ * tient la tablette frôle l'écran (six appuis parasites mesurés au bord,
+ * y ≈ 990). */
+#define LARGEUR_CONSOLE 300
+#define HAUT_DROITE     176
+
+/* La colonne gauche a été resserrée et REMONTÉE après le premier essai au
+ * doigt : « la ligne du bas est trop basse ». Touches de 52 px au pas de
+ * 56, première rangée centrée sur y = 190, dernière sur 470 — 40 px plus
+ * haut que la rangée qui gênait. 158 = 190 - 26 (demi-touche) - 6 (marge
+ * de la fenêtre). */
+#define HAUT_GAUCHE     158
+
+/* Les bascules du mode console : un calque « une frappe » revient aux
+ * lettres après un caractère ; un calque « tient » reste jusqu'au prochain
+ * appui. Les accents et les symboles s'écrivent un à un au milieu des
+ * lettres ; les chiffres, par séries. */
+#define CALQUE_UNE   1
+#define CALQUE_TIENT 2
 
 /* =========================================================================
  * Les touches
@@ -49,7 +79,10 @@ typedef enum {
     T_GAUCHE,
     T_DROITE,
     T_COUCHE,       /* vers la couche nommée par « maj »                    */
-    T_MODE,         /* plein format <-> deux mains                          */
+    T_CALQUE,       /* mode console : bascule le clavier GAUCHE vers la
+                       couche nommée par « maj » ; tenue, le temps qu'on
+                       la tient — voir « Les bascules »                     */
+    T_MODE,         /* plein format <-> console                             */
     T_MASQUER,
     T_VIDE,         /* une place sans touche : sous ↵, qui tient 2 rangées  */
 } Genre;
@@ -61,11 +94,12 @@ typedef struct {
     Genre       genre;
     int         largeur;   /* en colonnes de la grille                       */
     int         hauteur;   /* en rangées ; 0 vaut 1                          */
+    int         drapeau;   /* T_CALQUE : CALQUE_UNE ou CALQUE_TIENT          */
 } Touche;
 
-#define FIN          {NULL, NULL, T_TEXTE, 0, 0}
-#define L(c)         {c, NULL, T_TEXTE, 2, 0}
-#define D(c, m)      {c, m, T_TEXTE, 2, 0}
+#define FIN          {NULL, NULL, T_TEXTE, 0, 0, 0}
+#define L(c)         {c, NULL, T_TEXTE, 2, 0, 0}
+#define D(c, m)      {c, m, T_TEXTE, 2, 0, 0}
 
 /* --- Plein format : le clavier physique ----------------------------------
  *
@@ -77,93 +111,128 @@ typedef struct {
 static const Touche P0[] = {
     D("&","1"), D("é","2"), D("\"","3"), D("'","4"), D("(","5"), D("-","6"),
     D("è","7"), D("_","8"), D("ç","9"), D("à","0"), D(")","°"), D("=","+"),
-    {"⌫", NULL, T_EFFACER, 6, 0}, FIN };
+    {"⌫", NULL, T_EFFACER, 6, 0, 0}, FIN };
 static const Touche P1[] = {
-    {"⇥", NULL, T_TABULATION, 3, 0},
+    {"⇥", NULL, T_TABULATION, 3, 0, 0},
     L("a"), L("z"), L("e"), L("r"), L("t"), L("y"), L("u"), L("i"), L("o"), L("p"),
-    {"^", "¨", T_MORTE, 2, 0}, D("$","£"),
-    {"↵", NULL, T_ENTREE, 3, 2}, FIN };
+    {"^", "¨", T_MORTE, 2, 0, 0}, D("$","£"),
+    {"↵", NULL, T_ENTREE, 3, 2, 0}, FIN };
 static const Touche P2[] = {
-    {"⇪", NULL, T_VERR_MAJ, 3, 0},
+    {"⇪", NULL, T_VERR_MAJ, 3, 0, 0},
     L("q"), L("s"), L("d"), L("f"), L("g"), L("h"), L("j"), L("k"), L("l"), L("m"),
     D("ù","%"), D("*","µ"),
-    {"", NULL, T_VIDE, 3, 0}, FIN };
+    {"", NULL, T_VIDE, 3, 0, 0}, FIN };
 static const Touche P3[] = {
-    {"⇧", NULL, T_MAJ, 3, 0}, D("<",">"),
+    {"⇧", NULL, T_MAJ, 3, 0, 0}, D("<",">"),
     L("w"), L("x"), L("c"), L("v"), L("b"), L("n"),
     D(",","?"), D(";","."), D(":","/"), D("!","§"),
-    {"⇧", NULL, T_MAJ, 5, 0}, FIN };
+    {"⇧", NULL, T_MAJ, 5, 0, 0}, FIN };
 static const Touche P4[] = {
-    {"&@#", "altgr", T_COUCHE, 4, 0}, {"←", NULL, T_GAUCHE, 3, 0},
-    {"espace", NULL, T_ESPACE, 13, 0},
-    {"→", NULL, T_DROITE, 3, 0}, {"⇆", NULL, T_MODE, 3, 0},
-    {"⌄", NULL, T_MASQUER, 4, 0}, FIN };
+    {"&@#", "altgr", T_COUCHE, 4, 0, 0}, {"←", NULL, T_GAUCHE, 3, 0, 0},
+    {"espace", NULL, T_ESPACE, 13, 0, 0},
+    {"→", NULL, T_DROITE, 3, 0, 0}, {"⇆", NULL, T_MODE, 3, 0, 0},
+    {"⌄", NULL, T_MASQUER, 4, 0, 0}, FIN };
 
 /* --- Plein format : ce que donne AltGr sur le physique, et au-delà ------- */
 static const Touche Q0[] = {
     L("~"), L("#"), L("{"), L("["), L("|"), L("`"), L("\\"), L("^"), L("@"),
-    L("]"), L("}"), L("€"), {"⌫", NULL, T_EFFACER, 6, 0}, FIN };
+    L("]"), L("}"), L("€"), {"⌫", NULL, T_EFFACER, 6, 0, 0}, FIN };
 static const Touche Q1[] = {
-    {"⇥", NULL, T_TABULATION, 3, 0},
+    {"⇥", NULL, T_TABULATION, 3, 0, 0},
     L("«"), L("»"), L("“"), L("”"), L("‘"), L("’"), L("–"), L("—"), L("…"),
     L("•"), L("°"), L("²"),
-    {"↵", NULL, T_ENTREE, 3, 2}, FIN };
+    {"↵", NULL, T_ENTREE, 3, 2, 0}, FIN };
 static const Touche Q2[] = {
-    {"abc", "lettres", T_COUCHE, 3, 0},
+    {"abc", "lettres", T_COUCHE, 3, 0, 0},
     L("œ"), L("Œ"), L("æ"), L("Æ"), L("ß"), L("ñ"), L("Ñ"), L("¿"), L("¡"),
     L("±"), L("×"), L("÷"),
-    {"", NULL, T_VIDE, 3, 0}, FIN };
+    {"", NULL, T_VIDE, 3, 0, 0}, FIN };
 static const Touche Q3[] = {
     L("¤"), L("≠"), L("≤"), L("≥"), L("¼"), L("½"), L("¾"), L("©"), L("®"),
     L("™"), L("¶"), L("¥"), L("¢"), L("‰"), L("³"), FIN };
 static const Touche Q4[] = {
-    {"abc", "lettres", T_COUCHE, 4, 0}, {"←", NULL, T_GAUCHE, 3, 0},
-    {"espace", NULL, T_ESPACE, 13, 0},
-    {"→", NULL, T_DROITE, 3, 0}, {"⇆", NULL, T_MODE, 3, 0},
-    {"⌄", NULL, T_MASQUER, 4, 0}, FIN };
+    {"abc", "lettres", T_COUCHE, 4, 0, 0}, {"←", NULL, T_GAUCHE, 3, 0, 0},
+    {"espace", NULL, T_ESPACE, 13, 0, 0},
+    {"→", NULL, T_DROITE, 3, 0, 0}, {"⇆", NULL, T_MODE, 3, 0, 0},
+    {"⌄", NULL, T_MASQUER, 4, 0, 0}, FIN };
 
-/* --- Deux mains, à gauche : un clavier de téléphone ----------------------
+/* --- Console, à gauche : la frappe, et elle seule ----------------------
  *
- * La première disposition, celle qui a été vue fonctionner : rangée
- * d'accents fixe, apostrophe à la place du tiret — « l'été ». Vingt
- * colonnes. */
-static const Touche G0[] = { L("é"),L("è"),L("à"),L("ç"),L("ù"),
-                             L("ê"),L("â"),L("î"),L("ô"),L("û"), FIN };
-static const Touche G1[] = { L("a"),L("z"),L("e"),L("r"),L("t"),
-                             L("y"),L("u"),L("i"),L("o"),L("p"), FIN };
-static const Touche G2[] = { L("q"),L("s"),L("d"),L("f"),L("g"),
-                             L("h"),L("j"),L("k"),L("l"),L("m"), FIN };
-static const Touche G3[] = { {"⇧", NULL, T_MAJ, 3, 0},
-                             L("w"),L("x"),L("c"),L("v"),L("b"),L("n"),L("'"),
-                             {"⌫", NULL, T_EFFACER, 3, 0}, FIN };
-static const Touche G4[] = { {"?123", "symboles", T_COUCHE, 3, 0}, L(","),
-                             {"espace", NULL, T_ESPACE, 10, 0},
-                             L("."), {"↵", NULL, T_ENTREE, 3, 0}, FIN };
-
-static const Touche H0[] = { L("@"),L("#"),L("€"),L("_"),L("&"),
-                             L("-"),L("+"),L("("),L(")"),L("/"), FIN };
-static const Touche H1[] = { L("*"),L("\""),L("'"),L(":"),L(";"),
-                             L("!"),L("?"),L("="),L("%"),L("$"), FIN };
-static const Touche H2[] = { L("\\"),L("|"),L("<"),L(">"),L("{"),
-                             L("}"),L("["),L("]"),L("~"),L("°"), FIN };
-static const Touche H3[] = { L("«"),L("»"),L("^"),L("`"),L("£"),
-                             L("§"),L("µ"),L("œ"),L("…"),
-                             {"⌫", NULL, T_EFFACER, 2, 0}, FIN };
-static const Touche H4[] = { {"abc", "lettres", T_COUCHE, 3, 0}, L(","),
-                             {"espace", NULL, T_ESPACE, 10, 0},
-                             L("."), {"↵", NULL, T_ENTREE, 3, 0}, FIN };
-
-/* --- Deux mains, à droite : le pavé numérique ----------------------------
+ * UNE DISPOSITION CALCULÉE POUR CE POUCE, et non l'AZERTY replié. L'AZERTY
+ * vient des machines à écrire ; un pouce seul sur un écran obéit à autre
+ * chose. Démarche de BÉPO pour les fréquences, de Metropolis (Zhai, 2000)
+ * pour le pointeur unique — le 11 septembre 2026 :
  *
- * Disposition du pavé d'un clavier — 7 en haut — et non celle d'un
- * téléphone : c'est un pavé de calcul. Il porte aussi les commandes du
- * clavier, pour que la main gauche n'ait que des lettres. Huit colonnes. */
-static const Touche N0[] = { {"←", NULL, T_GAUCHE, 2, 0}, {"→", NULL, T_DROITE, 2, 0},
-                             {"⇆", NULL, T_MODE, 2, 0}, {"⌄", NULL, T_MASQUER, 2, 0}, FIN };
-static const Touche N1[] = { L("7"), L("8"), L("9"), {"⌫", NULL, T_EFFACER, 2, 0}, FIN };
-static const Touche N2[] = { L("4"), L("5"), L("6"), {"↵", NULL, T_ENTREE, 2, 2}, FIN };
-static const Touche N3[] = { L("1"), L("2"), L("3"), {"", NULL, T_VIDE, 2, 0}, FIN };
-static const Touche N4[] = { {"0", NULL, T_TEXTE, 4, 0}, L(","), L("."), FIN };
+ *   - fréquences du français : Lexique 3.83 (freqfilms2 + freqlivres),
+ *     lettres, é, apostrophe, et enchaînements dans le mot ; virgule et
+ *     point mesurés sur la prose du dépôt (1,5 et 1,4 % des lettres) ;
+ *   - zone du pouce : les 136 appuis de la sonde (sonde-pouces.c), ellipse
+ *     d'axe 70° — l'arc du coin haut-gauche au coin bas-droit que décrit
+ *     l'utilisateur —, centre REMONTÉ à y = 330 d'après son retour d'usage :
+ *     « la ligne du bas est trop basse », « le N quasi inaccessible » ;
+ *   - coût d'une frappe : inconfort de la place (distance à l'ellipse) +
+ *     trajet depuis la lettre précédente (loi de Fitts), pondérés par la
+ *     fréquence ; recuit simulé.
+ *
+ * Résultat : 39 % de coût en moins que l'AZERTY replié. L'optimum est
+ * PLAT — quatre tirages tombent au même coût à 0,3 % près avec des places
+ * différentes — mais la hiérarchie est stable : e à la meilleure place,
+ * puis s, puis a, i, t, n. q est sous u (« que », « qui »). Les coins de
+ * l'étirement (haut-droite) et du repli (bas-gauche) vont à k et y.
+ *
+ * Grille 5 x 6, rangées de y = 190 à 470 (voir HAUT_GAUCHE). Dix colonnes. */
+static const Touche CL0[] = { L("w"), L("f"), L("'"), L("z"), L("k"), FIN };
+static const Touche CL1[] = { L("j"), L("l"), L("r"), L("d"), L("g"), FIN };
+static const Touche CL2[] = { L("p"), L("a"), L("e"), L("t"), L("."), FIN };
+static const Touche CL3[] = { L("v"), L("i"), L("s"), L("n"), L("é"), FIN };
+static const Touche CL4[] = { L("b"), L("m"), L("o"), L("u"), L(","), FIN };
+static const Touche CL5[] = { L("y"), L("h"), L("c"), L("q"), L("x"), FIN };
+
+/* Les accents : à la même grille, placés par fréquence sur les places les
+ * plus confortables (à 0,49 %, è 0,33, ê 0,24, ç 0,19 — Lexique), puis la
+ * typographie française. é n'y est pas : il est sur le calque des lettres,
+ * plus fréquent que f, b, g, h, q ou j. */
+static const Touche CA0[] = { L("ä"), L("…"), L("«"), L("°"), L("ã"), FIN };
+static const Touche CA1[] = { L("–"), L("â"), L("û"), L("ü"), L("ö"), FIN };
+static const Touche CA2[] = { L("œ"), L("ê"), L("è"), L("ù"), L("“"), FIN };
+static const Touche CA3[] = { L("ÿ"), L("ç"), L("à"), L("ô"), L("»"), FIN };
+static const Touche CA4[] = { L("’"), L("ë"), L("î"), L("ï"), L("”"), FIN };
+static const Touche CA5[] = { L("ß"), L("‘"), L("æ"), L("—"), L("ñ"), FIN };
+
+/* Les chiffres : un pavé de calcul — 7 en haut, comme sur un clavier —,
+ * les opérateurs à sa droite, et ce qui accompagne un nombre en dessous. */
+static const Touche CC0[] = { L("7"), L("8"), L("9"), L("+"), L("-"), FIN };
+static const Touche CC1[] = { L("4"), L("5"), L("6"), L("*"), L("/"), FIN };
+static const Touche CC2[] = { L("1"), L("2"), L("3"), L("="), L("%"), FIN };
+static const Touche CC3[] = { L("0"), L(","), L("."), L("€"), L("$"), FIN };
+static const Touche CC4[] = { L("("), L(")"), L(":"), L(";"), L("#"), FIN };
+static const Touche CC5[] = { L("<"), L(">"), L("@"), L("&"), L("_"), FIN };
+
+static const Touche CS0[] = { L("!"), L("?"), L(";"), L(":"), L("\""), FIN };
+static const Touche CS1[] = { L("("), L(")"), L("["), L("]"), L("{"), FIN };
+static const Touche CS2[] = { L("}"), L("<"), L(">"), L("/"), L("\\"), FIN };
+static const Touche CS3[] = { L("@"), L("#"), L("&"), L("_"), L("-"), FIN };
+static const Touche CS4[] = { L("+"), L("="), L("*"), L("%"), L("|"), FIN };
+static const Touche CS5[] = { L("~"), L("`"), L("^"), L("£"), L("§"), FIN };
+
+/* --- Console, à droite : l'espace, les fonctions, les bascules ----------
+ *
+ * Douze colonnes : six places de 2, ou trois de 4. L'espace, la touche la
+ * plus frappée, au cœur de la bande que le pouce droit atteint (médiane
+ * mesurée : 164 px du bord, y ≈ 380) ; ce qui sert le moins, en haut. */
+static const Touche CD0[] = { {"⇥", NULL, T_TABULATION, 4, 0, 0},
+                              {"⇆", NULL, T_MODE, 4, 0, 0},
+                              {"⌄", NULL, T_MASQUER, 4, 0, 0}, FIN };
+static const Touche CD1[] = { {"éà", "accents", T_CALQUE, 4, 0, CALQUE_UNE},
+                              {"123", "chiffres", T_CALQUE, 4, 0, CALQUE_TIENT},
+                              {"#&", "symboles", T_CALQUE, 4, 0, CALQUE_UNE}, FIN };
+static const Touche CD2[] = { {"⇧", NULL, T_MAJ, 4, 0, 0},
+                              {"⌫", NULL, T_EFFACER, 8, 0, 0}, FIN };
+static const Touche CD3[] = { {"espace", NULL, T_ESPACE, 12, 2, 0}, FIN };
+static const Touche CD4[] = { {"", NULL, T_VIDE, 12, 0, 0}, FIN };
+static const Touche CD5[] = { {"←", NULL, T_GAUCHE, 3, 0, 0},
+                              {"→", NULL, T_DROITE, 3, 0, 0},
+                              {"↵", NULL, T_ENTREE, 6, 0, 0}, FIN };
 
 typedef struct {
     const char           *nom;
@@ -171,17 +240,21 @@ typedef struct {
     int                   colonnes;
 } Couche;
 
-static const Touche *const PLEIN_L[]  = { P0, P1, P2, P3, P4, NULL };
-static const Touche *const PLEIN_S[]  = { Q0, Q1, Q2, Q3, Q4, NULL };
-static const Touche *const GAUCHE_L[] = { G0, G1, G2, G3, G4, NULL };
-static const Touche *const GAUCHE_S[] = { H0, H1, H2, H3, H4, NULL };
-static const Touche *const PAVE[]     = { N0, N1, N2, N3, N4, NULL };
+static const Touche *const PLEIN_L[]    = { P0, P1, P2, P3, P4, NULL };
+static const Touche *const PLEIN_S[]    = { Q0, Q1, Q2, Q3, Q4, NULL };
+static const Touche *const CONSOLE_L[]  = { CL0, CL1, CL2, CL3, CL4, CL5, NULL };
+static const Touche *const CONSOLE_A[]  = { CA0, CA1, CA2, CA3, CA4, CA5, NULL };
+static const Touche *const CONSOLE_C[]  = { CC0, CC1, CC2, CC3, CC4, CC5, NULL };
+static const Touche *const CONSOLE_S[]  = { CS0, CS1, CS2, CS3, CS4, CS5, NULL };
+static const Touche *const CONSOLE_D[]  = { CD0, CD1, CD2, CD3, CD4, CD5, NULL };
 
-static const Couche COUCHES_PLEIN[]  = { {"lettres", PLEIN_L, 30},
-                                         {"altgr", PLEIN_S, 30}, {NULL, NULL, 0} };
-static const Couche COUCHES_GAUCHE[] = { {"lettres", GAUCHE_L, 20},
-                                         {"symboles", GAUCHE_S, 20}, {NULL, NULL, 0} };
-static const Couche COUCHES_DROITE[] = { {"pave", PAVE, 8}, {NULL, NULL, 0} };
+static const Couche COUCHES_PLEIN[]     = { {"lettres", PLEIN_L, 30},
+                                            {"altgr", PLEIN_S, 30}, {NULL, NULL, 0} };
+static const Couche COUCHES_CONSOLE_G[] = { {"lettres", CONSOLE_L, 10},
+                                            {"accents", CONSOLE_A, 10},
+                                            {"chiffres", CONSOLE_C, 10},
+                                            {"symboles", CONSOLE_S, 10}, {NULL, NULL, 0} };
+static const Couche COUCHES_CONSOLE_D[] = { {"fonctions", CONSOLE_D, 12}, {NULL, NULL, 0} };
 
 /* --- Les touches mortes --------------------------------------------------
  * Celles du clavier physique français, et elles seules. */
@@ -199,13 +272,13 @@ static const Composition COMPOSITIONS[] = {
  * L'état
  * ========================================================================= */
 typedef enum { MAJ_NON, MAJ_UNE, MAJ_VERROU } EtatMaj;
-typedef enum { MODE_PLEIN, MODE_DEUX_MAINS } Mode;
+typedef enum { MODE_PLEIN, MODE_CONSOLE } Mode;
 
 static struct {
     GtkWidget *plein;           /* fenêtre du plein format                */
     GtkWidget *plein_interieur; /* sa largeur bornée                      */
     GtkWidget *plein_pile;
-    GtkWidget *gauche;          /* fenêtres du mode à deux mains          */
+    GtkWidget *gauche;          /* fenêtres du mode console               */
     GtkWidget *gauche_pile;
     GtkWidget *droite;
 
@@ -213,6 +286,14 @@ static struct {
     GPtrArray *boutons_maj;
     GPtrArray *boutons_verr;
     GPtrArray *boutons_morte;
+    GPtrArray *boutons_calque;
+
+    /* Les bascules du mode console — voir « Les bascules ». */
+    const Touche *calque_tenu;  /* bascule sous le pouce droit, ou NULL   */
+    gboolean   calque_servi;    /* une frappe à gauche pendant la tenue   */
+    const char *calque_avant;   /* couche gauche avant l'appui            */
+    gboolean   calque_une;      /* revenir aux lettres après une frappe   */
+    gint64     dernier_calque;
 
     Mode       mode;
     gboolean   ecrit;           /* le clavier virtuel est branché         */
@@ -305,6 +386,20 @@ afficher_etat (void)
     marquer (K.boutons_maj, "verrouille", K.maj == MAJ_VERROU);
     marquer (K.boutons_verr, "active", K.verr_maj);
     marquer (K.boutons_morte, "active", K.morte != NULL);
+
+    /* Une bascule s'allume quand sa couche est à gauche ; elle se souligne
+     * quand la couche TIENT — verrouillée, ou chiffres par nature. */
+    const char *couche = K.gauche_pile != NULL
+        ? gtk_stack_get_visible_child_name (GTK_STACK (K.gauche_pile)) : NULL;
+    for (guint i = 0; K.boutons_calque != NULL && i < K.boutons_calque->len; i++) {
+        GtkWidget *b = g_ptr_array_index (K.boutons_calque, i);
+        const Touche *t = g_object_get_data (G_OBJECT (b), "touche");
+        gboolean ici = g_strcmp0 (couche, t->maj) == 0;
+        if (ici) gtk_widget_add_css_class (b, "active");
+        else     gtk_widget_remove_css_class (b, "active");
+        if (ici && !K.calque_une) gtk_widget_add_css_class (b, "verrouille");
+        else                      gtk_widget_remove_css_class (b, "verrouille");
+    }
 }
 
 static void
@@ -322,6 +417,108 @@ maj_consommer (void)
 {
     if (K.maj == MAJ_UNE)
         maj_poser (MAJ_NON);
+}
+
+/* =========================================================================
+ * Les bascules du mode console
+ *
+ * Le pouce droit choisit ce qu'écrit le gauche. Deux gestes, et le premier
+ * suffit pour commencer :
+ *
+ *   APPUI BREF    la couche s'affiche à gauche. Accents et symboles
+ *                 reviennent aux lettres après UNE frappe — on n'en tape
+ *                 guère deux d'affilée ; un double appui les verrouille.
+ *                 Les chiffres tiennent jusqu'au prochain appui. Appuyer sur
+ *                 la bascule de la couche affichée revient aux lettres.
+ *   APPUI TENU    la couche s'affiche le temps qu'on la tient, et le pouce
+ *                 gauche tape dedans. Au relâcher, retour aux lettres. C'est
+ *                 le geste des claviers à calques : le plus rapide une fois
+ *                 en main.
+ *
+ * Les deux se distinguent au relâcher : si une touche a été frappée à
+ * gauche pendant la tenue, c'était une tenue ; sinon, un appui bref.
+ *
+ * Par un GtkGestureDrag et non par « clicked » : le pouce qui tient bouge
+ * un peu, et un clic se dissout passé quelques pixels — la couche resterait
+ * affichée sans que rien la ramène. Un glisser, lui, finit toujours.
+ * ========================================================================= */
+static void
+calque_montrer (const char *couche)
+{
+    gtk_stack_set_visible_child_name (GTK_STACK (K.gauche_pile), couche);
+    afficher_etat ();
+}
+
+/* Une frappe à gauche vient d'avoir lieu. */
+static void
+calque_frappe (void)
+{
+    if (K.calque_tenu != NULL) {
+        K.calque_servi = TRUE;
+    } else if (K.calque_une) {
+        K.calque_une = FALSE;
+        calque_montrer ("lettres");
+    }
+}
+
+static void
+on_calque_appui (GtkGestureDrag *g, double x, double y, gpointer data)
+{
+    (void) x; (void) y;
+    const Touche *t = data;
+    /* Réclamé : le bouton ne fera rien de son côté. L'allumage de la touche
+     * passe par la classe « tenue », que GTK ne retirera pas. */
+    gtk_gesture_set_state (GTK_GESTURE (g), GTK_EVENT_SEQUENCE_CLAIMED);
+    gtk_widget_add_css_class (gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (g)),
+                              "tenue");
+    K.calque_avant = gtk_stack_get_visible_child_name (GTK_STACK (K.gauche_pile));
+    K.calque_tenu = t;
+    K.calque_servi = FALSE;
+    calque_montrer (t->maj);
+}
+
+static void
+calque_lacher (GtkGesture *g, const Touche *t)
+{
+    gtk_widget_remove_css_class (gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (g)),
+                                 "tenue");
+    if (K.calque_tenu != t)
+        return;                      /* déjà relâchée (fin puis annulation) */
+    K.calque_tenu = NULL;
+
+    gint64 maintenant = g_get_monotonic_time ();
+    if (K.calque_servi) {
+        /* Une tenue : la couche ne valait que pendant. */
+        K.calque_une = FALSE;
+        calque_montrer ("lettres");
+    } else if (g_strcmp0 (K.calque_avant, t->maj) != 0) {
+        /* Appui bref sur une autre couche : elle s'affiche. */
+        K.calque_une = t->drapeau == CALQUE_UNE;
+        calque_montrer (t->maj);
+    } else if (K.calque_une && maintenant - K.dernier_calque < DOUBLE_APPUI_US) {
+        /* Second appui rapproché sur la couche « une frappe » : verrou. */
+        K.calque_une = FALSE;
+        afficher_etat ();
+    } else {
+        /* Appui sur la bascule de la couche affichée : retour aux lettres. */
+        K.calque_une = FALSE;
+        calque_montrer ("lettres");
+    }
+    K.dernier_calque = maintenant;
+}
+
+static void
+on_calque_fin (GtkGestureDrag *g, double dx, double dy, gpointer data)
+{
+    (void) dx; (void) dy;
+    calque_lacher (GTK_GESTURE (g), data);
+}
+
+static void
+on_calque_annule (GtkGesture *g, GdkEventSequence *s, gpointer data)
+{
+    (void) s;
+    calque_lacher (g, data);
 }
 
 /* =========================================================================
@@ -380,6 +577,7 @@ frapper (const Touche *t, GtkWidget *bouton)
         g_autofree char *libre = NULL;
         ecrire (sortie (t, &libre));
         maj_consommer ();
+        calque_frappe ();
         break;
     }
     case T_MORTE: {
@@ -457,6 +655,7 @@ frapper (const Touche *t, GtkWidget *bouton)
     case T_MASQUER:
         masquer_sur_demande ();
         break;
+    case T_CALQUE:          /* par son geste, voir « Les bascules »       */
     case T_VIDE:
         break;
     }
@@ -545,7 +744,20 @@ touche_neuve (const Touche *t)
 
     /* Les tables sont statiques : elles survivent aux boutons. */
     g_object_set_data (G_OBJECT (b), "touche", (gpointer) t);
-    g_signal_connect (b, "clicked", G_CALLBACK (on_clic), (gpointer) t);
+    if (t->genre == T_CALQUE) {
+        /* En phase de capture : le geste passe avant le clic du bouton, et
+         * le réclame. Voir « Les bascules » pour le pourquoi du glisser. */
+        GtkGesture *geste = gtk_gesture_drag_new ();
+        gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (geste),
+                                                    GTK_PHASE_CAPTURE);
+        g_signal_connect (geste, "drag-begin", G_CALLBACK (on_calque_appui), (gpointer) t);
+        g_signal_connect (geste, "drag-end", G_CALLBACK (on_calque_fin), (gpointer) t);
+        g_signal_connect (geste, "cancel", G_CALLBACK (on_calque_annule), (gpointer) t);
+        gtk_widget_add_controller (b, GTK_EVENT_CONTROLLER (geste));
+        g_ptr_array_add (K.boutons_calque, b);
+    } else {
+        g_signal_connect (b, "clicked", G_CALLBACK (on_clic), (gpointer) t);
+    }
 
     if (t->genre == T_EFFACER || t->genre == T_GAUCHE || t->genre == T_DROITE) {
         GtkGesture *tenue = gtk_gesture_long_press_new ();
@@ -569,11 +781,11 @@ touche_neuve (const Touche *t)
 }
 
 static GtkWidget *
-grille (const Couche *c)
+grille (const Couche *c, int espace)
 {
     GtkWidget *g = gtk_grid_new ();
-    gtk_grid_set_row_spacing (GTK_GRID (g), 8);
-    gtk_grid_set_column_spacing (GTK_GRID (g), 8);
+    gtk_grid_set_row_spacing (GTK_GRID (g), espace);
+    gtk_grid_set_column_spacing (GTK_GRID (g), espace);
     gtk_grid_set_row_homogeneous (GTK_GRID (g), TRUE);
     gtk_grid_set_column_homogeneous (GTK_GRID (g), TRUE);
 
@@ -593,19 +805,23 @@ grille (const Couche *c)
     return g;
 }
 
+/* `espace` : entre deux colonnes de la grille. Chaque touche en couvre
+ * deux, l'espace compte donc aussi DANS la touche : à 8 px sur les dix
+ * colonnes de la console, les touches tomberaient à 50 px (8 mm) ; à 4 px,
+ * 54 px. Le plein format, qui a de la place, garde 8. */
 static GtkWidget *
-pile_neuve (const Couche *couches)
+pile_neuve (const Couche *couches, int espace)
 {
     GtkWidget *pile = gtk_stack_new ();
     gtk_widget_add_css_class (pile, "clavier");
     for (const Couche *c = couches; c->nom != NULL; c++)
-        gtk_stack_add_named (GTK_STACK (pile), grille (c), c->nom);
+        gtk_stack_add_named (GTK_STACK (pile), grille (c, espace), c->nom);
     return pile;
 }
 
 /* --- Les chiffres du plein format : le pavé de l'écran de connexion ------ */
-static const Touche ENTREE_PAVE  = {"↵",   NULL,      T_ENTREE, 0, 0};
-static const Touche LETTRES_PAVE = {"abc", "lettres", T_COUCHE, 0, 0};
+static const Touche ENTREE_PAVE  = {"↵",   NULL,      T_ENTREE, 0, 0, 0};
+static const Touche LETTRES_PAVE = {"abc", "lettres", T_COUCHE, 0, 0, 0};
 
 static void
 on_pave (char c, gpointer data)
@@ -642,7 +858,7 @@ chiffres (void)
 
 /* --- Les fenêtres --------------------------------------------------------- */
 static GtkWidget *
-fenetre_neuve (GtkApplication *app, gboolean gauche, gboolean droite,
+fenetre_neuve (GtkApplication *app, gboolean haut, gboolean gauche, gboolean droite,
                int zone, const char *nom, const char *classe, GtkWidget *contenu)
 {
     GtkWidget *f = gtk_window_new ();
@@ -654,6 +870,7 @@ fenetre_neuve (GtkApplication *app, gboolean gauche, gboolean droite,
      * plein écran (vu au banc, voir CLAUDE.md), et un champ peut vivre dans
      * une fenêtre plein écran. */
     gtk_layer_set_layer (GTK_WINDOW (f), GTK_LAYER_SHELL_LAYER_OVERLAY);
+    gtk_layer_set_anchor (GTK_WINDOW (f), GTK_LAYER_SHELL_EDGE_TOP, haut);
     gtk_layer_set_anchor (GTK_WINDOW (f), GTK_LAYER_SHELL_EDGE_BOTTOM, TRUE);
     gtk_layer_set_anchor (GTK_WINDOW (f), GTK_LAYER_SHELL_EDGE_LEFT, gauche);
     gtk_layer_set_anchor (GTK_WINDOW (f), GTK_LAYER_SHELL_EDGE_RIGHT, droite);
@@ -706,22 +923,28 @@ au_repos (void)
     gtk_stack_set_visible_child_name (GTK_STACK (K.gauche_pile), "lettres");
     K.morte = NULL;
     K.maj = MAJ_NON;
+    K.calque_une = FALSE;
+    K.calque_tenu = NULL;
     afficher_etat ();
 }
 
 static void
 appliquer (void)
 {
-    gboolean voir = K.ecrit && K.tablette && ((K.champ && !K.renvoye) || K.demande);
-
-    gboolean plein = voir && K.mode == MODE_PLEIN;
-    gboolean deux  = voir && K.mode == MODE_DEUX_MAINS;
+    /* Le plein format vient quand un champ le demande, ou sur demande. La
+     * console, elle, RESTE tant qu'elle est choisie — décision de
+     * l'utilisateur : comme les manettes d'une console, et pour que l'écran
+     * ne se recadre pas à chaque champ touché. ⌄ la range jusqu'au champ
+     * suivant, ou jusqu'à l'icône du dock. */
+    gboolean plein = K.ecrit && K.tablette && K.mode == MODE_PLEIN
+                   && ((K.champ && !K.renvoye) || K.demande);
+    gboolean deux  = K.ecrit && K.tablette && K.mode == MODE_CONSOLE && !K.renvoye;
+    gboolean voir  = plein || deux;
 
     if (plein) {
         ajuster_largeur ();
         /* Un champ qui attend des chiffres ouvre le pavé ; tout autre revient
-         * aux lettres s'il en héritait. En mode deux mains, le pavé est déjà
-         * sous le pouce droit. */
+         * aux lettres s'il en héritait. */
         const char *voulue = K.but == SHELL_SAISIE_CHIFFRES && K.champ ? "chiffres" : NULL;
         const char *courante = gtk_stack_get_visible_child_name (GTK_STACK (K.plein_pile));
         if (voulue != NULL)
@@ -806,7 +1029,7 @@ mode_lire (void)
         return;
     }
     g_autofree char *d = g_key_file_get_string (kf, "clavier", "disposition", NULL);
-    K.mode = g_strcmp0 (d, "deux-mains") == 0 ? MODE_DEUX_MAINS : MODE_PLEIN;
+    K.mode = g_strcmp0 (d, "console") == 0 ? MODE_CONSOLE : MODE_PLEIN;
 }
 
 static void
@@ -817,7 +1040,7 @@ mode_ecrire (void)
     g_autoptr(GKeyFile) kf = g_key_file_new ();
     g_autoptr(GError) err = NULL;
     g_key_file_set_string (kf, "clavier", "disposition",
-                           K.mode == MODE_DEUX_MAINS ? "deux-mains" : "plein");
+                           K.mode == MODE_CONSOLE ? "console" : "plein");
     if (g_mkdir_with_parents (dossier, 0700) != 0
         || !g_key_file_save_to_file (kf, chemin, &err))
         g_warning ("clavier à l'écran : disposition non gardée (%s) : %s", chemin,
@@ -827,11 +1050,15 @@ mode_ecrire (void)
 static void
 changer_mode (void)
 {
-    K.mode = K.mode == MODE_PLEIN ? MODE_DEUX_MAINS : MODE_PLEIN;
+    K.mode = K.mode == MODE_PLEIN ? MODE_CONSOLE : MODE_PLEIN;
     au_repos ();
     mode_ecrire ();
     g_message ("clavier à l'écran : disposition %s",
-               K.mode == MODE_PLEIN ? "plein format" : "à deux mains");
+               K.mode == MODE_PLEIN ? "plein format" : "console");
+    /* On vient de toucher le clavier : il reste à l'écran dans sa nouvelle
+     * forme, champ ou non. */
+    K.demande = TRUE;
+    K.renvoye = FALSE;
     appliquer ();
 }
 
@@ -857,7 +1084,7 @@ static GPtrArray *
 tous_les_textes (void)
 {
     GPtrArray *a = g_ptr_array_new_with_free_func (g_free);
-    const Couche *const groupes[] = { COUCHES_PLEIN, COUCHES_GAUCHE, COUCHES_DROITE };
+    const Couche *const groupes[] = { COUCHES_PLEIN, COUCHES_CONSOLE_G, COUCHES_CONSOLE_D };
 
     ajouter_texte (a, " ");
     for (guint g = 0; g < G_N_ELEMENTS (groupes); g++)
@@ -890,28 +1117,37 @@ shell_clavier_ecran_init (GtkApplication *app)
     K.boutons_maj = g_ptr_array_new ();
     K.boutons_verr = g_ptr_array_new ();
     K.boutons_morte = g_ptr_array_new ();
+    K.boutons_calque = g_ptr_array_new ();
     mode_lire ();
 
     /* Plein format : un bandeau sur toute la largeur, touches centrées. */
-    K.plein_pile = pile_neuve (COUCHES_PLEIN);
+    K.plein_pile = pile_neuve (COUCHES_PLEIN, 8);
     gtk_stack_add_named (GTK_STACK (K.plein_pile), chiffres (), "chiffres");
     K.plein_interieur = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
     gtk_widget_set_halign (K.plein_interieur, GTK_ALIGN_CENTER);
     gtk_box_append (GTK_BOX (K.plein_interieur), K.plein_pile);
-    K.plein = fenetre_neuve (app, TRUE, TRUE, 0, "claude-os-clavier",
+    K.plein = fenetre_neuve (app, FALSE, TRUE, TRUE, 0, "claude-os-clavier",
                              "clavier-plein", K.plein_interieur);
 
-    /* Deux mains. La gauche réserve sa hauteur, pour que le champ reste
-     * au-dessus ; la droite ne réserve rien (-1) : deux zones sur le même
-     * bord s'empileraient, et le pavé flotterait au-dessus des lettres. */
-    K.gauche_pile = pile_neuve (COUCHES_GAUCHE);
-    gtk_widget_set_size_request (K.gauche_pile, LARGEUR_GAUCHE, -1);
-    K.gauche = fenetre_neuve (app, TRUE, FALSE, 0, "claude-os-clavier-gauche",
-                              "clavier-gauche", K.gauche_pile);
-    GtkWidget *pave = pile_neuve (COUCHES_DROITE);
-    gtk_widget_set_size_request (pave, LARGEUR_DROITE, -1);
-    K.droite = fenetre_neuve (app, FALSE, TRUE, -1, "claude-os-clavier-droite",
-                              "clavier-droite", pave);
+    /* La console : deux colonnes sur toute la hauteur, collées aux bords,
+     * chacune réservant sa largeur. labwc recadre alors de lui-même les
+     * fenêtres agrandies entre elles — c'est le « recadrage » demandé.
+     * Les touches descendent de HAUT_GAUCHE / HAUT_DROITE, dans la bande que les pouces
+     * atteignent ; le reste de la colonne est vide. */
+    K.gauche_pile = pile_neuve (COUCHES_CONSOLE_G, 4);
+    gtk_widget_set_size_request (K.gauche_pile, LARGEUR_CONSOLE - 12, -1);
+    gtk_widget_set_margin_top (K.gauche_pile, HAUT_GAUCHE);
+    gtk_widget_set_valign (K.gauche_pile, GTK_ALIGN_START);
+    gtk_widget_set_vexpand (K.gauche_pile, FALSE);
+    K.gauche = fenetre_neuve (app, TRUE, TRUE, FALSE, 0, "claude-os-clavier-gauche",
+                              "console-gauche", K.gauche_pile);
+    GtkWidget *fonctions = pile_neuve (COUCHES_CONSOLE_D, 4);
+    gtk_widget_set_size_request (fonctions, LARGEUR_CONSOLE - 12, -1);
+    gtk_widget_set_margin_top (fonctions, HAUT_DROITE);
+    gtk_widget_set_valign (fonctions, GTK_ALIGN_START);
+    gtk_widget_set_vexpand (fonctions, FALSE);
+    K.droite = fenetre_neuve (app, TRUE, FALSE, TRUE, 0, "claude-os-clavier-droite",
+                              "console-droite", fonctions);
 
     afficher_etat ();
 
