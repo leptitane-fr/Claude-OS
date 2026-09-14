@@ -240,6 +240,11 @@ reprogrammer (int secondes)
     B.source = g_timeout_add_seconds (secondes, on_lecture, NULL);
 }
 
+/* LES TEXTES CI-DESSOUS SONT LUS PAR UN HUMAIN, ET PORTENT DONC LEURS
+ * ACCENTS -- contrairement aux commentaires de ce fichier, qui n'en ont pas.
+ * La regle du projet vaut pour le code, pas pour ce qui s'affiche : la
+ * premiere notification livree disait « Pensez a brancher », et cela se
+ * voyait a l'ecran. */
 static void
 franchir (Seuil s, int pourcent, double heures)
 {
@@ -247,21 +252,21 @@ franchir (Seuil s, int pourcent, double heures)
 
     g_autofree char *reste = NULL;
     if (heures > 0.0)
-        reste = g_strdup_printf (" Environ %d h %02d avant l'arret.",
+        reste = g_strdup_printf (" Environ %d h %02d avant l'arrêt.",
                                  (int) heures, (int) ((heures - (int) heures) * 60));
 
     g_autofree char *corps = NULL;
 
     switch (s) {
     case SEUIL_PREVENIR:
-        corps = g_strdup_printf ("Il reste %d %%.%s Pensez a brancher.",
+        corps = g_strdup_printf ("Il reste %d %%.%s Pensez à brancher.",
                                  pourcent, reste ? reste : "");
         prevenir ("Batterie faible", corps, FALSE);
         break;
     case SEUIL_INSISTER:
         corps = g_strdup_printf ("Il reste %d %%.%s Branchez maintenant.",
                                  pourcent, reste ? reste : "");
-        prevenir ("Batterie tres faible", corps, TRUE);
+        prevenir ("Batterie très faible", corps, TRUE);
         break;
     case SEUIL_ABRI:
         if (B.abri_engage)
