@@ -1463,6 +1463,42 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
            LISTE_DUREE (cfg->energie_verrou_delai, &M_VERROU_D));
     gtk_box_append (GTK_BOX (pile), rep);
 
+    /* --- La batterie ---
+     *
+     * Cette carte existe parce que RIEN ne surveillait la charge : ni
+     * upower, ni demon d'energie, et le seuil ACPI laisse a zero. Voir
+     * batterie.h : le 14 septembre 2026, la machine a redemarre cent fois de
+     * suite faute d'avoir su dire qu'elle manquait de courant. */
+    GtkWidget *bat = carte ("Batterie");
+    ligne (bat, "Prévenir à",
+           "Un avis discret, qui disparaît de lui-même. C'est le moment où "
+           "l'on cherche une prise sans se presser.",
+           liste (PCT_PREV, PCT_PREV_NOM, PCT_PREV_N,
+                  cfg->energie_bat_prevenir, &M_BAT_PREV));
+    ligne (bat, "Insister à",
+           "Un avis qui reste à l'écran tant qu'on ne l'a pas lu.",
+           liste (PCT_INS, PCT_INS_NOM, PCT_INS_N,
+                  cfg->energie_bat_insister, &M_BAT_INS));
+    ligne (bat, "Se mettre à l'abri à",
+           "Le dernier seuil, celui qui agit. En dessous, la machine ne "
+           "prévient plus : elle applique le choix ci-dessous.",
+           liste (PCT_ABRI, PCT_ABRI_NOM, PCT_ABRI_N,
+                  cfg->energie_bat_abri, &M_BAT_ABRI));
+
+    GtkWidget *d_abri = gtk_label_new (shell_batterie_abri_actif (cfg)->resume);
+    gtk_widget_add_css_class (d_abri, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (d_abri), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (d_abri), 46);
+    gtk_widget_set_halign (d_abri, GTK_ALIGN_START);
+
+    ligne (bat, "Au dernier seuil",
+           "Une application qui a demandé à ne pas être interrompue l'emporte "
+           "encore ici : on ne coupe pas la parole à un enregistrement pour "
+           "une estimation de pourcentage.",
+           liste_abris (cfg, d_abri));
+    gtk_box_append (GTK_BOX (bat), d_abri);
+    gtk_box_append (GTK_BOX (pile), bat);
+
     /* --- Un volet par mode, dans l'ordre de la table --- */
     const ShellModeEnergie *modes = shell_energie_modes ();
 
@@ -1508,42 +1544,6 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
     ligne (nom, "Veille de l'ordinateur après", NULL,
            LISTE_DUREE (cfg->energie_nomade_suspendre, &M_NOM_SUS));
     gtk_box_append (GTK_BOX (pile), nom);
-
-    /* --- La batterie ---
-     *
-     * Cette carte existe parce que RIEN ne surveillait la charge : ni
-     * upower, ni demon d'energie, et le seuil ACPI laisse a zero. Voir
-     * batterie.h : le 14 septembre 2026, la machine a redemarre cent fois de
-     * suite faute d'avoir su dire qu'elle manquait de courant. */
-    GtkWidget *bat = carte ("Batterie");
-    ligne (bat, "Prévenir à",
-           "Un avis discret, qui disparaît de lui-même. C'est le moment où "
-           "l'on cherche une prise sans se presser.",
-           liste (PCT_PREV, PCT_PREV_NOM, PCT_PREV_N,
-                  cfg->energie_bat_prevenir, &M_BAT_PREV));
-    ligne (bat, "Insister à",
-           "Un avis qui reste à l'écran tant qu'on ne l'a pas lu.",
-           liste (PCT_INS, PCT_INS_NOM, PCT_INS_N,
-                  cfg->energie_bat_insister, &M_BAT_INS));
-    ligne (bat, "Se mettre à l'abri à",
-           "Le dernier seuil, celui qui agit. En dessous, la machine ne "
-           "prévient plus : elle applique le choix ci-dessous.",
-           liste (PCT_ABRI, PCT_ABRI_NOM, PCT_ABRI_N,
-                  cfg->energie_bat_abri, &M_BAT_ABRI));
-
-    GtkWidget *d_abri = gtk_label_new (shell_batterie_abri_actif (cfg)->resume);
-    gtk_widget_add_css_class (d_abri, "reglages-detail");
-    gtk_label_set_wrap (GTK_LABEL (d_abri), TRUE);
-    gtk_label_set_max_width_chars (GTK_LABEL (d_abri), 46);
-    gtk_widget_set_halign (d_abri, GTK_ALIGN_START);
-
-    ligne (bat, "Au dernier seuil",
-           "Une application qui a demandé à ne pas être interrompue l'emporte "
-           "encore ici : on ne coupe pas la parole à un enregistrement pour "
-           "une estimation de pourcentage.",
-           liste_abris (cfg, d_abri));
-    gtk_box_append (GTK_BOX (bat), d_abri);
-    gtk_box_append (GTK_BOX (pile), bat);
 
     /* --- Ce qui n'est pas reglable, et pourquoi ---
      *
