@@ -102,7 +102,7 @@ cairo      = dependency('cairo')
 # processus, finissaient par se contredire. glissiere.c, l'animation de
 # sortie, n'est lie qu'aux deux composants qui s'en servent.
 commun = ['src/config.c', 'src/sysfs.c', 'src/modes-energie.c',
-          'src/abris-batterie.c']
+          'src/abris-batterie.c', 'src/actions-capot.c']
 
 # Repertoire des feuilles de style, resolu a la compilation.
 data_dir = get_option('prefix') / get_option('datadir') / 'claude-os-shell'
@@ -158,7 +158,7 @@ executable('claude-os-dock',
 executable('claude-os-status',
   'src/status.c', 'src/panel.c', 'src/console.c', 'src/notifications.c',
   'src/wifi.c', 'src/bluetooth.c', 'src/energie.c', 'src/retroeclairage.c',
-  'src/preavis.c', 'src/glissiere.c', 'src/batterie.c',
+  'src/preavis.c', 'src/glissiere.c', 'src/batterie.c', 'src/capot.c',
   idle_header, idle_code, commun,
   dependencies : [gtk, layershell, giounix, wlclient, pangocairo, m_dep],
   install : true)

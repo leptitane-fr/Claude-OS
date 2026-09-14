@@ -32,6 +32,7 @@
 #include "notifications.h"
 #include "energie.h"
 #include "batterie.h"
+#include "capot.h"
 #include "preavis.h"
 #include "panel.h"
 #include "sysfs.h"
@@ -408,6 +409,7 @@ on_config_reloaded (ShellConfig *cfg, gpointer data)
      * delais de veille doivent suivre sans qu'on relance quoi que ce soit. */
     shell_energie_reconfigurer (cfg);
     shell_batterie_reconfigurer (cfg);
+    shell_capot_reconfigurer (cfg);
     shell_config_free (cfg);
 }
 
@@ -636,6 +638,7 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     shell_energie_init (opt->cfg);
     shell_batterie_init (opt->cfg);
+    shell_capot_init (opt->cfg);
 
     if (opt->ouvrir)
         g_idle_add (open_panel_once, button);

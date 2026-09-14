@@ -85,6 +85,12 @@ typedef struct {
      *
      * « abri_action » dit ce que la machine fait au dernier seuil ; la table
      * des valeurs possibles vit dans abris-batterie.c, et fait foi. */
+    /* Ce que la fermeture du capot declenche -- voir capot.h. Le shell
+     * prend la main sur logind pour que ce choix vive ici, avec les autres,
+     * plutot que dans /etc. La table des valeurs possibles est dans
+     * actions-capot.c, et fait foi. */
+    char     *energie_capot_action;
+
     int       energie_bat_prevenir;
     int       energie_bat_insister;
     int       energie_bat_abri;

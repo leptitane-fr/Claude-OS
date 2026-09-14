@@ -175,6 +175,12 @@ shell_config_load (void)
     cfg->energie_verrou_delai = 60;   /* une minute de sursis */
     cfg->energie_suspendre_permis = FALSE;
 
+    /* CAPOT. « suspendre » : exactement ce que logind faisait avant que le
+     * shell ne prenne la main. Le defaut ne change donc rien au comportement
+     * de la machine -- il attend que la veille profonde soit eprouvee pour
+     * qu'on le porte a « suspendre-hiberner » en connaissance de cause. */
+    cfg->energie_capot_action    = g_strdup ("suspendre");
+
     /* Seuils de charge. 20 / 10 / 5 : les valeurs usuelles, et a 5 % il
      * reste largement de quoi ecrire la memoire sur le disque avant la
      * coupure. L'abri par defaut est l'hibernation, seul etat qui survive a
@@ -246,6 +252,13 @@ shell_config_load (void)
     lire_bool   (kf, "verrou",           &cfg->energie_verrou);
     lire_entier (kf, "verrou_delai",     &cfg->energie_verrou_delai);
 
+    g_autofree char *capot = g_key_file_get_string (kf, "energie",
+                                                    "capot_action", NULL);
+    if (capot != NULL && *capot != '\0') {
+        g_free (cfg->energie_capot_action);
+        cfg->energie_capot_action = g_steal_pointer (&capot);
+    }
+
     lire_entier (kf, "batterie_prevenir", &cfg->energie_bat_prevenir);
     lire_entier (kf, "batterie_insister", &cfg->energie_bat_insister);
     lire_entier (kf, "batterie_abri",     &cfg->energie_bat_abri);
@@ -257,6 +270,7 @@ shell_config_load (void)
                                                    "batterie_abri_action", NULL);
     if (abri != NULL && *abri != '\0') {
         g_free (cfg->energie_bat_abri_action);
+    g_free (cfg->energie_capot_action);
         cfg->energie_bat_abri_action = g_steal_pointer (&abri);
     }
 
@@ -309,6 +323,7 @@ shell_config_free (ShellConfig *cfg)
     g_free (cfg->wallpaper);
     g_free (cfg->energie_mode);
     g_free (cfg->energie_bat_abri_action);
+    g_free (cfg->energie_capot_action);
     g_free (cfg);
 }
 
@@ -348,6 +363,9 @@ shell_config_save (const ShellConfig *cfg, GError **error)
     g_key_file_set_integer (kf, "energie", "verrou_delai", cfg->energie_verrou_delai);
     g_key_file_set_boolean (kf, "energie", "suspendre_permis",
                             cfg->energie_suspendre_permis);
+    g_key_file_set_string  (kf, "energie", "capot_action",
+                            cfg->energie_capot_action ?
+                            cfg->energie_capot_action : "suspendre");
     g_key_file_set_integer (kf, "energie", "batterie_prevenir", cfg->energie_bat_prevenir);
     g_key_file_set_integer (kf, "energie", "batterie_insister", cfg->energie_bat_insister);
     g_key_file_set_integer (kf, "energie", "batterie_abri",     cfg->energie_bat_abri);

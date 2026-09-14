@@ -1,0 +1,42 @@
+# Claude OS — laisser la session lire le commutateur du capot.
+#
+# Le shell prend la main sur ce que déclenche la fermeture du capot, pour que
+# ce choix vive dans le panneau Énergie et non dans /etc/systemd/logind.conf
+# — un réglage d'usage ne devrait pas demander une élévation de privilèges.
+# Voir shell/src/capot.h pour le raisonnement.
+#
+# Pour cela, la barre d'état doit LIRE le commutateur. Sans cette règle, elle
+# ouvre le périphérique, reçoit EACCES, ne pose aucun inhibiteur, et le dit
+# dans shell.log ; logind garde alors la main et la machine se comporte
+# exactement comme avant. La dégradation est sûre, mais le réglage du panneau
+# reste sans effet.
+#
+# « uaccess » et non le groupe « input », pour la même raison que la règle du
+# mode tablette : le groupe ouvrirait TOUS les périphériques d'entrée —
+# clavier compris, donc la frappe — à tout programme du compte, et ne
+# prendrait effet qu'à la session suivante. uaccess donne une ACL au seul
+# utilisateur de la session active du siège, tout de suite, et sur ce seul
+# périphérique.
+#
+# LE CHOIX DU PÉRIPHÉRIQUE. Relevé le 14 septembre 2026 sur MADOO, deux
+# périphériques portent SW_LID :
+#
+#   - « Lid Switch » (ACPI PNP0C0D, event7) ne porte QUE lui. C'est celui-ci.
+#   - « cros_ec_buttons » (event2) le porte aussi, mais avec les boutons
+#     d'alimentation et de volume : l'ouvrir exposerait plus que nécessaire.
+#
+# Le même raisonnement que pour « Tablet Mode Switch » : on ouvre le
+# périphérique qui ne dit que ce qu'on veut savoir.
+#
+# Préfixe 70 : la règle doit poser l'étiquette AVANT 73-seat-late.rules, qui
+# applique les ACL. Posée après, elle ne ferait rien — sans un mot.
+#
+# udev ne rejoue pas un périphérique déjà présent : après déploiement, l'ACL
+# n'est posée qu'au démarrage suivant, ou par
+#   udevadm control --reload && udevadm trigger --action=change \
+#       --subsystem-match=input --sysname-match='event*'
+#
+# Ce que cela expose : savoir si le capot est ouvert. Un programme du compte
+# pourrait aussi « saisir » le périphérique (EVIOCGRAB) et en priver logind.
+# Aucune touche ne passe par lui.
+SUBSYSTEM=="input", KERNEL=="event*", ATTRS{name}=="Lid Switch", TAG+="uaccess"

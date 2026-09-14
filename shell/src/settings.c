@@ -23,6 +23,7 @@
 #include "config.h"
 #include "energie.h"   /* la table des modes, definie une seule fois */
 #include "batterie.h"  /* la table des abris, de meme */
+#include "capot.h"     /* et celle des actions du capot */
 #include "reseau.h"
 
 /* -------------------------------------------------------------------------
@@ -1224,6 +1225,9 @@ static void set_auto_att   (ShellConfig *c, gpointer d) { c->energie_auto_attenu
 static void set_auto_ete   (ShellConfig *c, gpointer d) { c->energie_auto_eteindre  = GPOINTER_TO_INT (d); }
 static void set_auto_sus   (ShellConfig *c, gpointer d) { c->energie_auto_suspendre = GPOINTER_TO_INT (d); }
 
+static void set_capot      (ShellConfig *c, gpointer d) { g_free (c->energie_capot_action);
+                                                          c->energie_capot_action = g_strdup (d); }
+
 static void set_bat_prev   (ShellConfig *c, gpointer d) { c->energie_bat_prevenir = GPOINTER_TO_INT (d); }
 static void set_bat_ins    (ShellConfig *c, gpointer d) { c->energie_bat_insister = GPOINTER_TO_INT (d); }
 static void set_bat_abri   (ShellConfig *c, gpointer d) { c->energie_bat_abri     = GPOINTER_TO_INT (d); }
@@ -1374,6 +1378,48 @@ on_choix_abri (GObject *dd, GParamSpec *ps, gpointer data)
     modifier (set_bat_act, (gpointer) abris[i].id);
 }
 
+static void
+on_choix_capot (GObject *dd, GParamSpec *ps, gpointer data)
+{
+    (void) ps;
+    guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
+    if (i == GTK_INVALID_LIST_POSITION)
+        return;
+
+    const ShellCapotAction *actions = shell_capot_actions ();
+    for (guint k = 0; k < i; k++)
+        if (actions[k].id == NULL)
+            return;
+    if (actions[i].id == NULL)
+        return;
+
+    GtkWidget *detail = data;
+    if (detail != NULL)
+        gtk_label_set_text (GTK_LABEL (detail), actions[i].resume);
+
+    modifier (set_capot, (gpointer) actions[i].id);
+}
+
+static GtkWidget *
+liste_capot (const ShellConfig *cfg, GtkWidget *detail)
+{
+    const ShellCapotAction *actions = shell_capot_actions ();
+    const ShellCapotAction *actif   = shell_capot_action_active (cfg);
+    GtkStringList          *noms    = gtk_string_list_new (NULL);
+    guint                   choisi  = 0;
+
+    for (guint i = 0; actions[i].id != NULL; i++) {
+        gtk_string_list_append (noms, actions[i].nom);
+        if (g_strcmp0 (actions[i].id, actif->id) == 0)
+            choisi = i;
+    }
+
+    GtkWidget *dd = gtk_drop_down_new (G_LIST_MODEL (noms), NULL);
+    gtk_drop_down_set_selected (GTK_DROP_DOWN (dd), choisi);
+    g_signal_connect (dd, "notify::selected", G_CALLBACK (on_choix_capot), detail);
+    return dd;
+}
+
 static GtkWidget *
 liste_abris (const ShellConfig *cfg, GtkWidget *detail)
 {
@@ -1462,6 +1508,27 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
            "verrouillage ne se déclenche pas : il s'ancre sur lui.",
            LISTE_DUREE (cfg->energie_verrou_delai, &M_VERROU_D));
     gtk_box_append (GTK_BOX (pile), rep);
+
+    /* --- Le capot ---
+     *
+     * Ce reglage n'existait pas : le capot appartenait a logind, donc a
+     * /etc, donc au meme comportement pour les trois modes. Le shell prend
+     * la main par un inhibiteur pour que le choix vive ici -- voir capot.h.
+     * S'il n'y arrive pas, la ligne reste affichee mais sans effet, et le
+     * journal dit pourquoi : c'est le seul endroit ou on peut le lire. */
+    GtkWidget *cap = carte ("Quand on rabat le capot");
+    GtkWidget *d_cap = gtk_label_new (shell_capot_action_active (cfg)->resume);
+    gtk_widget_add_css_class (d_cap, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (d_cap), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (d_cap), 46);
+    gtk_widget_set_halign (d_cap, GTK_ALIGN_START);
+
+    ligne (cap, "Fermeture du capot",
+           "L'ouvrir ne déclenche rien de plus : le réveil de la machine s'en "
+           "charge déjà.",
+           liste_capot (cfg, d_cap));
+    gtk_box_append (GTK_BOX (cap), d_cap);
+    gtk_box_append (GTK_BOX (pile), cap);
 
     /* --- La batterie ---
      *
