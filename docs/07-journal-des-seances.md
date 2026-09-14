@@ -1196,9 +1196,128 @@ le clavier. Si elle revient : relancer `tools/diag-tactile.py`, la mesurer
 
 ---
 
+## 14 septembre 2026 — la batterie, le capot, et un diagnostic faux depuis cinq jours
+
+### Ce qui a été démenti
+
+Depuis le 9 septembre, ce dépôt affirmait que **la reprise après
+suspension était cassée** : onze suspensions qui « n'avaient jamais
+repris », le journal s'arrêtant net sur `PM: suspend entry (s2idle)`.
+C'était faux, et l'utilisateur l'a dit d'emblée : « ce sont des pannes
+de batterie non alertées ». Le journal lui a donné raison, ligne à ligne :
+
+```
+07:23:20  Lid closed.
+07:23:42  PM: suspend entry (s2idle)
+07:24:00  Lid opened.  ->  PM: suspend exit
+```
+
+**La reprise fonctionne.** Si le journal s'arrêtait sur `suspend entry`,
+c'est que la machine MOURAIT en veille, faute de courant.
+
+Et la preuve en grand, le matin même : **101 démarrages enregistrés**,
+dont une centaine entre 05:39 et 07:23, par cycles réguliers de
+64 secondes — démarrer, vivre 28 secondes, se rendormir capot fermé,
+mourir. Une machine à plat qui n'arrivait pas à se recharger parce
+qu'elle se rendormait à chaque fois qu'elle revenait.
+
+**LA LEÇON DE MÉTHODE, et c'est la même qu'au 13 septembre avec la zone
+morte tactile :** un symptôme qui a deux causes possibles n'en désigne
+aucune. Un journal tronqué ne dit pas pourquoi il est tronqué, et
+l'identifiant de démarrage neuf — le seul indice retenu à l'époque —
+est exactement le même qu'on meure de faim ou qu'on échoue à reprendre.
+Le diagnostic a tenu cinq jours et fermé un étage entier de la veille.
+
+### Ce que la machine ne savait pas faire
+
+**Rien ne surveillait la charge.** Ni upower, ni démon d'énergie, et le
+seuil ACPI `alarm` à zéro. Le shell ne lisait la batterie que lorsque la
+Console était ouverte — c'est-à-dire quand l'utilisateur regardait déjà.
+Une machine qui ne sait pas qu'elle va manquer de courant ne peut ni
+prévenir, ni se mettre à l'abri.
+
+**Et la veille profonde était à portée**, contrairement à ce que ce
+document affirmait. `resume=` est bien absent de la ligne de commande,
+mais Debian passe par l'initramfs : `RESUME=UUID=…` y était,
+`/sys/power/resume` valait `179:3`, le firmware annonçait `S0 S3 S4 S5`,
+et `PM: Image not found (code -22)` à chaque démarrage prouvait que le
+chemin de reprise s'exécutait déjà, sans rien trouver. logind répondait
+`CanHibernate` = yes avant qu'on ait rien tenté.
+
+**L'utilisateur a hiberné par le capot le jour même. La session est
+revenue intacte.**
+
+### Ce qui a été livré
+
+Trois modules, et une règle udev :
+
+- **`batterie.c`** — trois seuils réglables dans le panneau Énergie :
+  prévenir, insister, se mettre à l'abri. Les deux premiers parlent, le
+  dernier agit et demande d'abord à logind s'il sait faire.
+- **`capot.c`** — le capot repris à logind par un inhibiteur
+  `handle-lid-switch` en `block`, six actions dont « Suspendre, puis
+  hiberner ». Le commutateur est « Lid Switch » (ACPI PNP0C0D), qui ne
+  porte QUE `SW_LID` — le même raisonnement que pour « Tablet Mode
+  Switch », d'où `70-claude-os-capot.rules` et son `uaccess`.
+- **`energie.c`** — le verrouillage systématique avant sommeil, ancré
+  là et non dans le capot : le capot n'est qu'une des façons de
+  s'endormir, et logind émet `PrepareForSleep` pour toutes.
+- **`logind.c`** — la mécanique des inhibiteurs en un seul endroit, le
+  jour où un second module en a voulu un.
+
+### Il faut scruter, et c'est mesuré
+
+La règle du projet est « aucune scrutation ». `batterie.c` ne peut pas
+la tenir, et ce n'est pas une facilité : **deux voies sans scrutation ont
+été essayées, les deux muettes.** Sept minutes d'uevents `power_supply`
+pendant une charge active — neuf changements de pourcentage, **zéro
+événement** ; et le seuil matériel `alarm`, armé au-dessus de la charge
+courante donc franchi d'emblée, sans plus d'effet ni changement de
+`capacity_level`.
+
+L'intervalle de lecture se calcule donc depuis le temps restant avant le
+prochain seuil, plutôt que d'être fixe : loin du seuil la machine dort,
+près du seuil elle regarde souvent.
+
+### Trois fautes, et ce qui les a trouvées
+
+1. **Un `g_free` en trop**, glissé dans `shell_config_load` par un
+   remplacement de texte trop peu spécifique — il avait frappé deux
+   endroits au lieu d'un. Toute configuration contenant
+   `batterie_abri_action` faisait tomber la barre d'état sur
+   `free(): double free`. **AddressSanitizer l'a nommé en trente
+   secondes** : libéré `config.c:273`, relibéré `config.c:326`, douze
+   octets — la taille d'« automatique ».
+
+2. **Deux champs inversés** dans la table des actions du capot :
+   `{id, nom, resume, methode}` déclaré contre `{id, nom, methode,
+   resume}` écrit. Le panneau affichait « Suspend » en guise de phrase
+   explicative. **C'est la capture d'écran qui l'a trouvé**, pas la
+   relecture du code.
+
+3. **Des notifications sans accents** — « Pensez a brancher », « Batterie
+   tres faible ». La règle du dépôt veut des commentaires sans accents ;
+   je l'avais appliquée à ce que l'utilisateur lit. **Vue sur une vraie
+   notification**, là encore.
+
+Les deux dernières ont la même morale : **regarder l'écran trouve ce que
+relire le code ne trouve pas.** Elles rejoignent le `%.3f` de `preavis.c`,
+qui cassait le cadran depuis des jours dans un `shell.log` que personne
+ne lisait.
+
+---
+
 ## Ce qui reste à faire — au 10 septembre 2026
 
 Par ordre d'importance.
+
+> **AU 14 SEPTEMBRE 2026, DEUX DE CES POINTS SONT CADUCS.** Le point 2
+> (« la reprise après suspension est cassée ») reposait sur un diagnostic
+> faux : elle fonctionne, et ce qu'on lui imputait était des morts par
+> batterie vide. Le point 3 (« la veille profonde n'est pas réalisable »)
+> l'était aussi : elle a été éprouvée le 14 septembre. Voir la séance de
+> ce jour. Ils sont laissés ici tels quels — une liste qu'on récrit après
+> coup ne montre plus comment on s'est trompé.
 
 1. **Le clavier tactile du verrou.** Il n'y en a pas. En mode tablette,
    capot replié, il faut le clavier physique pour déverrouiller — ce qui

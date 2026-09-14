@@ -54,7 +54,108 @@ Fichier : `rootfs/etc/default/grub.d/99-claude-os.cfg`, appliqué par
 - **Brider le processeur.** Voir le boost ci-dessus.
 - **Réduire la fréquence de rafraîchissement.** Gain marginal, confort dégradé.
 
-## 5.5 Mesurer plutôt que supposer
+## 5.5 La fin de la charge : prévenir, puis se mettre à l'abri
+
+**Ajouté le 14 septembre 2026, parce que rien ne surveillait la batterie.**
+Ni upower, ni démon d'énergie, et le seuil ACPI `alarm` laissé à zéro : le
+shell ne lisait la charge que la Console ouverte, donc quand l'utilisateur
+regardait déjà. Une machine qui ne sait pas qu'elle va manquer de courant ne
+peut ni prévenir ni se mettre à l'abri — et celle-ci en est morte une
+centaine de fois dans la seule matinée du 14 (voir `docs/07`).
+
+### Trois seuils, et seul le dernier agit
+
+Réglables dans le panneau Énergie, parce que ce sont des habitudes de travail
+et non des constantes physiques : qui reste près d'une prise veut qu'on le
+laisse tranquille, qui travaille en déplacement veut être prévenu tôt.
+
+| Seuil | Défaut | Ce qui se passe |
+|---|---|---|
+| Prévenir | 20 % | Un avis qui disparaît de lui-même |
+| Insister | 10 % | Un avis qui reste à l'écran |
+| Se mettre à l'abri | 5 % | L'action choisie : hiberner, suspendre, éteindre, ou rien |
+
+Le dernier seuil **demande d'abord à logind s'il sait faire**, et se rabat
+sur une extinction propre sinon. Une hibernation impossible rend une erreur
+que personne ne lit, et la machine meurt quand même : le pire des deux
+mondes, puisqu'on se croyait à l'abri.
+
+### Pourquoi ce module SCRUTE, alors que la règle l'interdit
+
+`energie.c` tient la règle « aucune scrutation » grâce à
+`ext-idle-notify-v1` : le compositeur prévient. Pour la batterie, **personne
+ne prévient**, et ce n'est pas une supposition — deux voies ont été essayées
+le 14 septembre 2026, les deux muettes :
+
+1. **Les uevents du noyau.** Sept minutes d'écoute
+   (`udevadm monitor --subsystem-match=power_supply`) pendant une charge
+   active : **neuf changements de pourcentage, zéro événement.**
+2. **Le seuil matériel.** `/sys/class/power_supply/BAT0/alarm` armé
+   au-dessus de la charge courante, donc franchi d'emblée : aucun
+   événement, et `capacity_level` immobile sur « Normal ».
+
+Alors on scrute **le moins possible** : l'intervalle se calcule depuis le
+temps restant avant le prochain seuil (`charge_now / current_now` — cette
+batterie rapporte en charge, pas en énergie : elle n'a ni `energy_now` ni
+`power_now`), et l'on se réveille au quart de ce temps. Loin du seuil la
+machine dort, près du seuil elle regarde souvent. Sur secteur, une seule
+chose peut arriver — qu'on débranche — et elle n'est pas urgente :
+intervalle long et fixe.
+
+## 5.6 Le capot, et la veille profonde
+
+### Le capot appartient au panneau, plus à /etc
+
+Il était réglé par `HandleLidSwitch=suspend` dans `logind.conf` : un réglage
+système, le même pour les trois modes d'énergie, qu'on ne pouvait pas changer
+sans élévation de privilèges. Depuis le 14 septembre 2026, le shell pose un
+inhibiteur `handle-lid-switch` en **block** et décide lui-même, comme GNOME
+et KDE le font.
+
+**Contrepartie assumée** — la même que pour les notifications et la veille :
+si la barre d'état tombe, l'inhibiteur tombe avec elle et logind reprend la
+main, donc l'ancien comportement. Le capot ne devient jamais inerte, il
+redevient ce qu'il était. C'est aussi pourquoi l'inhibiteur n'est posé
+qu'APRÈS avoir réussi à lire le commutateur : prendre la main sans savoir
+lire le capot laisserait la machine allumée, repliée, dans un sac.
+
+### La veille profonde MARCHE — ce document disait l'inverse
+
+`docs/07` et `CLAUDE.md` l'ont longtemps déclarée irréalisable, sur la foi
+d'un `resume=` absent de la ligne de commande du noyau. C'était mal lu :
+**Debian passe par l'initramfs.**
+
+| Ce qu'on croyait | Ce que la machine dit (14 septembre 2026) |
+|---|---|
+| `resume=` absent → hiberner perdrait la session | `/etc/initramfs-tools/conf.d/resume` porte le bon UUID, `/sys/power/resume` vaut `179:3` |
+| hibernation non disponible | `/sys/power/state` contient `disk`, le firmware annonce `S0 S3 S4 S5` |
+| à vérifier | `PM: Image not found (code -22)` à chaque démarrage : le chemin de reprise **s'exécute déjà**, il ne trouve rien |
+| — | logind répond `CanHibernate` = **yes** |
+
+**Éprouvée le 14 septembre 2026** par la fermeture du capot : la session est
+partie sur le disque et revenue intacte.
+
+Reste un point non mesuré : le swap disque fait 3,0 Gio pour 3,8 Gio de RAM,
+et le zram de 1,9 Gio **ne compte pas** — ses pages sont en mémoire, donc
+dans l'image. L'image a tenu ce jour-là ; la marge sur une machine chargée
+n'est pas connue.
+
+### Le verrouillage avant sommeil
+
+Le premier essai d'hibernation a ramené la session **déverrouillée**. Depuis,
+le verrou est posé **avant** que la machine ne parte, et non au réveil : au
+réveil, l'écran se rallume sur ce qui était affiché. Un inhibiteur `sleep` en
+mode `delay` donne le temps de le faire — logind attend, au plus
+`InhibitDelayMaxSec`, et le shell ne lui prend que 400 ms.
+
+C'est ancré dans `energie.c` et non dans `capot.c` : le capot n'est qu'une
+des façons de s'endormir, et logind émet `PrepareForSleep` pour toutes.
+
+Ce n'est **pas** le réglage « Demander le code PIN au réveil », qui décide du
+sursis après l'extinction de l'écran, machine restée là sous les yeux de son
+propriétaire. Dormir est autre chose : on ferme, on emporte.
+
+## 5.7 Mesurer plutôt que supposer
 
 Aucun chiffre d'autonomie n'est avancé ici : il dépend de la dalle, de l'usure
 de la batterie et de l'usage réel. À faire une fois la machine installée :

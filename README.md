@@ -156,6 +156,14 @@ applications suivent la bascule clair/sombre sans être relancées — et la
 **luminosité par logind**, qui commande l'écran sans appartenance au groupe
 `video` ni réouverture de session.
 
+**Réglés le 14 septembre 2026 :** la **reprise après suspension**, qui
+n'avait jamais été cassée — ce qu'on lui imputait depuis le 9 septembre était
+des **pannes de batterie non signalées** ; la **veille profonde**, déclarée
+irréalisable à tort et éprouvée le jour même ; l'**alerte de batterie**, qui
+n'existait pas ; et le **capot**, qui appartenait à `/etc` et se règle
+désormais dans le panneau Énergie. Voir [`docs/05`](docs/05-energie.md) §5.5
+à 5.6 et le journal de cette séance.
+
 **Chantiers ouverts :**
 
 1. **L'affichage au démarrage**, qui n'apparaît qu'au premier contact du
