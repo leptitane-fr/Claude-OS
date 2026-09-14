@@ -94,6 +94,11 @@ le 14 septembre 2026, les deux muettes :
    au-dessus de la charge courante, donc franchi d'emblée : aucun
    événement, et `capacity_level` immobile sur « Normal ».
 
+Ces deux essais ayant eu lieu **en charge**, ils ont été refaits **en
+décharge** le même jour, le pilote pouvant se comporter autrement : quinze
+minutes, **quatre changements de pourcentage** (88 → 84 %), **zéro
+événement**. La question est close — cette machine ne prévient pas.
+
 Alors on scrute **le moins possible** : l'intervalle se calcule depuis le
 temps restant avant le prochain seuil (`charge_now / current_now` — cette
 batterie rapporte en charge, pas en énergie : elle n'a ni `energy_now` ni
@@ -139,6 +144,25 @@ Reste un point non mesuré : le swap disque fait 3,0 Gio pour 3,8 Gio de RAM,
 et le zram de 1,9 Gio **ne compte pas** — ses pages sont en mémoire, donc
 dans l'image. L'image a tenu ce jour-là ; la marge sur une machine chargée
 n'est pas connue.
+
+### L'ordinateur ne s'endort que sur la batterie
+
+**Décision de l'utilisateur, le 14 septembre 2026**, une fois la veille
+profonde éprouvée. La veille progressive garde ses deux premiers étages —
+l'écran s'atténue, puis s'éteint — mais **le troisième reste fermé** :
+l'ordinateur ne s'endort pas sur l'inactivité. Il s'endort quand la batterie
+atteint son seuil de mise à l'abri, et par hibernation.
+
+Le raisonnement : **l'inactivité de l'utilisateur ne dit rien de l'activité
+de la machine.** Une compilation, un téléchargement, un transfert vers le NAS
+continuent pendant qu'on va faire autre chose ; les interrompre au bout de
+quinze minutes serait une nuisance pour un gain nul quand la prise est au
+mur. La charge qui s'épuise, elle, est une vraie échéance — et c'est
+celle-là qui endort la machine.
+
+En conséquence, `energie.suspendre_permis` reste à `false`, et les durées
+« Veille de l'ordinateur après » des trois modes restent enregistrées sans
+effet. **Ce n'est pas un oubli** : c'est ce réglage-ci qui les ferme.
 
 ### Le verrouillage avant sommeil
 

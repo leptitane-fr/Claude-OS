@@ -1615,22 +1615,19 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
     /* --- Ce qui n'est pas reglable, et pourquoi ---
      *
      * Une case grisee sans explication passe pour une panne. Celle-ci dit
-     * ce qui manque et ce qu'il faudrait pour l'ouvrir.
-     *
-     * LE TEXTE A ETE FAUX PENDANT CINQ JOURS. Il accusait la reprise, sur la
-     * foi du 9 septembre 2026. Mesure du 14 : capot ouvert a 07:24:00, « PM:
-     * suspend exit » dans la foulee -- la reprise fonctionne, et ce que l'on
-     * prenait pour des reveils manques etait des morts par batterie vide.
-     * Le detail est en tete de energie.h. */
+     * pourquoi elle est fermee -- et depuis le 14 septembre 2026 la raison
+     * n'est plus une panne, mais un choix. Voir energie.h. */
     GtkWidget *ordi = carte ("Mise en veille de l'ordinateur");
     GtkWidget *etat = gtk_label_new (
         cfg->energie_suspendre_permis
         ? "Autorisée."
-        : "Verrouillée, le temps que la veille profonde soit éprouvée. La "
-          "reprise, elle, fonctionne : ce qu'on avait pris pour onze réveils "
-          "manqués le 9 septembre 2026 était onze pannes de batterie, que "
-          "rien ne signalait alors. Les durées ci-dessus sont enregistrées "
-          "mais sans effet.");
+        : "Fermée volontairement. L'écran s'atténue et s'éteint quand vous "
+          "vous absentez, mais l'ordinateur, lui, ne s'endort que lorsque la "
+          "batterie atteint son seuil de mise à l'abri — réglé plus haut. "
+          "Votre inactivité ne dit rien de ce que la machine est en train de "
+          "faire : une compilation ou un transfert continuent pendant que "
+          "vous allez ailleurs. Les durées ci-dessus restent enregistrées, "
+          "sans effet.");
     gtk_widget_add_css_class (etat, "reglages-detail");
     gtk_label_set_wrap (GTK_LABEL (etat), TRUE);
     gtk_label_set_max_width_chars (GTK_LABEL (etat), 46);

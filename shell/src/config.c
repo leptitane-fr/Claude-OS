@@ -173,12 +173,15 @@ shell_config_load (void)
     cfg->energie_preavis  = 10;    /* 10 s, commun aux trois modes */
     cfg->energie_verrou       = FALSE;
     cfg->energie_verrou_delai = 60;   /* une minute de sursis */
+    /* FALSE PAR CHOIX, pas par defiance : voir energie.h. L'ordinateur ne
+     * s'endort que sur la batterie, au seuil d'abri. */
     cfg->energie_suspendre_permis = FALSE;
 
     /* CAPOT. « suspendre » : exactement ce que logind faisait avant que le
-     * shell ne prenne la main. Le defaut ne change donc rien au comportement
-     * de la machine -- il attend que la veille profonde soit eprouvee pour
-     * qu'on le porte a « suspendre-hiberner » en connaissance de cause. */
+     * shell ne prenne la main -- le defaut ne change donc rien au
+     * comportement d'une machine neuve. La veille profonde ayant ete
+     * eprouvee le 14 septembre 2026, « suspendre-hiberner » et « hiberner »
+     * sont des choix sûrs ; ils restent des CHOIX, faits dans le panneau. */
     cfg->energie_capot_action    = g_strdup ("suspendre");
 
     /* Seuils de charge. 20 / 10 / 5 : les valeurs usuelles, et a 5 % il

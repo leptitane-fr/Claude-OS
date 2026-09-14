@@ -31,10 +31,13 @@
  *      donc franchi d'emblee : aucun evenement, capacity_level immobile
  *      sur « Normal ».
  *
- * Reserve honnete : ces deux essais ont eu lieu BATTERIE EN CHARGE. Le
- * pilote peut se comporter autrement en decharge, et l'essai reste a
- * refaire. Si un evenement apparait un jour, ce module doit s'y brancher et
- * la scrutation ci-dessous devient un simple filet.
+ * Ces deux essais ayant eu lieu batterie EN CHARGE, ils ont ete refaits EN
+ * DECHARGE le meme jour, le pilote pouvant se comporter autrement : quinze
+ * minutes, QUATRE changements de pourcentage (88 -> 84), ZERO evenement.
+ * La question est close -- cette machine ne previent pas.
+ *
+ * Si un evenement apparaissait un jour, ce module doit s'y brancher et la
+ * scrutation ci-dessous redeviendrait un simple filet.
  *
  * -------------------------------------------------------------------------
  * ALORS ON SCRUTE LE MOINS POSSIBLE : L'INTERVALLE SE CALCULE

@@ -35,12 +35,26 @@
  * a plat qui n'arrive pas a se recharger parce qu'elle se rendort a chaque
  * fois qu'elle revient.
  *
- * CE QUI MANQUE N'EST DONC PAS UNE REPRISE FIABLE, MAIS UN PREAVIS ET UNE
- * PORTE DE SORTIE : rien ne surveille la charge (ni upower, ni demon, et le
- * seuil ACPI « alarm » est a zero), et la machine n'a aucun moyen de se
- * mettre a l'abri avant la coupure. L'etage reste ferme le temps que les
- * deux soient en place -- voir batterie.h -- et non plus par defiance
- * envers le noyau.
+ * CE QUI MANQUAIT N'ETAIT DONC PAS UNE REPRISE FIABLE, MAIS UN PREAVIS ET
+ * UNE PORTE DE SORTIE. Les deux existent depuis : voir batterie.h.
+ *
+ * ET POURTANT L'ETAGE RESTE FERME -- MAINTENANT PAR CHOIX.
+ *
+ * Decision de l'utilisateur, le 14 septembre 2026, la veille profonde une
+ * fois eprouvee : l'ecran s'attenue et s'eteint sur l'inactivite, mais
+ * L'ORDINATEUR NE S'ENDORT QUE SUR LA BATTERIE -- au seuil d'abri regle
+ * dans le panneau Energie, et par hibernation.
+ *
+ * Le raisonnement se tient : l'inactivite de l'utilisateur ne dit rien de
+ * l'activite de la MACHINE. Une compilation, un telechargement, un transfert
+ * vers le NAS continuent pendant qu'on va faire autre chose, et les
+ * interrompre au bout de quinze minutes serait une nuisance pour un gain
+ * nul quand la prise est au mur. La charge qui s'epuise, elle, est une vraie
+ * echeance -- et c'est celle-la qui endort la machine.
+ *
+ * Les durees « Veille de l'ordinateur apres » des modes restent donc
+ * enregistrees et sans effet. Ce n'est pas un oubli : c'est ce reglage-ci
+ * qui les ferme, et il se change dans shell.conf.
  *
  * AUCUNE SCRUTATION -- c'est la regle du projet, et elle vaut doublement
  * pour un module dont l'objet est d'economiser. Le compositeur previent par

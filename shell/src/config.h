@@ -67,11 +67,12 @@ typedef struct {
      *
      * Il valait FALSE parce qu'on croyait la reprise cassee. Elle ne l'est
      * pas : mesure du 14 septembre 2026, capot ouvert a 07:24:00, « PM:
-     * suspend exit » dans la foulee. Ce que le 9 septembre avait pris pour
-     * des reprises manquees etait des morts par batterie vide -- le detail
-     * est en tete de energie.h. Le drapeau reste FALSE le temps que la
-     * surveillance de charge et la veille profonde soient en place : une
-     * machine qu'on endort doit d'abord savoir se mettre a l'abri. */
+     * suspend exit » dans la foulee.
+     *
+     * Il reste FALSE, mais PAR CHOIX depuis ce jour-la : l'ordinateur ne
+     * s'endort que sur la batterie, au seuil d'abri, et non sur
+     * l'inactivite -- qui ne dit rien de ce que la machine est en train de
+     * faire. Le raisonnement complet est en tete de energie.h. */
     gboolean  energie_suspendre_permis;
 
     /* Surveillance de la charge -- voir batterie.h pour le raisonnement.
