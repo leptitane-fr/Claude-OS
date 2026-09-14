@@ -2,6 +2,7 @@
 
 #include "batterie.h"
 #include "sysfs.h"
+#include "logind.h"
 
 #include <gio/gio.h>
 #include <stdlib.h>
@@ -199,27 +200,6 @@ prevenir (const char *titre, const char *corps, gboolean urgent)
  * donc fort, et on laisse l'inhibiteur gagner -- il a une raison d'exister,
  * et l'utilisateur a ete averti deux fois avant.
  * ------------------------------------------------------------------------- */
-/* logind sait-il faire « Can<methode> » ? Il repond « yes », « no », « na »
- * (pas de materiel pour ca) ou « challenge » (il faudrait s'authentifier).
- * Seul « yes » nous interesse : sur tout le reste on se rabattra. */
-static gboolean
-logind_sait_faire (GDBusConnection *bus, const char *methode)
-{
-    g_autofree char *question = g_strconcat ("Can", methode, NULL);
-    g_autoptr(GError) err = NULL;
-    g_autoptr(GVariant) rep = g_dbus_connection_call_sync (
-        bus, "org.freedesktop.login1", "/org/freedesktop/login1",
-        "org.freedesktop.login1.Manager", question, NULL,
-        G_VARIANT_TYPE ("(s)"), G_DBUS_CALL_FLAGS_NONE, 2000, NULL, &err);
-    if (rep == NULL) {
-        g_message ("batterie : %s sans reponse — %s", question, err->message);
-        return FALSE;
-    }
-    const char *r = NULL;
-    g_variant_get (rep, "(&s)", &r);
-    return g_strcmp0 (r, "yes") == 0;
-}
-
 static void
 mettre_a_l_abri (void)
 {
@@ -233,31 +213,19 @@ mettre_a_l_abri (void)
         return;
     }
 
-    g_autoptr(GError) err = NULL;
-    g_autoptr(GDBusConnection) bus =
-        g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, &err);
-    if (bus == NULL) {
-        g_message ("batterie : bus systeme injoignable — %s", err->message);
-        return;
-    }
-
     /* CE REPLI N'EST PAS DECORATIF. Demander une hibernation impossible --
      * swap trop petit, « resume » absent, noyau sans support -- rend une
      * erreur que personne ne lit, et la machine meurt quand meme : le pire
      * des deux mondes, puisqu'on croyait etre a l'abri. Faute de pouvoir
      * hiberner, une extinction propre sauve au moins ce qui est enregistre. */
-    if (!logind_sait_faire (bus, methode)) {
+    if (!shell_logind_sait_faire (methode)) {
         g_message ("batterie : « %s » indisponible — extinction a la place",
                    methode);
         methode = "PowerOff";
     }
 
     g_message ("batterie : mise a l'abri — %s", methode);
-    g_dbus_connection_call (bus, "org.freedesktop.login1",
-                            "/org/freedesktop/login1",
-                            "org.freedesktop.login1.Manager", methode,
-                            g_variant_new ("(b)", FALSE),
-                            NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
+    shell_logind_appeler (methode);
 }
 
 /* ------------------------------------------------------------------------- */

@@ -2,6 +2,7 @@
 #include "retroeclairage.h"
 #include "sysfs.h"
 #include "preavis.h"
+#include "logind.h"
 
 #include <gtk/gtk.h>
 #include <gdk/wayland/gdkwayland.h>
@@ -9,6 +10,7 @@
 #include <glib-unix.h>        /* g_unix_fd_add */
 
 #include <string.h>            /* strcmp */
+#include <unistd.h>           /* close : lever un inhibiteur */
 
 #include "ext-idle-notify-v1-client-protocol.h"
 
@@ -63,7 +65,13 @@ static struct {
      * Elle est relue dans sysfs plutot que gardee de la fois precedente :
      * l'utilisateur a pu bouger le curseur ou les touches entre-temps. */
     int      avant;
-} E;
+
+    /* Verrouiller AVANT de dormir -- voir « La machine va dormir » plus bas.
+     * L'inhibiteur « sleep » en mode delay tient logind le temps que le
+     * verrou s'installe ; l'abonnement, lui, vit pour la duree du processus. */
+    int      inhib_sommeil;       /* descripteur, ou -1                    */
+    guint    abonnement_sommeil;
+} E = { .inhib_sommeil = -1 };
 
 /* -------------------------------------------------------------------------
  * Les trois signaux
@@ -191,6 +199,107 @@ suspendre_la_machine (void)
                             "org.freedesktop.login1.Manager", "Suspend",
                             g_variant_new ("(b)", FALSE),
                             NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
+}
+
+/* -------------------------------------------------------------------------
+ * LA MACHINE VA DORMIR : ON VERROUILLE D'ABORD
+ *
+ * Demande de l'utilisateur, le 14 septembre 2026, apres le premier essai
+ * reussi d'hibernation par le capot : la session etait revenue DEVERROUILLEE.
+ * Une machine qu'on replie et qu'on emporte doit se retrouver verrouillee,
+ * et cela ne se discute pas selon le chemin emprunte.
+ *
+ * D'OU L'ANCRAGE ICI, ET PAS DANS capot.c. Le capot n'est qu'une des facons
+ * de s'endormir : il y a aussi l'etage « suspendre », le seuil de batterie,
+ * et tout ce qu'un menu ou une autre application demandera un jour. logind
+ * emet « PrepareForSleep(true) » pour TOUTES, et c'est donc le seul endroit
+ * ou la regle s'ecrit une fois.
+ *
+ * CE N'EST PAS LE REGLAGE « Demander le code PIN au reveil ». Celui-la
+ * decide du sursis apres l'extinction de l'ecran, quand la machine est
+ * restee la, allumee, sous les yeux de son proprietaire. Dormir est autre
+ * chose : on ferme, on emporte. Le verrouillage y est systematique.
+ *
+ * VERROUILLER AVANT PLUTOT QUE REVEILLER APRES : au reveil, l'ecran se
+ * rallume sur ce qui etait affiche. Poser le verrou avant que la machine ne
+ * parte, c'est garantir qu'il n'y a aucun instant ou le bureau est visible.
+ * L'inhibiteur « sleep » en mode DELAY donne le temps de le faire -- logind
+ * attend, au plus InhibitDelayMaxSec (cinq secondes ici).
+ * ------------------------------------------------------------------------- */
+
+/* Le sursis qu'on prend reellement, bien en deca des cinq secondes : le
+ * temps que claude-os-verrou se connecte au compositeur et pose sa surface.
+ * Le garder court importe -- c'est autant de retard a chaque fermeture de
+ * capot, et l'utilisateur le voit. */
+#define DELAI_POSE_VERROU_MS 400
+
+static void
+armer_inhibiteur_sommeil (void)
+{
+    if (E.inhib_sommeil >= 0)
+        return;
+    E.inhib_sommeil = shell_logind_inhiber (
+        "sleep", "verrouiller l'écran avant que la machine ne dorme", "delay");
+}
+
+static gboolean
+laisser_dormir (gpointer donnee)
+{
+    (void) donnee;
+    /* Fermer le descripteur LEVE l'inhibiteur : logind peut alors endormir
+     * la machine. Tant qu'on le tient, elle attend. */
+    if (E.inhib_sommeil >= 0) {
+        close (E.inhib_sommeil);
+        E.inhib_sommeil = -1;
+    }
+    return G_SOURCE_REMOVE;
+}
+
+static void
+on_prepare_for_sleep (GDBusConnection *bus, const char *emetteur,
+                      const char *chemin, const char *iface,
+                      const char *signal, GVariant *params, gpointer donnee)
+{
+    (void) bus; (void) emetteur; (void) chemin; (void) iface;
+    (void) signal; (void) donnee;
+
+    gboolean debut = FALSE;
+    g_variant_get (params, "(b)", &debut);
+
+    if (debut) {
+        g_message ("energie : la machine va dormir — verrouillage");
+        shell_energie_verrouiller ();       /* idempotent : voir sa garde */
+        g_timeout_add (DELAI_POSE_VERROU_MS, laisser_dormir, NULL);
+    } else {
+        /* Au reveil : on se rearme pour la prochaine fois. L'inhibiteur a
+         * ete relache avant de dormir, il n'existe plus. */
+        g_message ("energie : reveil");
+        armer_inhibiteur_sommeil ();
+    }
+}
+
+static void
+suivre_le_sommeil (void)
+{
+    g_autoptr(GError) err = NULL;
+    GDBusConnection *bus = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, &err);
+    if (bus == NULL) {
+        g_warning ("energie : bus systeme injoignable, l'ecran ne sera pas "
+                   "verrouille avant de dormir — %s", err->message);
+        return;
+    }
+
+    /* La connexion n'est pas liberee : l'abonnement doit vivre aussi
+     * longtemps que le processus, et c'est tout ce qu'on lui demande. */
+    E.abonnement_sommeil = g_dbus_connection_signal_subscribe (
+        bus, "org.freedesktop.login1", "org.freedesktop.login1.Manager",
+        "PrepareForSleep", "/org/freedesktop/login1", NULL,
+        G_DBUS_SIGNAL_FLAGS_NONE, on_prepare_for_sleep, NULL, NULL);
+
+    armer_inhibiteur_sommeil ();
+    g_message ("energie : verrouillage avant sommeil arme%s",
+               E.inhib_sommeil >= 0 ? "" : " (sans inhibiteur : le verrou "
+               "pourrait arriver apres le sommeil)");
 }
 
 static void
@@ -412,6 +521,13 @@ void
 shell_energie_init (const ShellConfig *cfg)
 {
     E.avant = -1;
+
+    /* AVANT TOUT RETOUR ANTICIPE. Le verrouillage avant sommeil ne doit rien
+     * a la veille progressive : il vaut sur une machine sans retroeclairage
+     * pilotable comme sur un compositeur sans ext-idle-notify. Le placer
+     * plus bas le ferait disparaitre en silence sur ces machines-la, et
+     * c'est la session qui repartirait deverrouillee. */
+    suivre_le_sommeil ();
 
     /* Sans retroeclairage pilotable, les deux premiers etages n'ont aucun
      * effet et le troisieme est ferme par defaut : ne rien accrocher. */

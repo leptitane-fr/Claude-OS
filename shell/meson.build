@@ -159,6 +159,7 @@ executable('claude-os-status',
   'src/status.c', 'src/panel.c', 'src/console.c', 'src/notifications.c',
   'src/wifi.c', 'src/bluetooth.c', 'src/energie.c', 'src/retroeclairage.c',
   'src/preavis.c', 'src/glissiere.c', 'src/batterie.c', 'src/capot.c',
+  'src/logind.c',
   idle_header, idle_code, commun,
   dependencies : [gtk, layershell, giounix, wlclient, pangocairo, m_dep],
   install : true)

@@ -5,9 +5,9 @@
 
 #include "capot.h"
 #include "energie.h"      /* shell_energie_verrouiller () */
+#include "logind.h"
 
 #include <gio/gio.h>
-#include <gio/gunixfdlist.h>
 #include <glib-unix.h>
 
 #include <fcntl.h>
@@ -31,55 +31,6 @@ static struct {
     const ShellCapotAction *action;
 } C = { .fd = -1, .inhibiteur = -1 };
 
-/* -------------------------------------------------------------------------
- * L'inhibiteur
- *
- * « block » et non « delay » : delay ne fait qu'accorder un sursis -- cinq
- * secondes ici, InhibitDelayMaxSec -- apres quoi logind agit quand meme. On
- * verrait alors la machine suspendre malgre le reglage choisi, cinq secondes
- * plus tard, ce qui est le genre de panne qu'on met une soiree a comprendre.
- *
- * Le descripteur rendu EST l'inhibiteur : le fermer le leve. On le garde
- * donc ouvert pour la vie du processus, et c'est voulu -- si la barre tombe,
- * logind reprend la main et le capot retrouve son comportement d'avant.
- * ------------------------------------------------------------------------- */
-static int
-poser_inhibiteur (void)
-{
-    g_autoptr(GError) err = NULL;
-    g_autoptr(GDBusConnection) bus =
-        g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, &err);
-    if (bus == NULL) {
-        g_warning ("capot : bus systeme injoignable — %s", err->message);
-        return -1;
-    }
-
-    g_autoptr(GUnixFDList) recu = NULL;
-    g_autoptr(GVariant) rep = g_dbus_connection_call_with_unix_fd_list_sync (
-        bus, "org.freedesktop.login1", "/org/freedesktop/login1",
-        "org.freedesktop.login1.Manager", "Inhibit",
-        g_variant_new ("(ssss)", "handle-lid-switch", "Claude OS",
-                       "le panneau Énergie décide ce que fait le capot",
-                       "block"),
-        G_VARIANT_TYPE ("(h)"), G_DBUS_CALL_FLAGS_NONE, -1,
-        NULL, &recu, NULL, &err);
-
-    if (rep == NULL) {
-        g_warning ("capot : inhibiteur refuse — %s", err->message);
-        return -1;
-    }
-
-    gint32 indice = -1;
-    g_variant_get (rep, "(h)", &indice);
-    int fd = g_unix_fd_list_get (recu, indice, &err);
-    if (fd < 0) {
-        g_warning ("capot : descripteur d'inhibiteur illisible — %s",
-                   err->message);
-        return -1;
-    }
-    return fd;
-}
-
 /* ------------------------------------------------------------------------- */
 
 static void
@@ -95,42 +46,19 @@ agir (void)
         return;
     }
 
-    g_autoptr(GError) err = NULL;
-    g_autoptr(GDBusConnection) bus =
-        g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, &err);
-    if (bus == NULL) {
-        g_warning ("capot : bus systeme injoignable — %s", err->message);
-        return;
-    }
-
     /* On demande d'abord si logind sait faire. Un « SuspendThenHibernate »
      * sur une machine qui ne peut pas hiberner rend une erreur que personne
      * ne lit, et le capot ne fait alors RIEN : la machine reste allumee,
      * repliee, et chauffe dans un sac. Se rabattre sur la suspension vaut
      * infiniment mieux -- c'est ce que logind aurait fait sans nous. */
-    g_autofree char *question = g_strconcat ("Can", C.action->methode, NULL);
-    g_autoptr(GVariant) peut = g_dbus_connection_call_sync (
-        bus, "org.freedesktop.login1", "/org/freedesktop/login1",
-        "org.freedesktop.login1.Manager", question, NULL,
-        G_VARIANT_TYPE ("(s)"), G_DBUS_CALL_FLAGS_NONE, 2000, NULL, NULL);
-
     const char *methode = C.action->methode;
-    if (peut != NULL) {
-        const char *r = NULL;
-        g_variant_get (peut, "(&s)", &r);
-        if (g_strcmp0 (r, "yes") != 0) {
-            g_warning ("capot : « %s » indisponible (%s) — suspension simple",
-                       methode, r ? r : "sans reponse");
-            methode = "Suspend";
-        }
+    if (!shell_logind_sait_faire (methode)) {
+        g_warning ("capot : « %s » indisponible — suspension simple", methode);
+        methode = "Suspend";
     }
 
     g_message ("capot : ferme — %s", methode);
-    g_dbus_connection_call (bus, "org.freedesktop.login1",
-                            "/org/freedesktop/login1",
-                            "org.freedesktop.login1.Manager", methode,
-                            g_variant_new ("(b)", FALSE),
-                            NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL, NULL);
+    shell_logind_appeler (methode);
 }
 
 /* L'etat courant, demande au noyau. Sert a l'ouverture, et apres
@@ -246,7 +174,9 @@ shell_capot_init (const ShellConfig *cfg)
     /* L'INHIBITEUR EN DERNIER, et seulement si tout le reste a marche.
      * Prendre la main sans savoir lire le capot le rendrait inerte : la
      * machine resterait allumee, repliee, sans que rien ne la suspende. */
-    C.inhibiteur = poser_inhibiteur ();
+    C.inhibiteur = shell_logind_inhiber (
+        "handle-lid-switch",
+        "le panneau Énergie décide ce que fait le capot", "block");
     if (C.inhibiteur < 0) {
         g_warning ("capot : sans inhibiteur, logind garde la main — le "
                    "reglage du panneau restera sans effet");
