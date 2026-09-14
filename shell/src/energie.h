@@ -11,14 +11,36 @@
  *   secteur  « Normal »   attenuer, puis eteindre l'ecran
  *   batterie « Econome »  attenuer, eteindre, puis suspendre
  *
- * L'ETAGE « SUSPENDRE » EST DESACTIVE PAR DEFAUT, ET CE N'EST PAS UN OUBLI.
- * Le 9 septembre 2026, onze suspensions consecutives declenchees par la
- * fermeture du capot n'ont JAMAIS repris : le journal s'arrete net sur
- * « PM: suspend entry (s2idle) » et la machine reapparait avec un nouvel
- * identifiant de demarrage. Endormir automatiquement une machine qui ne se
- * reveille pas, c'est lui faire perdre la session de l'utilisateur. L'etage
- * existe, il se regle, mais il reste ferme tant que la reprise n'est pas
- * fiable.
+ * L'ETAGE « SUSPENDRE » EST DESACTIVE PAR DEFAUT -- MAIS PAS POUR LA RAISON
+ * QU'ON A CRUE PENDANT CINQ JOURS.
+ *
+ * Ce commentaire a longtemps accuse la reprise : le 9 septembre 2026, onze
+ * suspensions n'avaient « jamais repris », le journal s'arretant net sur
+ * « PM: suspend entry (s2idle) ». C'ETAIT UN FAUX DIAGNOSTIC, et il a coute
+ * cet etage. Mesure du 14 septembre 2026, sur cette machine :
+ *
+ *     07:23:20  Lid closed.
+ *     07:23:42  PM: suspend entry (s2idle)
+ *     07:24:00  Lid opened.  ->  PM: suspend exit
+ *
+ * LA REPRISE FONCTIONNE. Si le journal s'arretait sur « suspend entry », ce
+ * n'est pas que la machine ne se reveillait pas : c'est qu'elle MOURAIT en
+ * veille, faute de courant. Un journal tronque ne dit pas pourquoi il est
+ * tronque, et l'identifiant de demarrage neuf -- seul indice retenu a
+ * l'epoque -- est le meme qu'on meure de faim ou qu'on echoue a reprendre.
+ *
+ * La preuve en grand, le matin du 14 : 101 demarrages enregistres, dont une
+ * centaine entre 05:39 et 07:23, par cycles reguliers de 64 secondes --
+ * demarrer, vivre 28 secondes, se rendormir capot ferme, mourir. Une machine
+ * a plat qui n'arrive pas a se recharger parce qu'elle se rendort a chaque
+ * fois qu'elle revient.
+ *
+ * CE QUI MANQUE N'EST DONC PAS UNE REPRISE FIABLE, MAIS UN PREAVIS ET UNE
+ * PORTE DE SORTIE : rien ne surveille la charge (ni upower, ni demon, et le
+ * seuil ACPI « alarm » est a zero), et la machine n'a aucun moyen de se
+ * mettre a l'abri avant la coupure. L'etage reste ferme le temps que les
+ * deux soient en place -- voir batterie.h -- et non plus par defiance
+ * envers le noyau.
  *
  * AUCUNE SCRUTATION -- c'est la regle du projet, et elle vaut doublement
  * pour un module dont l'objet est d'economiser. Le compositeur previent par

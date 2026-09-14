@@ -22,6 +22,7 @@
 
 #include "config.h"
 #include "energie.h"   /* la table des modes, definie une seule fois */
+#include "batterie.h"  /* la table des abris, de meme */
 #include "reseau.h"
 
 /* -------------------------------------------------------------------------
@@ -1223,6 +1224,12 @@ static void set_auto_att   (ShellConfig *c, gpointer d) { c->energie_auto_attenu
 static void set_auto_ete   (ShellConfig *c, gpointer d) { c->energie_auto_eteindre  = GPOINTER_TO_INT (d); }
 static void set_auto_sus   (ShellConfig *c, gpointer d) { c->energie_auto_suspendre = GPOINTER_TO_INT (d); }
 
+static void set_bat_prev   (ShellConfig *c, gpointer d) { c->energie_bat_prevenir = GPOINTER_TO_INT (d); }
+static void set_bat_ins    (ShellConfig *c, gpointer d) { c->energie_bat_insister = GPOINTER_TO_INT (d); }
+static void set_bat_abri   (ShellConfig *c, gpointer d) { c->energie_bat_abri     = GPOINTER_TO_INT (d); }
+static void set_bat_act    (ShellConfig *c, gpointer d) { g_free (c->energie_bat_abri_action);
+                                                          c->energie_bat_abri_action = g_strdup (d); }
+
 static void set_nom_att    (ShellConfig *c, gpointer d) { c->energie_nomade_attenuer  = GPOINTER_TO_INT (d); }
 static void set_nom_ete    (ShellConfig *c, gpointer d) { c->energie_nomade_eteindre  = GPOINTER_TO_INT (d); }
 static void set_nom_sus    (ShellConfig *c, gpointer d) { c->energie_nomade_suspendre = GPOINTER_TO_INT (d); }
@@ -1263,6 +1270,28 @@ static const char *OPACITES_NOM[] = { "25 %", "40 %", "55 %", "70 %",
 static const int   NIVEAUX[]     = { 10, 20, 30, 40, 50 };
 static const char *NIVEAUX_NOM[] = { "10 %", "20 %", "30 %", "40 %", "50 %" };
 #define NIVEAUX_N ((int) G_N_ELEMENTS (NIVEAUX))
+
+static const Modif M_BAT_PREV = set_bat_prev;
+static const Modif M_BAT_INS  = set_bat_ins;
+static const Modif M_BAT_ABRI = set_bat_abri;
+
+/* Trois echelles distinctes plutot qu'une seule : proposer « 40 % » comme
+ * seuil de mise a l'abri, ou « 3 % » comme premier avertissement, n'a pas de
+ * sens et encombre la liste de choix que personne ne fera. */
+static const int   PCT_PREV[]     = { 10, 15, 20, 25, 30, 40 };
+static const char *PCT_PREV_NOM[] = { "10 %", "15 %", "20 %", "25 %", "30 %", "40 %" };
+#define PCT_PREV_N ((int) G_N_ELEMENTS (PCT_PREV))
+
+static const int   PCT_INS[]     = { 5, 8, 10, 12, 15, 20 };
+static const char *PCT_INS_NOM[] = { "5 %", "8 %", "10 %", "12 %", "15 %", "20 %" };
+#define PCT_INS_N ((int) G_N_ELEMENTS (PCT_INS))
+
+/* Pas de « 0 % » : ne rien faire se dit avec l'action « Ne rien faire », et
+ * un seuil a zero serait une seconde facon d'exprimer la meme chose -- deux
+ * reglages qui se contredisent finissent toujours par le faire. */
+static const int   PCT_ABRI[]     = { 3, 4, 5, 7, 10 };
+static const char *PCT_ABRI_NOM[] = { "3 %", "4 %", "5 %", "7 %", "10 %" };
+#define PCT_ABRI_N ((int) G_N_ELEMENTS (PCT_ABRI))
 
 /* Une liste de valeurs positionnee sur la valeur courante. Une valeur
  * absente de la table -- shell.conf s'edite a la main -- retient la valeur
@@ -1310,6 +1339,60 @@ liste (const int *valeurs, const char **noms, int n, int courant,
 
 #define LISTE_DUREE(v, m)   liste (DUREES,  DUREES_NOM,  DUREES_N,  (v), (m))
 #define LISTE_PREAVIS(v, m) liste (PREAVIS, PREAVIS_NOM, PREAVIS_N, (v), (m))
+
+/* -------------------------------------------------------------------------
+ * L'abri de la batterie : une liste de CHAINES, pas d'entiers
+ *
+ * « liste () » ne sait proposer que des valeurs numeriques. Les abris sont
+ * nommes, et leurs libelles viennent de batterie.c -- comme les modes
+ * viennent de energie.c. Le panneau ne redit jamais ce qu'une table sait
+ * deja : un libelle recopie ici serait faux le jour ou la table change.
+ * ------------------------------------------------------------------------- */
+static void
+on_choix_abri (GObject *dd, GParamSpec *ps, gpointer data)
+{
+    (void) ps;
+    guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
+    if (i == GTK_INVALID_LIST_POSITION)
+        return;
+
+    const ShellAbriBatterie *abris = shell_batterie_abris ();
+    for (guint k = 0; k < i; k++)
+        if (abris[k].id == NULL)
+            return;                       /* liste plus courte que l'index */
+    if (abris[i].id == NULL)
+        return;
+
+    /* Le panneau ne se reconstruit pas apres un enregistrement -- il se
+     * contente de se reappliquer le theme. Un resume laisse en place
+     * decrirait donc l'abri PRECEDENT, ce qui est pire que pas de resume du
+     * tout : on choisirait « Eteindre » en lisant la phrase d'« Hiberner ». */
+    GtkWidget *detail = data;
+    if (detail != NULL)
+        gtk_label_set_text (GTK_LABEL (detail), abris[i].resume);
+
+    modifier (set_bat_act, (gpointer) abris[i].id);
+}
+
+static GtkWidget *
+liste_abris (const ShellConfig *cfg, GtkWidget *detail)
+{
+    const ShellAbriBatterie *abris  = shell_batterie_abris ();
+    const ShellAbriBatterie *actif  = shell_batterie_abri_actif (cfg);
+    GtkStringList           *noms   = gtk_string_list_new (NULL);
+    guint                    choisi = 0;
+
+    for (guint i = 0; abris[i].id != NULL; i++) {
+        gtk_string_list_append (noms, abris[i].nom);
+        if (g_strcmp0 (abris[i].id, actif->id) == 0)
+            choisi = i;
+    }
+
+    GtkWidget *dd = gtk_drop_down_new (G_LIST_MODEL (noms), NULL);
+    gtk_drop_down_set_selected (GTK_DROP_DOWN (dd), choisi);
+    g_signal_connect (dd, "notify::selected", G_CALLBACK (on_choix_abri), detail);
+    return dd;
+}
 
 static GtkWidget *
 construire_energie (ShellConfig *cfg, GtkWidget *window)
@@ -1426,18 +1509,61 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
            LISTE_DUREE (cfg->energie_nomade_suspendre, &M_NOM_SUS));
     gtk_box_append (GTK_BOX (pile), nom);
 
+    /* --- La batterie ---
+     *
+     * Cette carte existe parce que RIEN ne surveillait la charge : ni
+     * upower, ni demon d'energie, et le seuil ACPI laisse a zero. Voir
+     * batterie.h : le 14 septembre 2026, la machine a redemarre cent fois de
+     * suite faute d'avoir su dire qu'elle manquait de courant. */
+    GtkWidget *bat = carte ("Batterie");
+    ligne (bat, "Prévenir à",
+           "Un avis discret, qui disparaît de lui-même. C'est le moment où "
+           "l'on cherche une prise sans se presser.",
+           liste (PCT_PREV, PCT_PREV_NOM, PCT_PREV_N,
+                  cfg->energie_bat_prevenir, &M_BAT_PREV));
+    ligne (bat, "Insister à",
+           "Un avis qui reste à l'écran tant qu'on ne l'a pas lu.",
+           liste (PCT_INS, PCT_INS_NOM, PCT_INS_N,
+                  cfg->energie_bat_insister, &M_BAT_INS));
+    ligne (bat, "Se mettre à l'abri à",
+           "Le dernier seuil, celui qui agit. En dessous, la machine ne "
+           "prévient plus : elle applique le choix ci-dessous.",
+           liste (PCT_ABRI, PCT_ABRI_NOM, PCT_ABRI_N,
+                  cfg->energie_bat_abri, &M_BAT_ABRI));
+
+    GtkWidget *d_abri = gtk_label_new (shell_batterie_abri_actif (cfg)->resume);
+    gtk_widget_add_css_class (d_abri, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (d_abri), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (d_abri), 46);
+    gtk_widget_set_halign (d_abri, GTK_ALIGN_START);
+
+    ligne (bat, "Au dernier seuil",
+           "Une application qui a demandé à ne pas être interrompue l'emporte "
+           "encore ici : on ne coupe pas la parole à un enregistrement pour "
+           "une estimation de pourcentage.",
+           liste_abris (cfg, d_abri));
+    gtk_box_append (GTK_BOX (bat), d_abri);
+    gtk_box_append (GTK_BOX (pile), bat);
+
     /* --- Ce qui n'est pas reglable, et pourquoi ---
      *
      * Une case grisee sans explication passe pour une panne. Celle-ci dit
-     * ce qui manque et ce qu'il faudrait pour l'ouvrir. */
+     * ce qui manque et ce qu'il faudrait pour l'ouvrir.
+     *
+     * LE TEXTE A ETE FAUX PENDANT CINQ JOURS. Il accusait la reprise, sur la
+     * foi du 9 septembre 2026. Mesure du 14 : capot ouvert a 07:24:00, « PM:
+     * suspend exit » dans la foulee -- la reprise fonctionne, et ce que l'on
+     * prenait pour des reveils manques etait des morts par batterie vide.
+     * Le detail est en tete de energie.h. */
     GtkWidget *ordi = carte ("Mise en veille de l'ordinateur");
     GtkWidget *etat = gtk_label_new (
         cfg->energie_suspendre_permis
         ? "Autorisée."
-        : "Verrouillée. Le 9 septembre 2026, onze suspensions consécutives "
-          "n'ont pas repris : la machine redémarrait au lieu de se réveiller. "
-          "Tant que la reprise n'est pas fiable, les durées ci-dessus sont "
-          "enregistrées mais sans effet.");
+        : "Verrouillée, le temps que la veille profonde soit éprouvée. La "
+          "reprise, elle, fonctionne : ce qu'on avait pris pour onze réveils "
+          "manqués le 9 septembre 2026 était onze pannes de batterie, que "
+          "rien ne signalait alors. Les durées ci-dessus sont enregistrées "
+          "mais sans effet.");
     gtk_widget_add_css_class (etat, "reglages-detail");
     gtk_label_set_wrap (GTK_LABEL (etat), TRUE);
     gtk_label_set_max_width_chars (GTK_LABEL (etat), 46);

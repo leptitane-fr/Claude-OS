@@ -175,6 +175,16 @@ shell_config_load (void)
     cfg->energie_verrou_delai = 60;   /* une minute de sursis */
     cfg->energie_suspendre_permis = FALSE;
 
+    /* Seuils de charge. 20 / 10 / 5 : les valeurs usuelles, et a 5 % il
+     * reste largement de quoi ecrire la memoire sur le disque avant la
+     * coupure. L'abri par defaut est l'hibernation, seul etat qui survive a
+     * une batterie vide -- batterie.c verifie aupres de logind qu'elle est
+     * possible, et retombe sur l'extinction sinon. */
+    cfg->energie_bat_prevenir    = 20;
+    cfg->energie_bat_insister    = 10;
+    cfg->energie_bat_abri        = 5;
+    cfg->energie_bat_abri_action = g_strdup ("hiberner");
+
     cfg->energie_travail_attenuer = 600;   /* 10 min */
     cfg->energie_travail_eteindre = 1200;  /* 20 min */
 
@@ -236,6 +246,20 @@ shell_config_load (void)
     lire_bool   (kf, "verrou",           &cfg->energie_verrou);
     lire_entier (kf, "verrou_delai",     &cfg->energie_verrou_delai);
 
+    lire_entier (kf, "batterie_prevenir", &cfg->energie_bat_prevenir);
+    lire_entier (kf, "batterie_insister", &cfg->energie_bat_insister);
+    lire_entier (kf, "batterie_abri",     &cfg->energie_bat_abri);
+
+    /* Une action inconnue laisse le defaut en place, comme le mode : on
+     * n'invente pas un comportement a partir d'une faute de frappe. La
+     * verification du nom appartient a batterie.c, qui tient la table. */
+    g_autofree char *abri = g_key_file_get_string (kf, "energie",
+                                                   "batterie_abri_action", NULL);
+    if (abri != NULL && *abri != '\0') {
+        g_free (cfg->energie_bat_abri_action);
+        cfg->energie_bat_abri_action = g_steal_pointer (&abri);
+    }
+
     lire_entier (kf, "travail_attenuer", &cfg->energie_travail_attenuer);
     lire_entier (kf, "travail_eteindre", &cfg->energie_travail_eteindre);
 
@@ -284,6 +308,7 @@ shell_config_free (ShellConfig *cfg)
     g_free (cfg->theme);
     g_free (cfg->wallpaper);
     g_free (cfg->energie_mode);
+    g_free (cfg->energie_bat_abri_action);
     g_free (cfg);
 }
 
@@ -323,6 +348,13 @@ shell_config_save (const ShellConfig *cfg, GError **error)
     g_key_file_set_integer (kf, "energie", "verrou_delai", cfg->energie_verrou_delai);
     g_key_file_set_boolean (kf, "energie", "suspendre_permis",
                             cfg->energie_suspendre_permis);
+    g_key_file_set_integer (kf, "energie", "batterie_prevenir", cfg->energie_bat_prevenir);
+    g_key_file_set_integer (kf, "energie", "batterie_insister", cfg->energie_bat_insister);
+    g_key_file_set_integer (kf, "energie", "batterie_abri",     cfg->energie_bat_abri);
+    g_key_file_set_string  (kf, "energie", "batterie_abri_action",
+                            cfg->energie_bat_abri_action ?
+                            cfg->energie_bat_abri_action : "hiberner");
+
     g_key_file_set_integer (kf, "energie", "travail_attenuer", cfg->energie_travail_attenuer);
     g_key_file_set_integer (kf, "energie", "travail_eteindre", cfg->energie_travail_eteindre);
     g_key_file_set_integer (kf, "energie", "automatique_attenuer",  cfg->energie_auto_attenuer);

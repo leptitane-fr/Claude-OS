@@ -63,9 +63,32 @@ typedef struct {
     int       energie_verrou_delai;
 
     /* L'etage « suspendre » ne s'ouvre que si CE drapeau est vrai, quels que
-     * soient les delais. Il vaut FALSE par defaut : le 9 septembre 2026,
-     * onze suspensions consecutives n'ont pas repris sur cette machine. */
+     * soient les delais.
+     *
+     * Il valait FALSE parce qu'on croyait la reprise cassee. Elle ne l'est
+     * pas : mesure du 14 septembre 2026, capot ouvert a 07:24:00, « PM:
+     * suspend exit » dans la foulee. Ce que le 9 septembre avait pris pour
+     * des reprises manquees etait des morts par batterie vide -- le detail
+     * est en tete de energie.h. Le drapeau reste FALSE le temps que la
+     * surveillance de charge et la veille profonde soient en place : une
+     * machine qu'on endort doit d'abord savoir se mettre a l'abri. */
     gboolean  energie_suspendre_permis;
+
+    /* Surveillance de la charge -- voir batterie.h pour le raisonnement.
+     *
+     * Trois seuils en POURCENT, du plus haut au plus bas : prevenir,
+     * insister, se mettre a l'abri. Les deux premiers parlent, le dernier
+     * agit. Ils se reglent parce que ce sont des habitudes de travail et non
+     * des constantes : qui reste pres d'une prise veut qu'on le laisse
+     * tranquille jusqu'au bout, qui travaille en deplacement veut etre
+     * prevenu tot.
+     *
+     * « abri_action » dit ce que la machine fait au dernier seuil ; la table
+     * des valeurs possibles vit dans abris-batterie.c, et fait foi. */
+    int       energie_bat_prevenir;
+    int       energie_bat_insister;
+    int       energie_bat_abri;
+    char     *energie_bat_abri_action;
 
     int       energie_travail_attenuer;
     int       energie_travail_eteindre;
