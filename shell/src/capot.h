@@ -49,8 +49,8 @@
 typedef struct {
     const char *id;       /* « suspendre », « suspendre-hiberner », …       */
     const char *nom;      /* « Suspendre, puis hiberner »                   */
-    const char *resume;   /* une phrase, montree sous le choix              */
     const char *methode;  /* la methode logind, ou NULL si le shell agit    */
+    const char *resume;   /* une phrase, montree sous le choix              */
 } ShellCapotAction;
 
 /* Table terminee par un id NULL. */

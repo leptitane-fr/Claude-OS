@@ -270,7 +270,6 @@ shell_config_load (void)
                                                    "batterie_abri_action", NULL);
     if (abri != NULL && *abri != '\0') {
         g_free (cfg->energie_bat_abri_action);
-    g_free (cfg->energie_capot_action);
         cfg->energie_bat_abri_action = g_steal_pointer (&abri);
     }
 
