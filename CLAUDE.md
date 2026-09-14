@@ -6,7 +6,28 @@ Ce fichier est chargé automatiquement à l'ouverture d'une session. Il dit
 
 ---
 
-## Où en est le projet — 11 septembre 2026
+## Où en est le projet — 14 septembre 2026
+
+**Le mode tablette est en service** (11 au 14 septembre 2026) : détection du
+retournement, rotation paysage ↔ chevalet, et un **clavier à l'écran** en deux
+formes — plein format calqué sur le clavier physique, et **mode console**, deux
+colonnes collées aux bords avec l'écran recadré entre elles. Sa colonne gauche
+est **calculée, pas héritée** : fréquences du français (Lexique 3), zone du
+pouce mesurée à la sonde, loi de Fitts, recuit simulé — touches de tailles
+variables le long de l'arc du pouce. Suggestions de mots avec contexte
+(Tatoeba), apprentissage, espace et majuscule automatiques. Détail dans
+[`docs/12`](docs/12-mode-tablette.md), fil de la séance dans
+[`docs/07`](docs/07-journal-des-seances.md).
+
+**UNE ZONE MORTE TACTILE EST APPARUE PUIS A DISPARU** (13-14 septembre). Un
+rectangle de 28 × 114 mm au bord gauche ne répondait plus — mesuré par deux
+sondes, dont une qui lit le noyau sans passer par labwc ni GTK. Le lendemain
+matin, tout répondait de nouveau, sans qu'on ait touché à quoi que ce soit.
+**Le défaut est intermittent, et rien n'a été inscrit en dur dans le clavier** :
+figer une panne passagère dans la géométrie aurait été une faute durable. S'il
+revient : `claude-os-root python3 tools/diag-tactile.py coins`, puis `carte`.
+**Toujours `coins` d'abord** — deux conclusions opposées et fausses sont sorties
+d'une carte lue dans un repère supposé.
 
 **Le dock et la barre sortent de l'écran par le bas** (11 septembre 2026) dès
 qu'une application passe au premier plan, et reviennent par la touche Loupe
@@ -566,7 +587,8 @@ sur lui — sur un conteneur.
 | Capot par mode | Le verrou s'ancre sur l'extinction ; le capot reste géré par logind, donc identique pour les trois modes. |
 | **Lecteur vidéo** | Écrit, compilé, mesuré sur batterie — **pas encore installé**, et **les gestes au doigt restent à éprouver**. Vitesse de lecture non faite, délibérément : voir `docs/11`. |
 | **Verrou sans clavier** | `claude-os-verrou` demande un clavier sans vérifier la capacité du siège : sans clavier, le compositeur le déconnecte (vu au banc). Sans conséquence sur MADOO aujourd'hui, mais un verrou qui meurt écran verrouillé laisse la session inaccessible. |
-| **Mode tablette** | **Clavier à l'écran EN SERVICE** depuis le 13 septembre 2026, en mode console (deux colonnes aux bords, écran recadré), pour un essai de plusieurs jours. Sa disposition gauche est CALCULÉE (fréquences du français + zone du pouce mesurée + loi de Fitts, `shell/essais/disposition-pouce.py`) : 39 % de coût en moins que l'AZERTY replié. Reste : colonne droite à retravailler, suggestions de mots, vitesse réelle à constater. Détection et rotation vues fonctionner. **Clavier AZERTY à l'écran à écrire** (input-method-v2 + virtual-keyboard-v1). Non établis : stylet écran tourné, boutons de barre de titre au doigt en chevalet. Voir `docs/12`. |
+| **Mode tablette** | **En service** — détection, rotation paysage/chevalet, clavier console, disposition organique CALCULÉE (fréquences du français + zone du pouce mesurée + loi de Fitts, `shell/essais/disposition-pouce.py`), suggestions avec contexte et apprentissage. Reste à l'usage : la colonne DROITE n'a pas été retravaillée, la vitesse de frappe réelle n'est pas constatée, le stylet écran tourné et les boutons de barre de titre en chevalet ne sont pas établis. Voir `docs/12`. |
+| **Zone morte tactile** | Apparue le 13 septembre, **disparue le 14 sans intervention** : intermittente, cause inconnue. Rien n'a été inscrit en dur dans le clavier. Si elle revient : `claude-os-root python3 tools/diag-tactile.py coins`, puis `carte`. |
 | **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
 | Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
 

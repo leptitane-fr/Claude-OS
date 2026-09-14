@@ -4,7 +4,7 @@
 été mesuré** sur MADOO, ce qui a été décidé avec l'utilisateur, et ce qui
 reste une limite. Ce qui n'est pas établi y est écrit comme tel.
 
-État au 13 septembre 2026 :
+État au 14 septembre 2026 :
 
 | Pièce | État |
 |---|---|
@@ -14,7 +14,9 @@ reste une limite. Ce qui n'est pas établi y est écrit comme tel.
 | Clavier AZERTY à l'écran, plein format | **Vu fonctionner sur MADOO** — voir §12.6 |
 | Mode console (deux colonnes, écran recadré) | **En service pour un essai de plusieurs jours** — voir §12.7 |
 | Disposition de la colonne gauche | **Calculée** : fréquences du français + zone du pouce mesurée — §12.7 |
-| Suggestions de mots, espace et majuscule automatiques | **Écrites le 13 septembre 2026** — §12.8 |
+| Suggestions de mots, espace et majuscule automatiques | **En service** — §12.8 |
+| Disposition organique (touches de tailles variables, arc du pouce) | **En service** — §12.7 |
+| Zone morte tactile du 13 septembre | **Disparue le lendemain — intermittente** — §12.9 |
 | Déplacer Claude Desktop au doigt | **Impossible sous labwc 0.8.3** — voir §12.5 |
 
 ---
@@ -282,12 +284,57 @@ accents rares : « aujourd » propose « aujourd'hui ».
 | Après `.`, `!`, `?`, une entrée, ou à l'entrée dans un champ | la **majuscule s'arme** seule (sauf mot de passe et champ numérique) |
 | Espace tapée après une espace automatique | **ignorée** — la double espace serait une faute à corriger |
 
-## 12.9 Ce qui n'est pas établi
+## 12.9 La zone morte tactile — un défaut INTERMITTENT
+
+Le 13 septembre 2026 au soir, l'utilisateur signale que le doigt ne prend
+pas par endroits. Mesuré par deux sondes indépendantes — la sonde d'écran
+(`shell/essais/sonde-pouces.c`, qui voit ce que reçoit une fenêtre) et la
+sonde du noyau (`tools/diag-tactile.py`, qui lit `/dev/input/event3` sans
+passer par labwc ni GTK) :
+
+> **Rectangle muet : x de 0 à ~170 px, y de ~375 à 1080.**
+> 28 × 114 mm, le long du bord gauche, sous la mi-hauteur.
+
+Trois voies concordantes : la carte de couverture, des appuis délibérés
+dont aucun n'est reçu, et un appui rapporté à y = 68 alors qu'il avait eu
+lieu à mi-hauteur — le contrôleur inventait une position.
+
+**Le lendemain matin, tout répondait de nouveau.** Rien n'avait été touché
+au logiciel. Le défaut est donc intermittent : ni la dalle ni le pilote ne
+sont morts. Pistes **non vérifiées** : contact de nappe, température, état
+du micrologiciel du contrôleur. Le pilote, lui, ne signale rien — c'est un
+périphérique HID multipoint ordinaire, sans réglage exposé.
+
+**Rien n'a été changé dans le clavier, et c'est délibéré.** On s'apprêtait
+à inscrire la zone comme contrainte dans le calcul de la disposition :
+cela aurait figé une panne passagère dans la géométrie du clavier, et
+personne n'aurait compris six mois plus tard pourquoi le coin inférieur
+gauche était vide. Si elle revient : mesurer d'abord, et voir si elle est
+au même endroit.
+
+```sh
+claude-os-root python3 tools/diag-tactile.py coins   # LE REPÈRE D'ABORD
+claude-os-root python3 tools/diag-tactile.py carte   # la couverture
+claude-os-root python3 tools/diag-tactile.py bord    # la frontière
+```
+
+**ÉTABLIR LE REPÈRE AVANT D'INTERPRÉTER.** Cette séance a produit deux
+conclusions opposées et fausses, tirées de cartes lues dans un repère
+supposé — un miroir de l'axe X qui n'existe pas. Quatre appuis dans les
+coins l'ont montré en quarante secondes. C'est pourquoi `diag-tactile.py`
+commence par `coins`.
+
+Ce que la zone touchait, le temps qu'elle a duré : les touches z, p, s
+entièrement, e, r, g à moitié, les deux tiers de la barre d'espace — et,
+hors clavier, le tiers gauche de la bande de rappel du dock.
+
+## 12.10 Ce qui n'est pas établi
 
 - le stylet sur écran tourné ;
 - **la vitesse de frappe réelle du mode console**, et le temps qu'il faut
   pour s'habituer à une disposition qui ne ressemble à rien de connu. C'est
   l'objet de l'essai en cours ;
+- **la cause de la zone morte du 13 septembre**, et si elle reviendra ;
 - **les suggestions à l'usage** : leur utilité réelle, la place de la rangée
   (au-dessus de la zone que le pouce atteint, faute de mieux dans la
   colonne), et si l'apprentissage remonte les bons mots ;

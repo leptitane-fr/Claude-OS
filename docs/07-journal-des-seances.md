@@ -1112,6 +1112,90 @@ posé dans l'environnement de la barre et désigne labwc.
 
 ---
 
+## 11 au 14 septembre 2026 — le mode tablette, de bout en bout
+
+Quatre séances, une demande : « détection automatique du mode tablette,
+déploiement d'un clavier AZERTY lorsque nécessaire, et optimisation de
+l'interface pour la captation des mouvements et touchers tactiles ». Le
+détail est dans [`docs/12`](12-mode-tablette.md) ; voici le fil, et ce
+qu'il a coûté.
+
+### Ce qui a été mesuré avant d'écrire
+
+- **labwc 0.8.3 expose `virtual_keyboard_v1`, `input_method_v2` et
+  `text_input_v3`.** `docs/09` et `clavier.h` affirmaient le contraire ;
+  c'était faux, et cela fermait la porte au seul clavier qui vaille.
+- **L'EC ne coupe pas le clavier ni le pavé tactile** capot retourné : les
+  frappes arrivent à evdev, c'est **libinput** qui les écarte. L'effet est
+  le même, la cause n'est pas celle qu'on croyait.
+- **Le commutateur `Tablet Mode Switch`** bascule vers 180-220°, sans
+  rebond, et les trois périphériques qui le portent concordent à 120 ms.
+- **La portée des pouces**, tablette tenue à deux mains : 95 % des appuis
+  du pouce gauche en deçà de 262 px du bord, du droit 320 px. C'est le
+  plus court qui a fixé la largeur des colonnes : 300 px.
+
+### Ce qui a été livré
+
+Détection (`tablette.c`), rotation paysage ↔ chevalet (`rotation.c`,
+portraits fermés à la demande de l'utilisateur), clavier à l'écran
+(`clavier-ecran.c`, `saisie.c`) en deux formes — plein format calqué sur
+le clavier physique, et **mode console** : deux colonnes collées aux bords,
+écran recadré entre elles, frappe à gauche, bascules et fonctions à droite.
+Suggestions de mots (`mots.c`) avec dictionnaire Lexique 3, suites de mots
+Tatoeba, apprentissage, espace et majuscule automatiques.
+
+**La disposition de la colonne gauche est calculée, pas héritée** :
+fréquences du français, zone du pouce mesurée, loi de Fitts, recuit simulé
+(`shell/essais/disposition-pouce.py`). Trois versions successives, chacune
+née d'un essai au doigt : grille 5 × 6, puis 5 × 5 avec barre d'espace,
+puis **organique** — touches de tailles différentes le long de l'arc du
+pouce, les rares petites, les fréquentes larges, et une nuance de couleur
+par fréquence.
+
+### Trois pièges payés, et ils se ressemblent
+
+1. **Les CODES de touches comptent.** La première disposition XKB donnait
+   un code par caractère, à la suite. « ; : ! » avaient reçu les codes
+   evdev de `KEY_LINEFEED`, `KEY_UP` et `KEY_LEFT` : dans Claude Desktop,
+   ils déplaçaient le curseur au lieu d'écrire, parce que Chromium déduit
+   du code la touche physique. ⌫ et ↵ occupaient `KEY_ESC` et ses voisines,
+   et marchaient par chance. Désormais : commandes sur leurs vrais codes,
+   caractères sur les seules positions de touches ordinaires, à quatre
+   niveaux.
+2. **La virgule décimale, deux fois.** `%.1f` dans la sonde des pouces a
+   cassé son propre CSV ; `%.3f` dans `preavis.c` cassait la règle CSS du
+   cadran depuis des jours — « Expected ')' at end of alpha() » dans
+   `shell.log`, que personne n'avait lu. `g_ascii_formatd` pour ce qui est
+   écrit à une machine, la virgule pour ce qui est lu par un humain.
+3. **Une mesure se verse au dépôt le jour même.** Le fichier brut des
+   appuis de pouce, laissé dans `/tmp`, a été effacé par un redémarrage.
+   Les paramètres qui en dérivent sont désormais inscrits dans le script.
+
+### La zone morte tactile — et la leçon de méthode
+
+Le 13 au soir, l'utilisateur signale des zones où le doigt ne prend pas.
+Deux sondes le confirment : un rectangle muet, **x de 0 à ~170 px, y de
+~375 à 1080** — 28 × 114 mm le long du bord gauche. Trois voies
+concordantes : carte de couverture, appuis délibérés jamais reçus, et un
+appui rapporté à y = 68 alors qu'il avait eu lieu à mi-hauteur.
+
+**J'ai conclu deux fois, dans deux directions opposées, sur un repère
+supposé.** Ayant vu des contacts « à droite » alors que l'utilisateur
+tapait à gauche, j'ai supposé l'axe X inversé, annoncé que le défaut était
+logiciel, puis l'inverse. Quatre appuis dans les coins ont tranché : le
+repère est **direct**, il n'y a aucun miroir. Une mesure interprétée dans
+un repère non établi ne vaut rien — et l'établir coûtait quarante
+secondes. `tools/diag-tactile.py` commence donc par la commande `coins`.
+
+**Le lendemain matin, la zone avait disparu.** La dalle répondait partout.
+Le défaut est donc INTERMITTENT, et c'est ce qui a sauvé le clavier : on
+s'apprêtait à inscrire la zone en dur dans la disposition, ce qui aurait
+été une faute durable pour une panne passagère. Rien n'a été modifié dans
+le clavier. Si elle revient : relancer `tools/diag-tactile.py`, la mesurer
+à nouveau, et voir si elle est au même endroit.
+
+---
+
 ## Ce qui reste à faire — au 10 septembre 2026
 
 Par ordre d'importance.

@@ -52,12 +52,16 @@ dessiner (GtkDrawingArea *a, cairo_t *cr, int l, int h, gpointer d)
     cairo_line_to (cr, l / 2.0, h);
     cairo_stroke (cr);
 
+    /* Les traces, larges : c'est en coloriant l'écran qu'on voit les trous.
+     * Ce programme sert à deux mesures — la portée des pouces, et la
+     * recherche de zones mortes — et la seconde demande de VOIR la
+     * couverture pendant qu'on la produit. */
     for (guint i = 0; i < P.traces->len; i++) {
         Point *p = &g_array_index (P.traces, Point, i);
         gboolean gauche = p->x < l / 2.0;
         cairo_set_source_rgba (cr, gauche ? 0.26 : 0.98, gauche ? 0.52 : 0.74,
-                               gauche ? 0.96 : 0.02, 0.35);
-        cairo_arc (cr, p->x, p->y, 3, 0, 2 * G_PI);
+                               gauche ? 0.96 : 0.02, 0.5);
+        cairo_arc (cr, p->x, p->y, 7, 0, 2 * G_PI);
         cairo_fill (cr);
     }
     for (guint i = 0; i < P.appuis->len; i++) {
@@ -164,12 +168,60 @@ bilan_cote (const char *nom, gboolean gauche)
             centile (ys, 0.95), centile (ys, 1.0));
 }
 
+/* La carte de couverture : l'écran en cases de 40 px, et ce qui n'a jamais
+ * été touché. Une case creuse ENTOURÉE de cases touchées est une zone
+ * morte ; une case creuse au bord de ce qu'on a balayé n'est rien. */
+static void
+bilan_couverture (void)
+{
+    const int PAS = 40;
+    int cl = (P.largeur + PAS - 1) / PAS, ch = (P.hauteur + PAS - 1) / PAS;
+    g_autofree int *n = g_new0 (int, cl * ch);
+    for (guint i = 0; i < P.traces->len; i++) {
+        Point *p = &g_array_index (P.traces, Point, i);
+        int cx = CLAMP ((int) p->x / PAS, 0, cl - 1), cy = CLAMP ((int) p->y / PAS, 0, ch - 1);
+        n[cy * cl + cx]++;
+    }
+    int touchees = 0, creuses = 0;
+    printf ("\ncouverture, cases de %d px (# touchée, · jamais) :\n", PAS);
+    for (int y = 0; y < ch; y++) {
+        printf ("  ");
+        for (int x = 0; x < cl; x++) {
+            int v = n[y * cl + x];
+            putchar (v > 4 ? '#' : v > 0 ? '+' : '.');
+            if (v > 0)
+                touchees++;
+        }
+        putchar ('\n');
+    }
+    /* Les creux entourés : au moins six des huit voisines touchées. */
+    printf ("\nzones mortes probables (case vide, voisines touchées) :\n");
+    for (int y = 1; y < ch - 1; y++)
+        for (int x = 1; x < cl - 1; x++) {
+            if (n[y * cl + x] != 0)
+                continue;
+            int voisins = 0;
+            for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++)
+                    if ((dx || dy) && n[(y + dy) * cl + x + dx] > 0)
+                        voisins++;
+            if (voisins >= 6) {
+                printf ("  x %4d..%4d  y %4d..%4d  (%d voisines touchées)\n",
+                        x * PAS, (x + 1) * PAS, y * PAS, (y + 1) * PAS, voisins);
+                creuses++;
+            }
+        }
+    if (creuses == 0)
+        printf ("  aucune — %d cases sur %d touchées\n", touchees, cl * ch);
+}
+
 static void
 terminer (void)
 {
     printf ("écran : %d x %d px\n", P.largeur, P.hauteur);
     bilan_cote ("pouce gauche", TRUE);
     bilan_cote ("pouce droit", FALSE);
+    bilan_couverture ();
     fflush (stdout);
     if (P.journal != NULL)
         fclose (P.journal);
@@ -221,8 +273,8 @@ on_activate (GtkApplication *app, gpointer d)
     GtkWidget *consigne = gtk_label_new (NULL);
     gtk_label_set_markup (GTK_LABEL (consigne),
         "<span size='x-large' foreground='white'><b>Tiens la tablette à deux mains.</b></span>\n"
-        "<span size='large' foreground='#cccccc'>Tape du pouce, des deux côtés, comme sur un clavier,\n"
-        "partout où c'est CONFORTABLE — sans étirer.\n"
+        "<span size='large' foreground='#cccccc'>Balaie TOUT l'écran du doigt, comme pour le colorier :\n"
+        "les trous se verront en direct. Insiste sur les bords et les coins.\n"
         "Rien n'est cliqué derrière. Touche « Terminer » quand c'est fait.</span>");
     gtk_label_set_justify (GTK_LABEL (consigne), GTK_JUSTIFY_CENTER);
     P.compte = gtk_label_new ("0 appui");
