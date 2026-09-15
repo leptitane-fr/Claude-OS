@@ -122,8 +122,34 @@ mkdir -p "$POINT" "$(dirname "$JOURNAL")"
 # fichier ouvert en écriture non séquentielle est refusé, et la moitié des
 # applications — dont les boîtes « Enregistrer sous » — écrivent ainsi. Le
 # nuage cesserait d'être un dossier ordinaire, ce qui est tout l'objet.
-OPT="--vfs-cache-mode writes --dir-cache-time 30s --poll-interval 15s"
-OPT="$OPT --file-perms 0644 --dir-perms 0755"
+OPT="--vfs-cache-mode writes --file-perms 0644 --dir-perms 0755"
+
+# LE CACHE DE RÉPERTOIRES EST LONG, ET C'EST DÉLIBÉRÉ.
+#
+# Il valait 30 s, et c'était une faute : passé ce délai, revenir dans le
+# dossier parent qu'on venait de quitter le faisait re-interroger entièrement.
+# Symptôme rapporté le 15 septembre 2026 — « un retour prend autant de temps
+# que l'aller, rien n'est conservé ».
+#
+# Un cache long ne périme rien : « --poll-interval » interroge le service pour
+# les changements distants et invalide ce qu'il faut. On ne choisit donc pas
+# entre fraîcheur et vitesse — on paie une petite requête par minute au lieu
+# d'un listage complet par dossier et par demi-minute.
+OPT="$OPT --dir-cache-time 1000h --poll-interval 1m"
+
+# LE DÉBIT EST BRIDÉ, ET C'EST MESURÉ.
+#
+# L'identifiant OAuth que rclone livre est PARTAGÉ par tous ses utilisateurs
+# dans le monde, et son quota Google l'est aussi. Saturé, il rend
+# « Error 403: Quota exceeded […] for consumer project_number:202264815644 »,
+# et rclone attend alors en doublant à chaque tentative : 1,5 s, 2 s, 4,6 s…
+# D'où des listages à 17, 34 et 52 s observés le 15 septembre 2026 sur des
+# dossiers de vingt entrées — sans rapport avec leur taille ni avec le réseau.
+#
+# Lisser le débit évite de déclencher la limite par rafales. Le vrai remède
+# est un identifiant OAuth propre au compte, qui donne son quota à lui ; voir
+# docs/13.
+OPT="$OPT --tpslimit 10 --tpslimit-burst 10"
 
 case "$FOURNISSEUR" in
 	drive)

@@ -164,6 +164,66 @@ ne retarde rien.
 
 ---
 
+## Le quota partagé de rclone — la limite de l'identifiant par défaut
+
+**Mesuré le 15 septembre 2026, après le premier usage réel.** Des listages de
+dossiers de vingt entrées prenaient 17, 34 puis 52 secondes, sans rapport avec
+leur taille ni avec le réseau, et *le même dossier* passait de 34,56 s à
+1,36 s d'un essai à l'autre. Le journal détaillé donne la cause :
+
+```
+Error 403: Quota exceeded for quota metric 'Queries' and limit
+'Requests per minute' of service 'drive.googleapis.com'
+for consumer 'project_number:202264815644'
+```
+
+`202264815644` est **le projet de rclone**. Le quota Google est attaché à
+l'application, donc **partagé par tous les utilisateurs de rclone dans le
+monde** qui se servent de l'identifiant livré. Saturé, il fait attendre le
+pacer en doublant à chaque tentative — 1,5 s, 2 s, 4,6 s…
+
+C'est la limite, non mesurée au moment du choix, de la recommandation
+« identifiant rclone pour Drive » retenue plus haut. Elle ne la condamne pas :
+l'accès fonctionne, les jetons durent, et rien n'est à créer. Mais la
+navigation reste à la merci de ce que font les autres.
+
+**Deux remèdes, de portée inégale.**
+
+*Palliatif, en place :* lisser le débit (`--tpslimit 10`) pour ne pas
+déclencher la limite par rafales, et surtout ne plus relister sans cesse
+(ci-dessous).
+
+*Vrai remède, à faire :* un identifiant OAuth propre au compte, créé dans la
+console Google Cloud — gratuite et **sans carte bancaire**, contrairement à
+Azure. Le compte reçoit alors son propre quota. Attention au piège : laissée
+en mode « Test », l'application voit ses jetons de rafraîchissement expirer au
+bout de 7 jours ; il faut la publier en « Production », ce qui affiche un
+écran « application non validée » mais rend les jetons durables.
+
+---
+
+## Le cache de répertoires — une faute et sa correction
+
+`--dir-cache-time` valait **30 s**, et c'était une faute de réglage. Passé ce
+délai, revenir dans le dossier parent qu'on venait de quitter le faisait
+re-interroger entièrement. Symptôme rapporté par l'utilisateur dès le premier
+usage : « un retour prend autant de temps que l'aller, rien n'est conservé ».
+Et chaque relistage inutile rapprochait un peu plus du quota ci-dessus.
+
+Un cache long ne périme rien, parce que `--poll-interval` interroge le service
+pour les changements distants et invalide ce qu'il faut. On ne choisit donc
+pas entre fraîcheur et vitesse.
+
+Mesures avant / après, même machine, même compte :
+
+| | avant (30 s) | après (1000 h + poll 1 min) |
+|---|---|---|
+| Retour au dossier parent | aussi long que l'aller | **0,01 s** |
+| Même dossier, 105 s plus tard | relisté depuis le réseau | **0,01 s** |
+| Fichier déposé par un autre appareil | — | **vu en 50 s**, sans démontage |
+
+---
+
 ## Quatre pièges payés
 
 ### 1. `--daemon` coûte une demi-minute pour rien
