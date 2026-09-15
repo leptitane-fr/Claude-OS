@@ -89,8 +89,10 @@ def main():
               f"bornes brutes : x {xmin}..{xmax}, y {ymin}..{ymax}"
               f"  →  rendu en pixels d'écran {L}x{H}\n"
               f"écoute {duree:.0f} s à partir de {time.strftime('%H:%M:%S')}\n\n"
-              f"{'#':>3} {'pose x,y':>12} {'trame+1':>10} {'+50 ms':>10} "
-              f"{'trajet x':>9} {'durée':>7} {'doigts':>7}\n")
+              f"lisière des tiroirs : 24 px de chaque bord"
+              f"  (donc x ≤ 23 à gauche, x ≥ {L - 24} à droite)\n\n"
+              f"{'#':>3} {'bord':>7} {'pose x,y':>12} {'x mini':>7} {'trame+1':>8} "
+              f"{'+50 ms':>8} {'trajet':>7} {'durée':>7} {'doigts':>6} {'lisière':>8}\n")
     j.write(entete); j.flush()
 
     slots = {}          # slot -> dict du contact en cours
@@ -139,12 +141,21 @@ def main():
                     premier = p[0]
                     suivant = p[1] if len(p) > 1 else p[0]
                     apres = next((q for q in p if q[0] - premier[0] >= 0.050), p[-1])
-                    trajet = max(q[1] for q in p) - min(q[1] for q in p)
-                    j.write(f"{n:>3} {ex(premier[1]):>5},{ey(premier[2]):<6} "
-                            f"{ex(suivant[1]):>10} {ex(apres[1]):>10} "
-                            f"{round(trajet * (L - 1) / max(1, xmax - xmin)):>9} "
-                            f"{p[-1][0] - p[0][0]:>6.2f}s "
-                            f"{c['voisins'] + 1:>7}\n")
+                    xs = [ex(q[1]) for q in p]
+                    x0, mini, maxi = xs[0], min(xs), max(xs)
+
+                    # De quel bord venait le geste, et le contact est-il tombé
+                    # dans la lisière ? C'est TOUTE la question : la lisière ne
+                    # voit que ce qui se pose dans ses 24 px.
+                    if x0 < L / 2:
+                        bord, dedans = "gauche", mini <= 23
+                    else:
+                        bord, dedans = "droite", maxi >= L - 24
+                    j.write(f"{n:>3} {bord:>7} {x0:>5},{ey(premier[2]):<6} "
+                            f"{mini:>7} {ex(suivant[1]):>8} {ex(apres[1]):>8} "
+                            f"{maxi - mini:>7} {p[-1][0] - p[0][0]:>6.2f}s "
+                            f"{c['voisins'] + 1:>6} "
+                            f"{'OUI' if dedans else 'non':>8}\n")
                     j.flush()
             elif t == EV_ABS and code == ABS_MT_POSITION_X and slot in slots:
                 slots[slot]["x"] = val

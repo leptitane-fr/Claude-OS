@@ -2,34 +2,44 @@
 
 #include <gtk4-layer-shell.h>
 
-/* LARGEUR DE LA LISIERE, ET POURQUOI ELLE N'EST PLUS CELLE DU BORD BAS.
+/* LARGEUR DES LISIERES, ET POURQUOI LES DEUX BORDS N'ONT PAS LA MEME.
  *
- * Elle a fait 10 px, comme la bande qui rappelle le dock. Mesure au banc le
- * 15 septembre 2026, doigt virtuel par uinput -- donc par libinput et le
- * touch.c de labwc, le vrai chemin du contact : le glissé n'ouvrait QUE si
- * le premier contact tombait entre 0 et 9 px du bord. A 11 px, plus rien,
- * des deux cotes.
+ * LA DALLE DE MADOO NE RAPPORTE RIEN AU RAS DE SON BORD GAUCHE. Mesure sur
+ * la dalle meme, en amont du compositeur (essais/sonde-contacts.py), le
+ * 15 septembre 2026, quatre glissés venus du cadre gauche :
  *
- * C'est assez pour le pointeur, qu'on vise. Ce ne l'est pas pour le doigt :
- * la dalle rapporte la pose une trame apres le contact, et un doigt qui
- * entre vite depuis le cadre a deja parcouru dix a vingt pixels quand sa
- * position est rapportee. Le bord BAS s'en tire a 10 px parce qu'on l'aborde
- * perpendiculairement, en butant contre le chassis ; les bords lateraux se
- * prennent en biais.
+ *     premier contact  37, 32, 32, 37    x le plus proche du bord : idem
  *
- * CE QUE CES 24 PX COUTENT : les applications ne recoivent plus ni contact
- * ni clic dans les 24 premiers pixels de gauche et de droite -- 3,9 mm sur
- * cette dalle, qui fait 310 mm pour 1920 px. C'est le prix du geste, et il
- * se rend en changeant cette seule ligne. */
-#define BANDE_PX 24
+ * Jamais rien en deca de 32 px. Les memes gestes au bord DROIT se posent a
+ * 1919, 1905, 1919, 1915 -- au dernier pixel de l'ecran. L'ecart n'est pas
+ * dans le geste, il est dans le verre : la zone sensible du Goodix commence
+ * une trentaine de pixels a l'interieur du bord gauche, et rien en logiciel
+ * n'ira chercher un contact qui n'est pas rapporte.
+ *
+ * D'ou DEUX largeurs, et non une valeur symetrique qui aurait l'air plus
+ * propre :
+ *
+ *   - a GAUCHE, 48 px : les contacts mesures tombent entre 32 et 37, et la
+ *     marge couvre une entree plus vive. CE QUE CELA COUTE EST PLUS FAIBLE
+ *     QU'IL N'Y PARAIT : les 32 premiers pixels ne recoivent deja AUCUN
+ *     contact, quoi qu'on y mette. La lisiere ne prend donc aux applications
+ *     que les 16 px qui restent -- au doigt. Au pointeur, elle prend bien
+ *     les 48.
+ *   - a DROITE, 24 px : le contact s'y pose au dernier pixel, et il n'y a
+ *     aucune raison de prendre plus que necessaire.
+ *
+ * Une largeur se change ici, et le banc du doigt (essais/banc-doigt.sh) dit
+ * aussitot ce qu'elle vaut. */
+#define LISIERE_GAUCHE_PX 48
+#define LISIERE_DROITE_PX 24
 
 /* CE QUE LE POINTEUR, LUI, GARDE : dix pixels.
  *
- * La lisiere elargie sert le doigt ; l'ouverture au pointeur pose reste
- * bornee aux 10 px du bord. Une souris immobilisee a 20 px du cadre -- sur
- * la bordure d'une fenetre, par exemple -- ne doit pas faire sortir un volet
- * au bout d'une seconde. Le doigt est imprecis, le pointeur ne l'est pas :
- * il n'y a aucune raison de leur donner la meme tolerance. */
+ * Les lisieres elargies servent le doigt ; l'ouverture au pointeur pose
+ * reste bornee aux 10 px du bord. Une souris immobilisee a 20 px du cadre --
+ * sur la bordure d'une fenetre, par exemple -- ne doit pas faire sortir un
+ * volet au bout d'une seconde. Le doigt est imprecis, le pointeur ne l'est
+ * pas : il n'y a aucune raison de leur donner la meme tolerance. */
 #define POSE_PX 10
 
 /* Ce qu'il faut parcourir vers l'interieur pour que le glisser compte.
@@ -74,13 +84,16 @@ typedef struct {
     GtkLayerShellEdge bord;
     const char       *espace;     /* le namespace de la lisiere              */
     const char       *nom;        /* pour le journal, et pour le banc        */
+    int               lisiere;    /* largeur de la bande sensible, en px     */
     struct { GdkEventSequence *suite; double x0; } contacts[SUITES_MAX];
 } Cote;
 
 static Cote G = { .sens = +1, .bord = GTK_LAYER_SHELL_EDGE_LEFT,
-                  .espace = "claude-os-lisiere-gauche", .nom = "gauche" };
+                  .espace = "claude-os-lisiere-gauche", .nom = "gauche",
+                  .lisiere = LISIERE_GAUCHE_PX };
 static Cote D = { .sens = -1, .bord = GTK_LAYER_SHELL_EDGE_RIGHT,
-                  .espace = "claude-os-lisiere-droite", .nom = "droite" };
+                  .espace = "claude-os-lisiere-droite", .nom = "droite",
+                  .lisiere = LISIERE_DROITE_PX };
 
 static struct {
     GtkWidget *fenetre;      /* le tiroir : plein ecran, masque au repos    */
@@ -199,7 +212,7 @@ attente_echue (gpointer data)
 static double
 au_bord (const Cote *c, double x)
 {
-    return c->sens > 0 ? x : BANDE_PX - x;
+    return c->sens > 0 ? x : c->lisiere - x;
 }
 
 /* LE POINTEUR POSE, ET NON LE POINTEUR QUI PASSE.
@@ -310,7 +323,7 @@ on_bande_contact (GtkEventControllerLegacy *ctrl, GdkEvent *ev, gpointer d)
 }
 
 /* Le glisser du POINTEUR : vers l'interieur de l'ecran, depuis le bord. Il
- * part d'OU QU'IL SOIT dans la lisiere -- c'est tout l'objet de ses 24 px.
+ * part d'OU QU'IL SOIT dans la lisiere -- c'est tout l'objet de sa largeur.
  * Le doigt, lui, passe par on_bande_contact(). */
 static void
 on_bande_glisse (GtkGestureDrag *g, double dx, double dy, gpointer d)
@@ -357,7 +370,7 @@ bande_creer (GtkApplication *app, Cote *c)
                                  GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
 
     GtkWidget *plage = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_size_request (plage, BANDE_PX, -1);
+    gtk_widget_set_size_request (plage, c->lisiere, -1);
     gtk_window_set_child (GTK_WINDOW (bande), plage);
 
     GtkGesture *g = gtk_gesture_drag_new ();

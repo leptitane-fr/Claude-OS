@@ -256,21 +256,43 @@ volet vide, n'était centrée sur rien.
   est réarmée à **chaque mouvement dans la bande** : tant que le curseur
   bouge, le compte repart de zéro.
 
-**LA LISIÈRE FAIT 24 PX POUR LE DOIGT, ET LA POSE N'EN GARDE QUE 10.**
-Elle a fait 10 px, comme la bande du bord bas qui rappelle le dock. Mesure au
-banc le 15 septembre 2026, **doigt virtuel par uinput** — donc par libinput et
-le `touch.c` de labwc, le vrai chemin du contact : le glissé n'ouvrait **que
-si le premier contact tombait entre 0 et 9 px du bord**, des deux côtés ; à
-11 px, plus rien. C'est assez pour le pointeur, qu'on vise ; ce ne l'est pas
-pour le doigt, la dalle rapportant la pose une trame après le contact — un
-doigt qui entre vite a déjà parcouru dix à vingt pixels. Le bord **bas** s'en
-tire à 10 px parce qu'on l'aborde perpendiculairement, en butant contre le
-châssis ; les bords latéraux se prennent en biais.
+**LES DEUX LISIÈRES N'ONT PAS LA MÊME LARGEUR, ET C'EST LA DALLE QUI LE
+DICTE.** Mesure sur le Goodix de MADOO, en amont du compositeur
+(`shell/essais/sonde-contacts.py`), le 15 septembre 2026 — quatre glissés
+venus de chaque bord :
 
-Ce que ces 24 px coûtent : les applications ne reçoivent plus ni contact ni
-clic dans les **24 premiers pixels** de gauche et de droite — 3,9 mm sur cette
-dalle, qui fait 310 mm pour 1920 px. C'est le prix du geste, et il se rend en
-changeant une ligne (`BANDE_PX`).
+| bord | premier contact | x le plus proche du bord jamais atteint |
+|---|---|---|
+| gauche | 37, 32, 32, 37 | 37, 32, 32, 37 |
+| droite | 1919, 1905, 1919, 1915 | au dernier pixel |
+
+**La dalle ne rapporte jamais rien en deçà de 32 px de son bord gauche.**
+L'écart n'est pas dans le geste, il est dans le verre : la zone sensible
+commence une trentaine de pixels à l'intérieur de ce bord. Rien en logiciel
+n'ira chercher un contact qui n'est pas rapporté.
+
+D'où deux largeurs, et non une valeur symétrique qui aurait l'air plus propre :
+**48 px à gauche** (les contacts mesurés tombent entre 32 et 37 ; la marge
+couvre une entrée plus vive) et **24 px à droite** (le contact s'y pose au
+dernier pixel, inutile de prendre plus).
+
+Ce que la lisière gauche coûte est plus faible qu'il n'y paraît : **les
+32 premiers pixels ne reçoivent déjà aucun contact**, quoi qu'on y mette. Elle
+ne prend donc aux applications que les 16 px restants — au doigt. Au pointeur,
+elle prend bien ses 48.
+
+Étape par étape : elle a d'abord fait 10 px, comme la bande du bord bas qui
+rappelle le dock ; le doigt virtuel a montré qu'à 11 px de distance plus rien
+n'ouvrait ; 24 px ont amélioré sans régler, et c'est la sonde sur la dalle qui
+a rendu le chiffre qui manquait. Le bord **bas** reste à 10 px : on l'aborde
+perpendiculairement, en butant contre le châssis, et la zone sensible y va
+jusqu'au bord.
+
+**L'ouverture au pointeur posé reste bornée à 10 px** (`POSE_PX`) des deux
+côtés : une souris immobilisée à 20 px du cadre — sur la bordure d'une
+fenêtre — ne doit pas faire sortir un volet au bout d'une seconde. Le doigt est
+imprécis, le pointeur ne l'est pas ; rien n'oblige à leur donner la même
+tolérance.
 
 **TOUS LES CONTACTS SONT SUIVIS, ET PAS SEULEMENT LE PREMIER.** `GtkGestureDrag`
 est un `GtkGestureSingle` : il ne suit qu'une suite de contacts à la fois, et

@@ -10,9 +10,11 @@
 #
 # Ce qu'il éprouve, et pourquoi chaque cas existe :
 #
-#   - le glissé depuis le cadre, à mi-lisière, au bout de la lisière : la
-#     dalle rapporte la pose une trame après le contact, et un doigt qui entre
-#     vite a déjà parcouru dix à vingt pixels (BANDE_PX vaut 24) ;
+#   - les glissés à x = 0, 32, 37 et 47 : la dalle de MADOO ne rapporte RIEN
+#     en deçà de 32 px à gauche (mesuré, essais/sonde-contacts.py), et les
+#     gestes réels s'y posent entre 32 et 37. La lisière gauche fait donc
+#     48 px là où celle de droite, où le contact se pose au dernier pixel,
+#     garde 24 ;
 #   - le glissé hors lisière, à rebours, et la tape sans trajet : ce qui ne
 #     doit RIEN ouvrir ;
 #   - le FANTÔME suivi du vrai glissé : un contact fugace naît sur la lisière
@@ -87,14 +89,21 @@ claude-os-root modprobe uinput || { echo "uinput indisponible" >&2; exit 1; }
 relancer_bavarde
 
 echo "Gestes au doigt — $BARRE"
+# LES CHIFFRES DE GAUCHE SONT CEUX DE LA DALLE, PAS DES VALEURS RONDES. Le
+# Goodix de MADOO ne rapporte jamais un contact en deçà de x = 32 : les quatre
+# glissés mesurés le 15 septembre 2026 se sont posés à 32, 32, 37 et 37. Le
+# cas « x=37 » est donc le geste réel de l'utilisateur, et c'est celui qui
+# échouait quand la lisière faisait 24 px.
 cas "glissé depuis le cadre (x=0)"        gauche ouvre glisse 0 600 210 600 260
-cas "glissé à mi-lisière (x=12)"          gauche ouvre glisse 12 600 220 600 260
-cas "glissé au bout de la lisière (x=23)" gauche ouvre glisse 23 600 230 600 260
-cas "glissé hors lisière (x=30)"          gauche rien  glisse 30 600 240 600 260
-cas "glissé à rebours (23 → 0)"           gauche rien  glisse 23 600 0 600 260
+cas "glissé au plancher de la dalle (32)" gauche ouvre glisse 32 600 240 600 260
+cas "glissé comme mesuré (x=37)"          gauche ouvre glisse 37 600 320 600 260
+cas "glissé au bout de la lisière (47)"   gauche ouvre glisse 47 600 260 600 260
+cas "glissé hors lisière (x=56)"          gauche rien  glisse 56 600 270 600 260
+cas "glissé à rebours (47 → 0)"           gauche rien  glisse 47 600 0 600 260
 cas "tape sans trajet"                    gauche rien  touche 5 600
-cas "fantôme puis glissé"                 gauche ouvre fantome 8 600 230 600 5 380
+cas "fantôme puis glissé"                 gauche ouvre fantome 37 600 320 600 5 380
 cas "bord droit, vers l'intérieur"        droite ouvre glisse 1914 600 1700 600 260
+cas "bord droit, hors lisière (1890)"     droite rien  glisse 1890 600 1700 600 260
 cas "bord droit, fantôme puis glissé"     droite ouvre fantome 1914 600 1700 600 1918 380
 fermer
 
@@ -105,5 +114,5 @@ tuer_barre
 claude-os-root modprobe -r uinput || true
 
 echo
-echo "9 cas, $ECHECS en échec. Journal : $JOURNAL"
+echo "11 cas, $ECHECS en échec. Journal : $JOURNAL"
 exit "$ECHECS"

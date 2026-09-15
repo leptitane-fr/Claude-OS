@@ -65,15 +65,19 @@ ailleurs les referme. Les widgets ont quitté le bord droit, où ils
 partageaient une colonne avec la Console, le 15 septembre 2026 : deux choses
 sans rapport empilées au même bord se lisaient comme une seule.
 
-**LA LISIÈRE FAIT 24 PX POUR LE DOIGT, 10 PX POUR LA POSE DU POINTEUR.** À
-10 px, mesuré au doigt virtuel (`shell/essais/doigt.py`, uinput), le glissé
-n'ouvrait que si le premier contact tombait entre 0 et 9 px du bord — des deux
-côtés. La dalle rapporte la pose une trame après le contact, et un doigt qui
-entre en biais a déjà parcouru dix à vingt pixels. Le bord bas s'en tire à
-10 px parce qu'on l'aborde perpendiculairement. Ce que ça coûte : les
-applications ne reçoivent plus rien dans les 24 premiers pixels de gauche et
-de droite (3,9 mm). L'ouverture au pointeur POSÉ, elle, reste à 10 px : une
-souris arrêtée sur la bordure d'une fenêtre ne doit pas sortir un volet.
+**LES DEUX LISIÈRES N'ONT PAS LA MÊME LARGEUR — 48 px à gauche, 24 à droite —
+ET C'EST LA DALLE QUI LE DICTE.** Mesuré sur le Goodix en amont du compositeur
+(`shell/essais/sonde-contacts.py`) : à droite le contact se pose au dernier
+pixel (1919), à gauche **la dalle ne rapporte jamais rien en deçà de 32 px**
+(quatre glissés : 32, 32, 37, 37). La zone sensible commence à l'intérieur de
+ce bord-là ; aucun logiciel n'ira chercher un contact qui n'est pas rapporté.
+Ce que la lisière gauche coûte est donc plus faible qu'il n'y paraît : les
+32 premiers pixels ne reçoivent déjà aucun contact, elle ne prend aux
+applications que les 16 px restants — au doigt ; au pointeur, elle prend ses
+48. Le bord **bas** du dock garde 10 px : on l'aborde perpendiculairement, et
+la zone sensible y va jusqu'au bord. L'ouverture au pointeur POSÉ reste à
+10 px des deux côtés (`POSE_PX`) : une souris arrêtée sur la bordure d'une
+fenêtre ne doit pas sortir un volet.
 
 **ET TOUS LES CONTACTS SONT SUIVIS, PAS SEULEMENT LE PREMIER.** `GtkGestureDrag`
 ne suit qu'une suite de contacts : un contact fugace né sur la lisière avant

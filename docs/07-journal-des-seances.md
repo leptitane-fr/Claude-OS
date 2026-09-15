@@ -1743,6 +1743,52 @@ banc qui se saborde :
 
 ---
 
+## 15 septembre 2026, tard — la dalle ne voit pas son bord gauche
+
+« Ça ne s'ouvre toujours pas au glissé, ça fonctionne très bien à droite. »
+Trois correctifs plus tard, la vérité était dans le verre, et une seule mesure
+l'a rendue.
+
+**Ce que la sonde a lu**, sur la dalle même, en amont du compositeur, quatre
+glissés par bord :
+
+| bord | premier contact | x le plus proche du bord jamais atteint | dans la lisière |
+|---|---|---|---|
+| gauche | 37, 32, 32, 37 | 37, 32, 32, 37 | non ×4 |
+| droite | 1919, 1905, 1919, 1915 | au dernier pixel | oui ×4 |
+
+**Le Goodix de MADOO ne rapporte jamais un contact en deçà de 32 px de son
+bord gauche.** Rien de tel à droite, où il se pose au dernier pixel. Ce
+n'était donc ni le geste, ni GTK, ni labwc : la zone sensible commence une
+trentaine de pixels à l'intérieur de ce bord-là, et aucun logiciel n'ira
+chercher un contact qui n'est pas rapporté.
+
+**Deux largeurs, et non une valeur symétrique :** 48 px à gauche — les
+contacts mesurés tombent entre 32 et 37, la marge couvre une entrée plus vive
+— et 24 px à droite, où il n'y a aucune raison de prendre plus. Le banc du
+doigt porte désormais le geste réel de l'utilisateur, `x=37`, celui-là même
+qui échouait ; onze cas sur onze contre le binaire installé.
+
+**Ce que la lisière gauche coûte est plus faible qu'il n'y paraît :** les
+32 premiers pixels ne reçoivent déjà aucun contact, quoi qu'on y mette. Elle
+ne prend aux applications que les 16 px restants — au doigt. Au pointeur, elle
+prend bien ses 48 ; c'est le seul vrai prix, et il est dit.
+
+**La leçon de méthode, et elle est chère.** Trois séries d'essais au doigt
+virtuel ont donné 100 % de réussite pendant que l'utilisateur échouait neuf
+fois sur dix. L'instrument était juste — il traverse bien libinput et le
+`touch.c` de labwc, la correction du fantôme l'a prouvé en changeant son
+résultat — mais **il pose le contact où on le lui dit**, et c'était exactement
+la variable en cause. Un banc ne peut pas éprouver ce qu'il fabrique lui-même :
+il fallait lire la dalle, et il a fallu trois échanges pour y venir. L'ordre
+juste était l'inverse — mesurer d'abord la seule chose qu'on ne contrôlait
+pas, corriger ensuite.
+
+Le correctif du fantôme, lui, reste : il était réel, reproductible, et il
+aurait mordu tôt ou tard.
+
+---
+
 ## Ce qui reste à faire — au 10 septembre 2026
 
 Par ordre d'importance.
