@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Claude OS — volume coupé -->
+  <path d="M2.4 6.4L5.2 6.4L8.5 3.1L8.5 12.9L5.2 9.6L2.4 9.6Z" fill="#222222"/>
+  <g transform="translate(10.4 5.6) rotate(51.633)"><path d="M0.75 -0.75H5.372A0.75 0.75 0 0 1 6.122 0V0A0.75 0.75 0 0 1 5.372 0.75H0.75A0.75 0.75 0 0 1 0 0V0A0.75 0.75 0 0 1 0.75 -0.75Z" fill="#222222"/></g>
+  <g transform="translate(14.2 5.6) rotate(128.367)"><path d="M0.75 -0.75H5.372A0.75 0.75 0 0 1 6.122 0V0A0.75 0.75 0 0 1 5.372 0.75H0.75A0.75 0.75 0 0 1 0 0V0A0.75 0.75 0 0 1 0.75 -0.75Z" fill="#222222"/></g>
+</svg>

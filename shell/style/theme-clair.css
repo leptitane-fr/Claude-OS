@@ -32,6 +32,65 @@
 @define-color warn              #fbbc05;
 @define-color danger            #ea4335;
 
+/* Ce qui porte l'encre blanche du coin — l'ombre posée sous chaque élément.
+   Voir « .coin-heure » et les siennes dans shell.css.
+
+   NOIR DANS LES QUATRE THÈMES, par nécessité et non par goût : c'est le
+   pendant exact de @avis. L'encre du coin est blanche partout, ce qui la
+   détache doit donc être sombre partout.
+
+   UN VIGNETTAGE AVAIT ÉTÉ ESSAYÉ D'ABORD, et écarté à l'usage. Il faisait
+   son travail — mesuré, 4,7:1 sous l'heure sur une page blanche — mais pour
+   s'éteindre sans qu'on voie son bord, il lui fallait 800 px de course : il
+   occupait un quart de l'écran et tirait l'œil. Une ombre portée obtient le
+   même détachement sur quelques pixels, et ne prend AUCUNE place. C'est
+   aussi, tout simplement, ce que font les sous-titres.
+
+   LE JETON EST OPAQUE, et l'opacité vient d'ailleurs : c'est
+   « appearance.ombre_opacite » de shell.conf, relu à chaud, qui la fixe —
+   avec le flou, le contour et le décalage. Le thème dit DE QUELLE COULEUR
+   l'ombre est faite, le réglage dit combien on en met. */
+@define-color ombre-encre #000000;
+
+/* Les avis système — le cadran du compte à rebours et les messages courts
+   qui passent au-dessus du dock.
+
+   BLANC DANS LES QUATRE THÈMES, par décision : un avis n'appartient à aucune
+   application et ne colore rien : il éclaire. Le blanc est la seule teinte
+   qui dise cela sans rien signifier d'autre — un accent l'aurait rattaché au
+   thème, un gris l'aurait fait passer pour éteint.
+
+   C'est un jeton et non un « #ffffff » écrit dans avis.c : la règle du
+   projet vaut ici comme ailleurs, les couleurs vivent dans les thèmes. Un
+   thème qui voudrait en décider autrement n'a que cette ligne à changer.
+
+   Son opacité, elle, n'est PAS fixée ici : avis.c la réécrit d'après le
+   réglage « opacite » du panneau Énergie. */
+@define-color avis #ffffff;
+
+/* -------------------------------------------------------------------------
+   LES MÊMES SURFACES, EN VERRE.
+
+   Chargées par-dessus les précédentes quand « Activer la transparence » est
+   coché — voir style/verre.css, qui ne fait rien d'autre que renommer
+   celles-ci en @surface, @surface-alt et @surface-sunk. Aucune règle de
+   shell.css ne change : c'est le jeton qui devient translucide, pas la
+   règle.
+
+   TROIS VALEURS ET NON UNE, ET L'OPACITÉ CROÎT AVEC L'ENFONCEMENT. Le
+   survol d'une icône se peint PAR-DESSUS le fond du dock : plus clairsemé
+   que lui, il se lirait comme un trou creusé dans la surface au lieu d'une
+   réaction au doigt. Sur un fond clair, 0.74 laisse deviner le fond
+   d'écran sans que le texte noir perde son assise.
+
+   Les valeurs sont RECOPIÉES et non écrites alpha(@surface, …) : le
+   fournisseur du verre redéfinit précisément @surface, et la référence
+   tournerait en rond.
+   ------------------------------------------------------------------------- */
+@define-color verre       alpha(#ffffff, 0.74);
+@define-color verre-alt   alpha(#f1f3f4, 0.86);
+@define-color verre-sunk  alpha(#e8eaed, 0.94);
+
 .fond-degrade {
   background-color: #e9ecf1;
   background-image:

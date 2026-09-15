@@ -1307,6 +1307,263 @@ ne lisait.
 
 ---
 
+## 14 septembre 2026, suite — l'apparence se règle, et le bureau a ses icônes
+
+Trois demandes d'esthétique, toutes **vues à l'écran sur MADOO**.
+
+### La transparence, en trois lignes
+
+`style/verre.css` ne contient aucune règle :
+
+```css
+@define-color surface      @verre;
+@define-color surface-alt  @verre-alt;
+@define-color surface-sunk @verre-sunk;
+```
+
+Le dock, la barre, la Console, le lanceur et les fenêtres du système ne
+peignent jamais une couleur : ils peignent l'un de ces trois jetons. Les
+renommer suffit donc, et il n'y a **aucune liste de classes à tenir à jour** —
+une liste qui aurait vieilli à la première fenêtre ajoutée, en silence.
+
+**Trois valeurs de verre et non une, l'opacité croissant avec
+l'enfoncement.** Le survol d'une icône se peint par-dessus le fond du dock ;
+plus clairsemé que lui, il se lirait comme un trou creusé dans la surface.
+
+Décochée par défaut, et **pas par prudence d'affichage** : une surface
+translucide interdit au compositeur de la poser sans mélange, et se paie en
+remplissage GPU donc en watts.
+
+### La couleur de contraste
+
+Même mécanique, d'un cran au-dessus : `style/accent-<id>.css` ne redéfinit
+que quatre jetons, chargé comme un fournisseur CSS de priorité supérieure.
+
+**Le mécanisme a été vérifié avant d'être écrit** — un programme d'essai a
+confirmé qu'un fournisseur plus prioritaire redéfinit une couleur nommée pour
+des règles écrites ailleurs, et que le vider rend la main au thème.
+
+**Les huit teintes ne sont pas choisies à l'œil** : chacune est la plus vive
+de sa famille qui tienne encore **4,5:1 sous du texte blanc**. C'est ce seuil
+qui a fixé la valeur, pas l'inverse — un réglage nommé « couleur de
+contraste » qui rendrait les libellés illisibles serait une plaisanterie.
+
+### Le thème d'icônes de la distribution
+
+[`tools/fabrique-icones.py`](../tools/fabrique-icones.py) engendre 116
+pictogrammes. **C'est le générateur qui est la source** ; corriger un SVG
+installé serait perdu à l'exécution suivante.
+
+Ce qui fait qu'un jeu paraît dessiné plutôt qu'assemblé n'est pas le talent
+de chaque pictogramme, c'est qu'ils partagent l'épaisseur de trait, le rayon
+d'angle et la marge. Ces constantes sont en tête du fichier.
+
+**Tout y est une surface pleine, jamais un contour.** GTK recolore une icône
+`-symbolic` en imposant `fill` ; un `stroke` resterait noir sur un thème
+sombre. Ce que GTK recolore exactement — `rect`, `circle`, `path`, `polygon`,
+y compris dans un groupe transformé — a été **mesuré** : une icône d'essai
+rendue en rouge, puis les pixels relus.
+
+**LE CONTRÔLE DE COUVERTURE A TROUVÉ UN VRAI DÉFAUT.** Le générateur relève
+les noms cités dans `shell/src/*.c` et dit lesquels il ne dessine pas.
+`status.c` ne demande pas un nom écrit en clair : il **compose**
+`battery-level-%d%s-symbolic` depuis la charge arrondie à la dizaine. Le
+thème ne dessinait que le cran 100 ; sur une machine à 67 %, la barre d'état
+servait la batterie de Papirus au milieu de nos icônes. Les vingt-deux crans
+sont désormais engendrés — et le contrôle sait que ces noms-là ne peuvent pas
+être trouvés par un `grep`.
+
+---
+
+## 15 septembre 2026 — les avis, le coin, le tiroir : la barre d'état disparaît
+
+La plus grosse refonte de l'interface depuis la mise en service. Elle s'est
+faite en cinq temps, chacun sorti de l'usage réel.
+
+### 1. Les avis système ont une surface à eux
+
+`shell/src/preavis.c` est devenu `shell/src/avis.c`. Ce n'était plus le seul
+compte à rebours de la veille : c'est **l'endroit unique** où le système
+affiche ce qu'il a à dire en passant. Au centre, au-dessus du dock, en blanc,
+sans clic ni survol ni focus.
+
+**C'est le lieu qui fait l'avis, pas le module qui l'émet.** Un signal
+périphérique ne vaut que si l'œil sait d'avance où le trouver.
+
+**L'avis n'est pas la notification, et les deux coexistent.** L'avis est
+fugace ; ce qui doit se retrouver plus tard passe par la cloche.
+`batterie.c` fait les deux aux seuils, et **l'avis seul** aux bascules de la
+prise — on ne va pas chercher dans l'historique la confirmation d'un geste
+qu'on vient de faire.
+
+Le diamètre ne se mesure plus sur la pilule de la barre : au centre de
+l'écran il n'y a plus de bord à partager, et faire dépendre un diamètre de la
+largeur de l'heure affichée était devenu une coïncidence entretenue pour rien.
+
+### 2. « En charge » arrivait jusqu'à cinq minutes trop tard
+
+Rapporté à l'usage. La cause était nette une fois posée : `batterie.c` ne
+découvrait le branchement qu'à sa lecture suivante, et l'intervalle sur
+secteur est de 300 s.
+
+`batterie.h` dit, mesures à l'appui, que cette machine n'émet **aucun**
+événement quand le pourcentage change — quinze minutes d'écoute en décharge,
+quatre changements, zéro événement. **Mais cela ne valait que pour le
+pourcentage.** Brancher est un événement matériel, et le noyau l'annonce.
+
+Vérifié avant d'écrire une ligne : socket **netlink**, groupe 1 — celui des
+uevents du noyau, déclaré `NL_CFG_F_NONROOT_RECV`, donc **abonnable sans
+privilège et sans libudev**. Cinq messages arrivent d'un coup, un par
+alimentation, avec `POWER_SUPPLY_ONLINE` dans la charge utile.
+
+Puis vérifié dans le vrai `claude-os-status` : événement à 09:26:54, **une
+seule** lecture — la rafale est regroupée sur 250 ms. La scrutation reste en
+filet, et le journal dit lequel des deux chemins a parlé.
+
+**Un second retard s'est révélé ensuite** : l'avis arrivait à l'heure, mais la
+fiche du coin tenait de la minuterie d'une minute de `status.c` — deux témoins
+de la même chose, dont l'un mentait pendant jusqu'à soixante secondes.
+`shell_batterie_sur_lecture()` prévient désormais à chaque lecture, d'où
+qu'elle vienne.
+
+### 3. Le coin remplace la barre d'état, le tiroir remplace le clic
+
+Sur maquette fournie par l'utilisateur. La pilule opaque du bas-droite laisse
+la place à deux choses :
+
+**Le coin** (`coin.c`) : des tracés clairs posés sur le fond d'écran, sans
+fond ni bordure ni ombre, **permanents** et **insensibles au clic comme au
+survol**. Heure, date en toutes lettres, mode d'énergie en grand par-dessus la
+droite de l'heure, et en colonne non-lu, réseau, Bluetooth, charge, fiche
+secteur.
+
+**Le tiroir** (`tiroir.c`) : deux volets tirés du bord droit — widgets à venir
+en haut, Console en bas. Glissé du doigt, ou **pointeur posé une seconde**
+contre le bord : une attente et non un contact, le bord droit étant l'endroit
+où finit tout mouvement un peu vif.
+
+Quatre points de conception qui ont demandé du soin :
+
+- **La Console n'est plus un popover.** `panel_new()` rend le contenu, et la
+  relecture périodique suit `map`/`unmap` plutôt que `show`/`closed` : ces
+  deux signaux disent exactement « la Console est à l'écran », ce que
+  l'ouverture d'un popover ne garantissait pas.
+- **La fenêtre du tiroir est plein écran dès sa création**, et c'est le
+  revealer qui bouge. Redimensionner une surface layer-shell qui porte un
+  popover ouvert l'envoie hors de l'écran sous labwc 0.8.3 — règle du
+  11 septembre — et la Console en ouvre.
+- **La nappe et les volets sont séparés par un `GtkOverlay`**, pas par un test
+  dans un gestionnaire de clic : GTK désigne le widget le plus haut, la
+  distinction est structurelle.
+- **Le centre de notifications n'a plus d'entrée**, par choix explicite de
+  l'utilisateur — le volet haut reste vide en attendant un widget. La
+  **bannière**, elle, reste : elle s'accroche au coin. Perdre l'historique est
+  un choix ; perdre l'annonce à l'arrivée en aurait été un autre.
+
+**Les trois modes d'énergie ont dû changer de glyphes.** Le coin n'en montre
+qu'un, en grand et sans libellé : trois cadrans que seule l'inclinaison d'une
+aiguille distinguait ne pouvaient plus faire l'affaire. Un badge « AUTO » a
+été essayé puis écarté — dire la chose par un mot est l'aveu qu'on n'a pas
+trouvé l'image, et quatre lettres deviennent illisibles à la taille de la
+Console. C'est finalement **la famille d'Adwaita** qui a été reprise, cadran,
+balance et feuille, redessinée dans la grammaire du projet : celle que le
+bureau portait avant d'avoir son propre jeu, et que l'utilisateur est venu
+rechercher.
+
+### 4. Rien ne doit bouger, et c'est mesuré
+
+Le coin est ancré à droite : toute largeur qui change déplace son bord
+gauche. Trois causes, trouvées à l'usage :
+
+- **L'heure.** En chasses proportionnelles, « 11:11 » est plus étroit que
+  « 10:00 ». La boîte heure/date prend la plus large de ses deux lignes — et
+  selon la minute c'était l'heure ou la date qui l'emportait. Le bloc sautait
+  **une fois par minute**. Chiffres tabulaires.
+- **La date.** Largeur fixe, **mesurée** : 28 jours consécutifs — les sept
+  jours de la semaine — sur douze mois, 336 formatages au démarrage, on garde
+  le plus large. Mesurée et non écrite en dur : elle dépend de la police.
+- **La fiche secteur**, qui était masquée sur batterie. Un widget masqué ne
+  reçoit plus d'allocation : la batterie glissait de vingt pixels à chaque
+  branchement. Elle est posée à **opacité zéro**, sa place réservée.
+
+**Vérifié** : deux captures à 14:24 et 14:25, bornes du bloc relevées au
+pixel — `x de 1711 à 1905` les deux fois, **0 px de déplacement**.
+
+### 5. Le blanc sur du blanc — trois tentatives, et la bonne en dernier
+
+Le coin écrit en blanc. Sur une page web blanche en plein écran, il
+disparaissait.
+
+**Premier essai, un vignettage court** (500 px, 0,55 d'opacité). Il faisait
+son travail — 4,7:1 mesurés sous l'heure — et se lisait comme **une tache
+grise** dans le coin : son bord se voyait.
+
+**Deuxième essai, un vignettage long** (800 px de course, cinq paliers, 0,30).
+La transition devenait invisible, mais le voile occupait **un quart de
+l'écran** et tirait l'œil ; et à cette densité il ne donnait plus que 1,6:1.
+
+**LES DEUX EXIGENCES NE SE CUMULENT PAS POUR UN VOILE DE RÉGION** : assez
+dense pour porter du blanc sur du blanc, il se voit.
+
+**Troisième essai, proposé par l'utilisateur et retenu : une ombre portée
+sous chaque élément.** Elle obtient le même détachement sur quelques pixels
+et ne prend aucune place — mesuré, le gris de la page reste à 255 dès 200 px
+du coin. C'est ce que font les sous-titres, et pour la même raison : elle
+suit le glyphe au lieu d'assombrir la région.
+
+Deux ombres par élément, sur le modèle de celles du dock : une courte et
+dense décalée d'un pixel, qui donne le contour, et une large sans décalage,
+qui pose le halo.
+
+**L'ombre a révélé un défaut vieux de la refonte** : le glyphe du mode était
+l'enfant *superposé* de la `GtkOverlay`, donc dessiné **par-dessus** l'heure.
+Tant qu'il n'était qu'une forme claire en retrait, cela ne se voyait pas ;
+dès qu'il a porté une ombre, celle-ci est tombée sur les chiffres. Un
+filigrane se met derrière — c'est la définition d'un filigrane.
+
+Les quatre nombres de l'ombre vivent dans `shell.conf`, relus à chaud, pour
+que le réglage se trouve à l'œil sans recompiler. **Pas dans le panneau** :
+on y règle des habitudes, pas des détails de dessin.
+
+### 6. Et il s'efface sous une fenêtre plein écran
+
+Concédé à contrecœur, et sorti de l'usage : une heure posée sur un film n'est
+plus un service, et **les commandes de lecture de Netflix vivent exactement en
+bas à droite** — deux tracés clairs l'un sur l'autre, illisibles tous les
+deux. Il n'y a pas d'arrangement ; l'un des deux doit partir, et ce n'est pas
+au film de s'effacer.
+
+`wlr-foreign-toplevel-management-v1`, qui ne consulte rien. **Toute** fenêtre
+plein écran non réduite compte, pas seulement l'active : la question est
+« quelque chose couvre-t-il l'écran », pas « qui a le clavier ».
+
+**Mesuré** sur les trois états, contraste relevé dans le bloc du coin :
+bureau `9–255`, plein écran `249–255`, retour `9–255`.
+
+### Quatre pièges payés, tous muets
+
+- **`window.shell { background: transparent }` gagne sur `.coin`** par
+  spécificité. Du temps du vignettage, le dégradé n'était jamais peint et rien
+  ne le disait — 255 mesurés sous le texte là où on attendait 115.
+- **Padding et fond posés sur le nœud `window` font DISPARAÎTRE le coin.** La
+  surface layer-shell garde la taille du contenu seul pendant que GTK place
+  l'enfant hors d'elle. Un coin entièrement vide, sans une ligne de journal.
+- **GTK 4 refuse `icon-shadow`**, le nom de GTK 3 : « No property named
+  icon-shadow » au chargement de la feuille, sans que rien d'autre ne
+  s'arrête. C'est `-gtk-icon-shadow`. Les deux ont été soumis au parseur
+  avant que la règle soit écrite.
+- **GTK 4 ne publie plus `size-allocate`** sur les widgets : la région
+  d'entrée du coin se repose sur `GdkSurface::layout`.
+
+**Et une faute de méthode, de mon fait.** Un `--compiler` lancé depuis
+`shell/` avec un chemin relatif n'a rien fait, n'a rien affiché, et mon
+`grep -c '✗'` a rendu 0 sur une sortie vide : j'ai cru l'installation faite
+alors qu'elle n'avait pas eu lieu, et c'est la capture d'écran qui l'a
+montré. **L'invariant n°4 en toutes lettres** — compter les lignes d'une
+sortie n'est pas la lire.
+
+---
+
 ## Ce qui reste à faire — au 10 septembre 2026
 
 Par ordre d'importance.

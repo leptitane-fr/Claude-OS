@@ -633,7 +633,8 @@ typedef struct {
     const char *methode;        /* « PowerOff » — pour ACTION_LOGIND           */
     ActionType  type;
     gboolean    confirmer;      /* deux temps, ou tout de suite ?              */
-    GtkWidget  *popover;
+    ConsoleFermer fermer;
+    gpointer      fermer_data;
     gboolean    arme;
     guint       desarmement;
     gboolean    apercu;
@@ -750,8 +751,8 @@ on_action (GtkButton *b, gpointer data)
     /* La Console est une surface layer-shell posee par-dessus tout : la
      * laisser ouverte pendant l'extinction fige l'ecran sur le panneau, et
      * elle passerait devant l'ecran de verrouillage le temps qu'il monte. */
-    if (a->popover != NULL)
-        gtk_popover_popdown (GTK_POPOVER (a->popover));
+    if (a->fermer != NULL)
+        a->fermer (a->fermer_data);
 
     if (a->type == ACTION_VERROU) {
         shell_energie_verrouiller ();
@@ -785,15 +786,16 @@ on_action (GtkButton *b, gpointer data)
 static GtkWidget *
 action_new (Action *a, const char *libelle, const char *icone_nom,
             ActionType type, const char *methode, gboolean confirmer,
-            GtkWidget *popover, gboolean apercu)
+            ConsoleFermer fermer, gpointer fermer_data, gboolean apercu)
 {
     a->libelle   = libelle;
     a->icone_nom = icone_nom;
     a->type      = type;
     a->methode   = methode;
-    a->confirmer = confirmer;
-    a->popover   = popover;
-    a->apercu    = apercu;
+    a->confirmer   = confirmer;
+    a->fermer      = fermer;
+    a->fermer_data = fermer_data;
+    a->apercu      = apercu;
 
     a->icone = gtk_image_new_from_icon_name (icone_nom);
     gtk_image_set_pixel_size (GTK_IMAGE (a->icone), 18);
@@ -992,7 +994,8 @@ console_energie_new (gboolean apercu)
 }
 
 GtkWidget *
-console_alimentation_new (GtkWidget *popover, gboolean apercu)
+console_alimentation_new (ConsoleFermer fermer, gpointer data,
+                          gboolean apercu)
 {
     /* Les etats vivent aussi longtemps que la rangee ; ils sont liberes
      * avec elle par g_object_set_data_full. */
@@ -1007,19 +1010,19 @@ console_alimentation_new (GtkWidget *popover, gboolean apercu)
      * premier, le seul qui ne demande pas de confirmation. */
     gtk_box_append (GTK_BOX (boite),
         action_new (&actions[0], "Verrouiller", "system-lock-screen-symbolic",
-                    ACTION_VERROU, NULL, FALSE, popover, apercu));
+                    ACTION_VERROU, NULL, FALSE, fermer, data, apercu));
     gtk_box_append (GTK_BOX (boite),
         action_new (&actions[1], "Fermer la session", "system-log-out-symbolic",
-                    ACTION_DECONNEXION, NULL, TRUE, popover, apercu));
+                    ACTION_DECONNEXION, NULL, TRUE, fermer, data, apercu));
     gtk_box_append (GTK_BOX (boite),
         action_new (&actions[2], "Veille", "weather-clear-night-symbolic",
-                    ACTION_LOGIND, "Suspend", TRUE, popover, apercu));
+                    ACTION_LOGIND, "Suspend", TRUE, fermer, data, apercu));
     gtk_box_append (GTK_BOX (boite),
         action_new (&actions[3], "Redémarrer", "system-reboot-symbolic",
-                    ACTION_LOGIND, "Reboot", TRUE, popover, apercu));
+                    ACTION_LOGIND, "Reboot", TRUE, fermer, data, apercu));
     gtk_box_append (GTK_BOX (boite),
         action_new (&actions[4], "Éteindre", "system-shutdown-symbolic",
-                    ACTION_LOGIND, "PowerOff", TRUE, popover, apercu));
+                    ACTION_LOGIND, "PowerOff", TRUE, fermer, data, apercu));
 
     g_object_set_data_full (G_OBJECT (boite), "actions", actions, g_free);
     return boite;

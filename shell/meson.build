@@ -158,9 +158,9 @@ executable('claude-os-dock',
 executable('claude-os-status',
   'src/status.c', 'src/panel.c', 'src/console.c', 'src/notifications.c',
   'src/wifi.c', 'src/bluetooth.c', 'src/energie.c', 'src/retroeclairage.c',
-  'src/preavis.c', 'src/glissiere.c', 'src/batterie.c', 'src/capot.c',
-  'src/logind.c',
-  idle_header, idle_code, commun,
+  'src/avis.c', 'src/batterie.c', 'src/capot.c',
+  'src/logind.c', 'src/coin.c', 'src/tiroir.c', 'src/toplevels.c',
+  idle_header, idle_code, ftl_header, ftl_code, commun,
   dependencies : [gtk, layershell, giounix, wlclient, pangocairo, m_dep],
   install : true)
 
@@ -281,8 +281,15 @@ install_data(['data/claude-os-reglages.desktop',
 install_data(
   'data/icons/hicolor/index.theme',
   install_dir : data_dir / 'icons' / 'hicolor')
+# La cloche, et les trois glyphes des modes d'energie. TOUS engendres sauf
+# la cloche, par tools/fabrique-icones.py -- voir la section « LES ICONES
+# LIVREES AVEC LE SHELL » de ce fichier pour la raison qui les met la plutot
+# que dans le theme d'icones.
 install_data(
-  'data/icons/hicolor/scalable/status/claude-os-cloche-symbolic.svg',
+  ['data/icons/hicolor/scalable/status/claude-os-cloche-symbolic.svg',
+   'data/icons/hicolor/scalable/status/claude-os-mode-travail-symbolic.svg',
+   'data/icons/hicolor/scalable/status/claude-os-mode-automatique-symbolic.svg',
+   'data/icons/hicolor/scalable/status/claude-os-mode-nomade-symbolic.svg'],
   install_dir : data_dir / 'icons' / 'hicolor' / 'scalable' / 'status')
 
 # Le dictionnaire des suggestions du clavier à l'écran : 119 688 formes du

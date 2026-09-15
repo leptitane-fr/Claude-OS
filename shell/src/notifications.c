@@ -107,6 +107,10 @@ struct _Notifs {
     NotifsBarreFunc barre;          /* la barre d'etat, qui peut etre partie */
     gpointer        barre_data;
 
+    NotifsNonLuFunc non_lu_fn;
+    gpointer        non_lu_data;
+    int             non_lu_dit;   /* -1 : jamais annonce        */
+
     GtkWidget   *fenetre;      /* la barre d'etat : la nappe la laisse dehors */
     GtkWidget   *nappe;        /* recoit le clic a cote, centre ouvert       */
     int          hauteur_console;   /* 0 quand elle est fermee               */
@@ -310,12 +314,32 @@ non_lues (Notifs *n)
 static void
 cloche_rafraichir (Notifs *n)
 {
-    if (n->cloche == NULL)
-        return;
-    if (non_lues (n) > 0)
-        gtk_widget_add_css_class (n->cloche, "nouvelles");
-    else
-        gtk_widget_remove_css_class (n->cloche, "nouvelles");
+    gboolean neuf = non_lues (n) > 0;
+
+    if (n->cloche != NULL) {
+        if (neuf)
+            gtk_widget_add_css_class (n->cloche, "nouvelles");
+        else
+            gtk_widget_remove_css_class (n->cloche, "nouvelles");
+    }
+
+    /* Le coin porte le meme etat, et c'est lui qu'on voit. Annonce
+     * seulement au CHANGEMENT : cette fonction est appelee a chaque
+     * notification recue, lue ou effacee, et repeindre a chaque fois un
+     * temoin qui n'a pas bouge reveillerait le compositeur pour rien. */
+    if (n->non_lu_fn != NULL && n->non_lu_dit != (int) neuf) {
+        n->non_lu_dit = neuf;
+        n->non_lu_fn (neuf, n->non_lu_data);
+    }
+}
+
+void
+notifs_sur_non_lu (Notifs *n, NotifsNonLuFunc f, gpointer data)
+{
+    n->non_lu_fn   = f;
+    n->non_lu_data = data;
+    n->non_lu_dit  = -1;
+    cloche_rafraichir (n);
 }
 
 /* -------------------------------------------------------------------------

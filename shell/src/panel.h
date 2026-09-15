@@ -9,6 +9,8 @@
 
 #include <gtk/gtk.h>
 
+#include "console.h"
+
 /* CE QUE LA CONSOLE LAISSE SOUS ELLE.
  *
  * Le centre de notifications se pose au-dessus de la Console et doit
@@ -30,10 +32,27 @@
 typedef void (*PanelGeometrieFn) (int largeur, int hauteur, gpointer data);
 void panel_observer_geometrie (GtkWidget *popover, PanelGeometrieFn fn, gpointer data);
 
-/* Cree le panneau (un GtkPopover pret a etre attache a un GtkMenuButton).
+/* Cree le CONTENU de la Console -- un widget ordinaire, a poser ou l'on
+ * veut.
+ *
+ * IL RENDAIT UN GtkPopover, ET C'EST FINI. La Console s'ouvrait au clic sur
+ * la barre d'etat ; la barre a disparu, et la Console vit maintenant dans le
+ * volet bas du tiroir du bord droit. Un popover suppose une ancre a
+ * laquelle s'accrocher et une surface qui le porte -- deux choses qu'un
+ * volet n'a pas.
+ *
+ * LA RELECTURE SUIT « map » ET « unmap », et non plus « show » et
+ * « closed ». Le contenu d'un GtkRevealer replie est demappe, et celui
+ * d'une fenetre masquee aussi : ces deux signaux disent donc exactement
+ * « la Console est a l'ecran » et « elle n'y est plus », quel que soit ce
+ * qui la porte. C'est meme plus sur qu'avant : le popover pouvait etre
+ * ouvert sur une surface masquee.
+ *
+ * `fermer` est appele par la rangee d'alimentation avant d'eteindre ou de
+ * verrouiller -- voir ConsoleFermer dans console.h.
  *
  * `apercu` remplace les sources systeme par des valeurs fixes. C'est une
  * aide au banc d'essai visuel, rien d'autre : elle permet de juger la mise
  * en page sans NetworkManager ni BlueZ dans le conteneur. Elle ne prouve
  * evidemment rien du branchement D-Bus reel. */
-GtkWidget *panel_new (gboolean apercu);
+GtkWidget *panel_new (gboolean apercu, ConsoleFermer fermer, gpointer data);

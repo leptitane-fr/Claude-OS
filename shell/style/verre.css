@@ -1,0 +1,36 @@
+/* =========================================================================
+   Claude-OS — la transparence, en trois lignes
+
+   Chargé par-dessus le thème quand « Activer la transparence » est coché
+   dans les Réglages, et vidé — pas retiré — quand on le décoche.
+
+   CE FICHIER NE CONTIENT AUCUNE RÈGLE, ET C'EST TOUT SON INTÉRÊT.
+
+   Le dock, la barre d'état, la Console, le lanceur, les fenêtres système et
+   leurs survols ne peignent jamais une couleur : ils peignent @surface,
+   @surface-alt ou @surface-sunk. Renommer ces trois jetons suffit donc à
+   rendre le bureau entier translucide, sans qu'une seule règle de
+   shell.css soit touchée — et sans qu'on ait à tenir à jour, ici, la liste
+   des classes qui se trouvent porter un fond. Une telle liste aurait
+   vieilli à la première fenêtre ajoutée, en silence.
+
+   Les trois valeurs de verre appartiennent AU THÈME : c'est lui qui sait de
+   quelle couleur il dilue, et de combien. Voir le bloc « LES MÊMES SURFACES,
+   EN VERRE » en fin de chaque style/theme-*.css.
+
+   CE QUE LA TRANSPARENCE COÛTE. Une surface opaque est annoncée comme telle
+   au compositeur, qui peut la poser sans rien mélanger ; une surface
+   translucide oblige à fondre ce qu'il y a dessous, à chaque image et sur
+   toute la hauteur de la pile. C'est du remplissage GPU, donc des watts sur
+   une machine qui en compte 6,8 au repos. D'où le réglage, et d'où son
+   défaut : décoché.
+
+   IL N'Y A PAS DE FLOU DERRIÈRE CE VERRE, et il ne peut pas y en avoir :
+   labwc ne sait pas flouter ce qui est sous une fenêtre. Les opacités sont
+   donc choisies pour rester lisibles sur un fond d'écran chargé, là où un
+   flou aurait permis d'aller beaucoup plus loin.
+   ========================================================================= */
+
+@define-color surface      @verre;
+@define-color surface-alt  @verre-alt;
+@define-color surface-sunk @verre-sunk;

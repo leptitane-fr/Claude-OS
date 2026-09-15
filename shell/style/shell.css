@@ -449,50 +449,266 @@ window.reglages { background-color: @surface-alt; }
  * multiplier, et une colonne les accepte toutes sans que les libellés
  * rétrécissent. C'est aussi la disposition qu'ont ChromeOS et GNOME, donc
  * celle qu'on cherche du regard. */
-/* --- Compte à rebours avant l'atténuation ---------------------------------
+/* --- Les avis système ------------------------------------------------------
  *
- * Un cadran et non un texte : un nombre appelle la lecture, et l'œil quitte
- * le paragraphe pour déchiffrer trois mots — l'interruption même qu'on
- * voulait éviter. Un disque qui se vide se perçoit sans se lire.
+ * Une seule surface, au centre et au-dessus du dock, pour tout ce que le
+ * système a à dire en passant : le compte à rebours avant l'atténuation, et
+ * les messages courts comme « En charge ».
  *
- * GRAND ET TRANSPARENT. Le premier essai faisait 44 px et opaque : il se
- * laissait ignorer trop facilement. Le cadran prend désormais la largeur de
- * la pilule de la barre d'état — 172 px mesurés — ce qui en fait une vraie
- * alerte ; la transparence l'empêche d'être intrusif pour autant. L'un sans
- * l'autre donnerait soit un signal qu'on ne voit pas, soit une pastille qui
- * occupe le coin de l'écran.
+ * MÊME PLACE, MÊME COULEUR, MÊME OPACITÉ. Un signal périphérique ne vaut que
+ * si l'œil sait d'avance où le trouver ; deux coins d'écran pour deux
+ * messages du même genre obligeraient à chercher.
  *
- * La teinte ET SON ALPHA viennent de « color » : le tracé cairo les lit par
- * gtk_widget_get_color(), donc l'opacité du disque se règle ici, en CSS, et
- * pas une couleur n'est écrite dans le C.
+ * Un cadran et non un texte, pour le décompte : un nombre appelle la lecture,
+ * et l'œil quitte le paragraphe pour déchiffrer trois mots — l'interruption
+ * même qu'on voulait éviter. Un disque qui se vide se perçoit sans se lire.
+ * Les messages, eux, sont du texte parce qu'ils n'ont pas d'échelle à
+ * montrer : « En charge » n'a pas de fraction.
  *
- * border-radius généreux plutôt qu'une valeur exacte : le diamètre suit la
- * pilule et change avec elle, un rayon fixe cesserait d'arrondir. */
-.preavis { background: none; background-color: transparent; }
-
-/* AUCUNE OMBRE PORTEE. Elle donnait au cadran le relief d'un objet pose
- * sur le bureau, alors qu'on veut l'inverse : quelque chose qui affleure,
- * qu'on percoit sans le regarder. Une ombre attire l'oeil par definition.
- *
- * Les opacites ci-dessous ne sont que le point de depart : preavis.c les
- * reecrit d'apres le reglage « opacite » de shell.conf. */
-/* NI OMBRE, NI BORDURE, NI FOND.
+ * NI OMBRE, NI BORDURE, NI FOND.
  *
  * L'ombre donnait au cadran le relief d'un objet posé sur le bureau, alors
- * qu'on veut l'inverse : quelque chose qui affleure. La bordure coûtait
- * deux pixels de contenu — GTK la déduit de la zone de tracé — et le disque
- * cessait de faire la largeur de la barre. Le fond, lui, en faisait une
- * pastille : on ne veut que le soleil et ses graduations, flottant sur ce
- * qui se trouve dessous.
+ * qu'on veut l'inverse : quelque chose qui affleure. La bordure coûtait deux
+ * pixels de contenu — GTK la déduit de la zone de tracé. Le fond, lui, en
+ * faisait une pastille : on ne veut que le tracé, flottant sur ce qui se
+ * trouve dessous.
  *
  * Ne reste donc que « color », que le tracé cairo lit par
  * gtk_widget_get_color() — teinte ET opacité, cette dernière réécrite par
- * preavis.c d'après le réglage « opacite » de shell.conf. */
-.preavis-cadran {
-  color: alpha(@accent, 0.55);
+ * avis.c d'après le réglage « opacite » de shell.conf. Les valeurs ci-dessous
+ * ne sont que le point de départ. */
+.avis { background: none; background-color: transparent; }
+
+.avis-cadran {
+  color: alpha(@avis, 0.55);
   background: none;
   background-color: transparent;
   border: none;
+}
+
+/* Une ligne : l'icône, puis deux mots.
+ *
+ * 26 px et demi-gras : un message est là pour être saisi d'un coup d'œil
+ * depuis l'autre bout de l'écran, pas lu de près. C'est le corps d'un titre,
+ * et c'est volontaire — en corps de texte, il faudrait s'en approcher, ce qui
+ * est exactement ce qu'on refuse au cadran juste au-dessus.
+ *
+ * LA COULEUR EST POSÉE ICI, SUR LA LIGNE, et pas sur l'étiquette : l'icône
+ * symbolique la prend par héritage, comme le texte. Sur l'étiquette seule,
+ * l'icône serait restée à la teinte du thème et les deux auraient divergé au
+ * premier réglage d'opacité.
+ *
+ * Aucune largeur maximale : deux mots n'en ont pas besoin, et en fixer une
+ * inviterait à y mettre des phrases. Ce qui ne tient pas ici doit partir en
+ * notification. */
+.avis-message {
+  color: alpha(@avis, 0.55);
+  font-size: 26px;
+  font-weight: 600;
+  padding: 6px 18px;
+  background: none;
+  background-color: transparent;
+}
+
+/* La marge est à DROITE de l'icône et sur elle, pas en espacement de la
+ * boîte : sans icône, la boîte ne doit pas garder un vide à gauche du texte,
+ * et un espacement de conteneur l'aurait fait. */
+.avis-message-icone { margin-right: 12px; }
+
+/* --- Le coin : ce que la machine dit d'elle en permanence -------------------
+ *
+ * Il remplace la barre d'état, et il ne lui ressemble pas : ni fond, ni
+ * bordure, ni ombre. Ce qui reste à l'écran en permanence ne doit pas y
+ * occuper de place — il flotte sur le fond d'écran comme les avis système,
+ * et il emprunte leur jeton @avis et leur opacité, parce que c'est la même
+ * voix.
+ *
+ * LA COULEUR EST POSÉE SUR « .coin » PAR coin.c, en une seule règle
+ * engendrée. Tout ce qui suit hérite : les libellés, et les icônes
+ * symboliques que GTK recolore avec la couleur du widget. Une couleur par
+ * classe aurait divergé au premier réglage d'opacité. */
+/* LE VOILE : UN VIGNETTAGE, ET C'EST CE QUI REND LE BLANC LISIBLE.
+ *
+ * Le coin écrit en blanc sur ce qui se trouve dessous. Sur un fond d'écran,
+ * cela va de soi ; sur une page web blanche en plein écran, le blanc écrit
+ * sur du blanc, et le coin disparaît purement et simplement. C'était la
+ * contrepartie connue et assumée du choix du blanc — elle ne l'est plus.
+ *
+ * UN DÉGRADÉ ET NON UN FOND. Un rectangle opaque aurait rendu au coin la
+ * surface qu'on lui avait justement retirée, avec un bord franc au milieu de
+ * l'écran. Le dégradé radial, lui, est ancré au coin de l'écran, dense là où
+ * sont les chiffres et nul bien avant de finir : il n'a ni bord ni forme, on
+ * ne le voit pas, on voit seulement que le texte tient.
+ *
+ * IL NE SE VOIT QUE QUAND IL SERT. Noir sur un fond d'écran sombre, il est
+ * imperceptible ; c'est exactement là qu'il ne sert à rien. Sur une page
+ * claire il assombrit ce qu'il faut, et pas un pixel de plus.
+ *
+ * LE PADDING EST LE RETRAIT DU COIN, et non une marge layer-shell : la
+ * fenêtre va jusqu'au cadre pour que le dégradé y aille aussi. Le haut et la
+ * gauche sont généreux — c'est la course dont le dégradé a besoin pour
+ * s'éteindre sans qu'on voie où. */
+/* « window.coin » ET NON « .coin » : la règle « window.shell », tout en haut
+   de ce fichier, pose « background: transparent » et a une spécificité plus
+   forte qu'une classe seule. Elle gagnait, le dégradé n'était jamais peint,
+   et rien ne le disait — mesuré sur une page blanche, 255 sous le texte là
+   où on attendait 125. À spécificité égale, c'est le dernier écrit qui
+   l'emporte : celle-ci vient après.
+
+   Le dégradé s'éteint EXACTEMENT au bord gauche et au bord haut de la
+   fenêtre — rayons à 100 % de sa taille —, ce qui garantit qu'aucune
+   coupure ne se voit. C'est le padding qui donne à cette extinction la
+   course dont elle a besoin. */
+window.coin { background: none; background-color: transparent; }
+
+/* L'OMBRE PORTÉE PLUTÔT QUE LE VIGNETTAGE.
+ *
+ * Le coin écrit en blanc sur ce qui se trouve dessous : sur une page
+ * blanche en plein écran, le blanc écrit sur du blanc et le coin disparaît.
+ *
+ * UN VIGNETTAGE A ÉTÉ ESSAYÉ, ET ÉCARTÉ À L'USAGE. Il faisait son travail —
+ * mesuré, 4,7:1 sous l'heure — mais pour s'éteindre sans qu'on voie son
+ * bord il lui fallait 800 px de course : il occupait un quart de l'écran et
+ * tirait l'œil. Un premier essai plus court, lui, se lisait franchement
+ * comme une tache grise.
+ *
+ * Une ombre portée obtient le même détachement sur quelques pixels et ne
+ * prend AUCUNE place. C'est ce que font les sous-titres, et pour la même
+ * raison : elle suit le glyphe au lieu d'assombrir la région.
+ *
+ * DEUX OMBRES, comme les ombres du dock. Une courte et dense, décalée d'un
+ * pixel vers le bas, qui donne le contour ; une large et diffuse, sans
+ * décalage, qui pose le halo. L'une sans l'autre donne soit un liseré dur,
+ * soit un flou qui ne détache rien.
+ *
+ * LE PADDING N'EST PLUS QU'UN RETRAIT. Il portait la course du dégradé ;
+ * il ne reste que les 12 px de la trame du bureau, que la fenêtre garde
+ * avec le bord de l'écran. */
+.coin-rangee { padding: 0 12px 12px 0; }
+
+.coin-heure, .coin-date, .coin-pourcent {
+  /* Valeurs de repli, et documentation de la forme : coin.c recouvre cette
+     règle avec celles de shell.conf, relues à chaud. */
+  text-shadow: 0 1px 2px alpha(@ombre-encre, 0.62),
+               0 0   5px alpha(@ombre-encre, 0.62);
+}
+
+/* « -gtk-icon-shadow » ET NON « icon-shadow » : GTK 4 a renommé la
+   propriété, et l'ancien nom est refusé — « No property named icon-shadow »
+   au chargement de la feuille, sans que rien d'autre ne s'arrête. Vérifié en
+   soumettant les deux au parseur. */
+.coin-mode, .coin-cloche, .coin-reseau, .coin-bt,
+.coin-prise, .coin-batterie {
+  -gtk-icon-shadow: 0 1px 2px alpha(@ombre-encre, 0.62),
+                    0 0   5px alpha(@ombre-encre, 0.62);
+}
+
+/* 46 px : l'heure est le seul élément du coin qu'on vient vraiment lire, et
+ * elle doit se lire de l'autre bout de la pièce. Le reste est là pour être
+ * aperçu, pas déchiffré — d'où l'écart de corps entre elle et la date. */
+.coin-heure {
+  font-size: 46px;
+  font-weight: 700;
+  /* Serré : à ce corps, l'interligne par défaut creuse un vide entre
+     l'heure et la date que rien ne justifie. */
+  margin-bottom: -4px;
+  /* CHIFFRES TABULAIRES, ET C'EST CE QUI EMPÊCHE LE BLOC DE SAUTER.
+     En chasses proportionnelles, « 11:11 » est plus étroit que « 10:00 » :
+     la boîte heure/date prend le plus large de ses deux lignes, et selon la
+     minute c'était l'heure ou la date qui l'emportait. Le coin étant ancré
+     à droite, tout le bloc se déplaçait — une fois par minute. */
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.coin-date { font-size: 15px; font-weight: 500; }
+
+/* Le glyphe du mode, posé par-dessus la droite de l'heure. La marge le
+   remonte au-dessus de la ligne de texte : c'est le vide qui s'y trouve
+   qu'il occupe, et il ne coûte donc pas un pixel de largeur.
+ *
+ * PLUS EFFACÉ QUE L'HEURE, ET C'EST CE QUI LES SÉPARE. Les deux se
+ * chevauchent et partagent la même encre ; à opacité égale, le glyphe se
+ * lisait comme un trait de plus dans les chiffres. Reculé d'un cran, il
+ * passe DERRIÈRE l'heure sans qu'on ait eu à l'écarter — le recouvrement
+ * reste, la confusion part.
+ *
+ * L'opacité se MULTIPLIE avec celle que coin.c pose sur « .coin » : le
+ * réglage des avis système continue de commander l'ensemble, et celle-ci
+ * n'en est qu'une fraction. */
+.coin-mode {
+  margin-bottom: 24px;
+  /* NÉGATIVE, pour que le glyphe déborde vers la droite par-dessus la
+     colonne des témoins. Il est en filigrane : ce qu'il recouvre reste
+     lisible, et le déport lui donne la place que 96 px demandent sans
+     élargir le coin d'un seul pixel. */
+  margin-right: -26px;
+  opacity: 0.62;
+}
+
+/* La colonne des témoins : un peu d'air à gauche de l'heure, et rien de
+   plus — ils s'alignent tous sur le bord droit. */
+.coin-etat { margin-left: 14px; }
+
+/* Mêmes chiffres tabulaires que l'heure, et pour la même raison : la
+   colonne ne doit pas bouger en passant de 100 % à 99 %. La largeur de
+   quatre caractères est posée dans coin.c. */
+.coin-pourcent {
+  font-size: 13px;
+  font-weight: 600;
+  margin-top: 2px;
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* CE QUI EST ÉTEINT S'EFFACE, IL NE DISPARAÎT PAS. Une icône qui s'en va
+   fait sauter la colonne d'un cran, et l'œil croit qu'autre chose a changé.
+   0,3 : assez pour qu'on voie qu'il y a quelque chose, assez peu pour qu'on
+   lise « éteint » sans hésiter. */
+.coin-reseau.eteint, .coin-bt.eteint { opacity: 0.3; }
+
+/* La cloche n'est qu'un témoin : elle ne s'ouvre pas. Éteinte tant qu'il n'y
+   a rien à lire, pleine dès qu'il reste du non-lu. */
+.coin-cloche { opacity: 0.3; }
+.coin-cloche.nouvelles { opacity: 1; }
+
+/* --- Le tiroir du bord droit -----------------------------------------------
+ *
+ * Deux volets empilés, tirés du bord droit. Ils viennent AFFLEURER le bord :
+ * coins arrondis à gauche seulement, aucune marge à droite. C'est ce qui les
+ * fait lire comme un tiroir qu'on sort, et non comme deux cartes posées près
+ * du bord.
+ *
+ * Le bas s'arrête bien avant le bas de l'écran : le coin y est, et un volet
+ * qui passerait devant l'heure prendrait la place de ce qu'on est venu
+ * consulter. */
+.tiroir { background: none; background-color: transparent; }
+
+.tiroir-nappe { background-color: transparent; }
+
+.tiroir-colonne {
+  margin: 16px 0 180px 0;
+}
+
+.tiroir-volet {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-right: none;
+  border-radius: 18px 0 0 18px;
+  padding: 12px 14px;
+  /* Même doublement d'ombre que le dock : une large pour l'élévation, une
+     courte pour asseoir le contact. */
+  box-shadow: 0 8px 28px @shadow,
+              0 2px  6px @shadow-close;
+}
+
+/* Le volet des widgets est vide, et il le dit. Il n'est pas masqué en
+   attendant : une place réservée qu'on voit est une promesse, une place
+   absente est un oubli. */
+.tiroir-attente {
+  font-size: 15px;
+  font-weight: 600;
+  color: @text-dim;
 }
 
 .reglages-volets {

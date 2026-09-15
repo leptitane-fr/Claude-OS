@@ -94,6 +94,7 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`tools/validate-install.sh`](tools/validate-install.sh) | Passe en revue l'installation poste par poste — Wi-Fi, Bluetooth, **audio**, VA-API, énergie, session, empreinte mémoire — et rend un verdict. À lancer après `provision.sh`. |
 | [`tools/diag-connexion.sh`](tools/diag-connexion.sh) | **Quand il n'y a pas d'écran de connexion** — console texte, écran noir, ou repli du filet. Lit d'abord ce que le filet a collecté avant de redémarrer : c'est la seule trace du démarrage qui a échoué. |
 | [`tools/diag-session.sh`](tools/diag-session.sh) | Le pendant du précédent, quand la session graphique est ouverte mais que le bureau se comporte mal. |
+| [`tools/fabrique-icones.py`](tools/fabrique-icones.py) | **Le thème d'icônes de la distribution.** Engendre les 115 pictogrammes de `rootfs/usr/share/icons/Claude-OS` depuis une grammaire de dessin commune — même épaisseur, même rayon, même marge —, contrôle que rien de ce que le shell demande ne manque, et sait rendre une planche de contact (`--planche`). |
 | [`tools/probe-keys.sh`](tools/probe-keys.sh) | Relève, sous Wayland, ce qu'émettent réellement la rangée supérieure et la touche Loupe du clavier Chromebook, pour en déduire les liaisons labwc. |
 
 ---

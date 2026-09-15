@@ -76,6 +76,15 @@ GtkWidget *console_energie_new (gboolean apercu);
  * pendant que la Console etait fermee. */
 void console_energie_relire (GtkWidget *rangee);
 
+/* Ce que la rangee d'alimentation appelle avant d'agir.
+ *
+ * ELLE NE CONNAIT PLUS LE POPOVER, PARCE QU'IL N'Y EN A PLUS. La Console
+ * vivait dans un GtkPopover, qu'il suffisait de « popdown » avant
+ * d'eteindre ; elle vit desormais dans le tiroir du bord droit, qui se
+ * ferme autrement -- et qui s'anime. Un rappel plutot qu'un widget : la
+ * rangee dit « ferme-toi » et ne sait pas a quoi elle parle. */
+typedef void (*ConsoleFermer) (gpointer data);
+
 /* --- Alimentation --------------------------------------------------------
  *
  * Verrouiller, fermer la session, mettre en veille, redemarrer, eteindre.
@@ -87,7 +96,9 @@ void console_energie_relire (GtkWidget *rangee);
  *
  * Icones seules : le nom de chaque bouton est dans son infobulle.
  *
- * `popover` est referme avant d'agir : la Console est une surface
- * layer-shell posee par-dessus tout, et la laisser ouverte pendant l'arret
- * donne un ecran fige sur le panneau. */
-GtkWidget *console_alimentation_new (GtkWidget *popover, gboolean apercu);
+ * La Console est refermee avant d'agir : c'est une surface layer-shell
+ * posee par-dessus tout, et la laisser ouverte pendant l'arret donne un
+ * ecran fige sur le panneau -- elle passerait meme devant l'ecran de
+ * verrouillage le temps qu'il monte. */
+GtkWidget *console_alimentation_new (ConsoleFermer fermer, gpointer data,
+                                     gboolean apercu);

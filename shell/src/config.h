@@ -17,6 +17,52 @@ typedef struct {
     gboolean  dark;          /* deduit du theme, pour les widgets GTK natifs  */
     gboolean  reserve_space; /* le dock repousse-t-il les fenetres maximisees */
 
+    /* Couleur de contraste -- ce qui colore un bouton actif, une selection,
+     * le point sous une application ouverte. Vide : celle du theme.
+     *
+     * ELLE NE VIT PAS DANS LE THEME, et c'est le but : on veut pouvoir
+     * garder les surfaces d'un theme en changeant ce qui les souligne.
+     * Voir shell_accents (). */
+    char     *accent;
+
+    /* L'OMBRE PORTEE DU COIN, en quatre nombres.
+     *
+     * POURQUOI ELLE SE REGLE. Le coin ecrit en blanc sur ce qui se trouve
+     * dessous -- fond d'ecran, page web blanche, video sombre. Il n'existe
+     * pas de reglage d'ombre juste pour ces trois cas a la fois : le bon
+     * equilibre se trouve a l'oeil, sur SON fond d'ecran, et il se trouve
+     * en quelques essais. Recompiler entre chaque essai est le plus sur
+     * moyen de s'arreter au premier « ca ira ».
+     *
+     * Ce sont donc quatre cles de shell.conf, relues a chaud comme tout le
+     * reste : on ecrit, on enregistre, le coin change sous les yeux.
+     *
+     * CE N'EST PAS DANS LE PANNEAU DE REGLAGES, ET C'EST DELIBERE -- voir
+     * le commentaire de tete de settings.c : on y regle des habitudes, pas
+     * des details d'implementation. « Rayon de diffusion de l'ombre » n'est
+     * pas un choix d'utilisateur, c'est un choix de dessin, qu'on fait une
+     * fois. Une fois trouve, il devient le defaut ci-dessous et personne
+     * n'a plus a y toucher.
+     *
+     * DEUX OMBRES, comme celles du dock : une courte et dense decalee vers
+     * le bas, qui donne le contour ; une large sans decalage, qui pose le
+     * halo. L'une sans l'autre donne soit un lisere dur, soit un flou qui
+     * ne detache rien. */
+    int       ombre_opacite;    /* pourcent, les deux ombres a la fois     */
+    int       ombre_flou;       /* rayon du halo, en pixels                */
+    int       ombre_contour;    /* rayon de l'ombre courte, en pixels      */
+    int       ombre_decalage;   /* descente de l'ombre courte, en pixels   */
+
+    /* Transparence des surfaces du bureau -- dock, barre d'etat, Console,
+     * lanceur, fenetres du systeme.
+     *
+     * FAUX PAR DEFAUT, et pas par prudence d'affichage : une surface
+     * translucide interdit au compositeur de la poser sans melange, et se
+     * paie en remplissage GPU donc en watts. Sur une machine qui consomme
+     * 6,8 W au repos, c'est un choix, pas un reglage de confort gratuit.
+     * Le raisonnement complet est en tete de style/verre.css. */
+    gboolean  transparence;
+
     /* Fond d'ecran. Chemin vide : le degrade dessine par le shell. */
     char     *wallpaper;     /* chemin d'une image, ou ""                    */
     gboolean  wallpaper_fill;/* couvrir en rognant plutot que tout montrer   */
@@ -38,10 +84,15 @@ typedef struct {
     char     *energie_mode;   /* « travail », « automatique », « nomade »   */
     int       energie_niveau; /* pourcent vise par l'etage « attenuer »     */
 
-    /* Opacite du cadran de preavis, en pourcent. Se regle parce que le bon
-     * equilibre depend du fond d'ecran et de la vue de chacun : trop
-     * discret il ne previent pas, trop marque il occupe le coin de
-     * l'ecran. Un curseur coute moins cher qu'un debat. */
+    /* Opacite des avis systeme, en pourcent -- le compte a rebours ET les
+     * messages courts, qui partagent tout (voir avis.h). Se regle parce que
+     * le bon equilibre depend du fond d'ecran et de la vue de chacun : trop
+     * discret il ne previent pas, trop marque il occupe le milieu de
+     * l'ecran. Un curseur coute moins cher qu'un debat.
+     *
+     * Elle compte plus qu'avant : les avis sont blancs et au centre, la ou
+     * une fenetre claire se trouve souvent -- c'est ce reglage, et lui seul,
+     * qui rattrape un avis qu'on ne distingue pas. */
     int       energie_opacite;
 
     /* Compte a rebours avant chaque baisse d'ecran, en secondes.
@@ -142,6 +193,26 @@ const ShellTheme *shell_theme_actif (const ShellConfig *cfg);
  * une fonction, non. */
 gboolean shell_config_set_theme (ShellConfig *cfg, const char *id);
 
+/* Une couleur de contraste disponible. */
+typedef struct {
+    const char *id;    /* valeur ecrite dans shell.conf, et nom du fichier  */
+    const char *nom;   /* libelle montre a l'utilisateur                    */
+} ShellAccent;
+
+/* Table des couleurs de contraste, terminee par un id NULL. La premiere
+ * ligne porte un id vide : c'est « celle du theme », l'absence de choix.
+ *
+ * MEME MECANIQUE QUE LES THEMES, a dessein : ajouter une couleur, c'est
+ * ajouter une ligne ici et un fichier style/accent-<id>.css. Aucune regle
+ * de shell.css n'est a toucher -- elle ne connait que @accent, @accent-hover,
+ * @accent-press et @on-accent, et le fichier ne fait que les redefinir
+ * par-dessus le theme. */
+const ShellAccent *shell_accents (void);
+
+/* La couleur active, jamais NULL : un identifiant inconnu renvoie la
+ * premiere ligne, c'est-a-dire celle du theme. */
+const ShellAccent *shell_accent_actif (const ShellConfig *cfg);
+
 /* Cette famille de police est-elle reellement installee ?
  *
  * Le panneau de reglages en a besoin : un theme qui demande une police
@@ -149,9 +220,18 @@ gboolean shell_config_set_theme (ShellConfig *cfg, const char *id);
  * pour une panne. */
 gboolean shell_police_installee (const char *famille);
 
-/* Charge le theme demande puis shell.css. Rappelable : le fournisseur du
- * theme est remplace, pas empile. */
-void shell_styles_load (const char *theme);
+/* Charge le theme, la couleur de contraste, le verre, puis shell.css.
+ * Rappelable : les fournisseurs sont remplaces, pas empiles.
+ *
+ * ELLE PREND LA CONFIGURATION ENTIERE, ET NON LE SEUL NOM DU THEME.
+ *
+ * Elle ne prenait qu'un « const char *theme », et c'etait une invitation a
+ * la meme faute que celle documentee au-dessus de shell_config_set_theme :
+ * trois reglages decident desormais de l'aspect -- le theme, l'accent, la
+ * transparence -- et un appelant qui n'en passe qu'un laisse les deux
+ * autres a leur valeur precedente sans qu'aucun compilateur ne s'en
+ * plaigne. La signature les tient donc ensemble. */
+void shell_styles_load (const ShellConfig *cfg);
 
 /* Meme chose, a la signature du signal « startup » de GtkApplication : a
  * brancher avec la configuration en donnee utilisateur. */

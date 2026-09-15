@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Claude OS — son -->
+  <defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d7639a"/><stop offset="1" stop-color="#ab3a69"/></linearGradient></defs>
+  <g transform="translate(12 12) scale(2.5)"><path d="M4.2 1.6H9.4L13 5.2V13.2A1.2 1.2 0 0 1 11.8 14.4H4.2A1.2 1.2 0 0 1 3 13.2V2.8A1.2 1.2 0 0 1 4.2 1.6Z" fill="url(#f)"/></g>
+  <g transform="translate(20 24) scale(1.5)"><path d="M11.4 4.4H11.4A0.75 0.75 0 0 1 12.15 5.15V11.25A0.75 0.75 0 0 1 11.4 12H11.4A0.75 0.75 0 0 1 10.65 11.25V5.15A0.75 0.75 0 0 1 11.4 4.4Z" fill="#faf9f5"/><path d="M12.15 3.65H12.85A0.75 0.75 0 0 1 13.6 4.4V4.4A0.75 0.75 0 0 1 12.85 5.15H12.15A0.75 0.75 0 0 1 11.4 4.4V4.4A0.75 0.75 0 0 1 12.15 3.65Z" fill="#faf9f5"/><path d="M13.1 4.4H14.1A0.25 0.25 0 0 1 14.35 4.65V4.65A0.25 0.25 0 0 1 14.1 4.9H13.1A0.25 0.25 0 0 1 12.85 4.65V4.65A0.25 0.25 0 0 1 13.1 4.4Z" fill="#faf9f5"/><path d="M7.6 12A2 2 0 1 1 11.6 12A2 2 0 1 1 7.6 12Z" fill="#faf9f5"/></g>
+</svg>

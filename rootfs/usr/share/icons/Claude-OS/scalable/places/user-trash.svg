@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Claude OS — corbeille -->
+  <defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7d8ea1"/><stop offset="1" stop-color="#5a6877"/></linearGradient></defs>
+  <path d="M17 2H47A15 15 0 0 1 62 17V47A15 15 0 0 1 47 62H17A15 15 0 0 1 2 47V17A15 15 0 0 1 17 2Z" fill="url(#f)"/>
+  <g transform="translate(12 12) scale(2.5)"><path d="M2.95 3.65H13.05A0.75 0.75 0 0 1 13.8 4.4V4.4A0.75 0.75 0 0 1 13.05 5.15H2.95A0.75 0.75 0 0 1 2.2 4.4V4.4A0.75 0.75 0 0 1 2.95 3.65Z" fill="#faf9f5"/><path d="M6.8 1.9H9.2A0.6 0.6 0 0 1 9.8 2.5V2.8A0.6 0.6 0 0 1 9.2 3.4H6.8A0.6 0.6 0 0 1 6.2 2.8V2.5A0.6 0.6 0 0 1 6.8 1.9Z" fill="#faf9f5"/><path d="M3.3 5.6L12.7 5.6L11.8 13.9L4.2 13.9ZM4.9 7.1L11.1 7.1L10.4 12.4L5.6 12.4Z" fill="#faf9f5" fill-rule="evenodd"/></g>
+</svg>

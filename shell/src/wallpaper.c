@@ -58,7 +58,7 @@ on_config_reloaded (ShellConfig *cfg, gpointer data)
 {
     Wallpaper *w = data;
 
-    shell_styles_load (cfg->theme);
+    shell_styles_load (cfg);
     wallpaper_apply (w, cfg);
     shell_config_free (cfg);
 }

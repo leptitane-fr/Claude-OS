@@ -1,0 +1,26 @@
+/* =========================================================================
+   Claude-OS — couleur de contraste « Argile »
+
+   Choisie dans les Réglages, volet Interface. Chargée PAR-DESSUS le thème :
+   elle ne remplace que les quatre jetons ci-dessous, le reste du thème —
+   surfaces, texte, ombres, alertes — ne bouge pas.
+
+   La terre cuite des thèmes Claude, assombrie de la même façon que le bleu.
+   C'est elle qui met l'accent de la marque sur un thème qui ne l'a pas.
+
+   CE QUI A ÉTÉ MESURÉ, et pourquoi ces trois valeurs-là. Le blanc posé
+   dessus tient 4,56:1, au-dessus du 4,5:1 que demande un texte de petit
+   corps — c'est ce seuil qui a fixé la teinte, pas l'inverse. Contre la
+   surface d'un thème sombre (#1f1f1d) elle se détache à 3,62:1, au-dessus
+   du 3:1 demandé à un élément d'interface : une seule valeur sert donc les
+   quatre thèmes, et il n'y a pas deux palettes à tenir d'accord.
+
+   Le survol s'éclaircit de 9 % vers le blanc et l'appui s'assombrit de
+   15 % vers le noir. Assez pour qu'on voie la réaction du doigt ; pas assez
+   pour que le libellé blanc descende sous 4:1 (3,90:1 au survol).
+   ========================================================================= */
+
+@define-color accent        #ad6242;
+@define-color accent-hover  #b47053;
+@define-color accent-press  #935338;
+@define-color on-accent     #ffffff;

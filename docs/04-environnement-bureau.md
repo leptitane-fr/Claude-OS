@@ -100,44 +100,174 @@ Quatre limites connues, toutes voulues :
   En TOP, labwc les éteignait sous une fenêtre plein écran — mesuré au banc —
   et ni la Loupe ni le doigt n'auraient pu les rappeler pendant une vidéo.
 
-### La barre d'état
+### Le coin — ce que la machine dit d'elle en permanence
 
-En bas à droite, dans la même pilule : l'icône du **mode de veille** en
-vigueur, réseau, batterie, et **la date au-dessus de l'heure** — deux lignes
-qui donnent à la pilule la hauteur d'une cible qu'on touche au doigt. À sa
-gauche, la **cloche** des notifications, ronde, exactement de la hauteur de la
-pilule.
+Il a remplacé la barre d'état le 15 septembre 2026, et il ne lui ressemble
+pas. `shell/src/coin.c`, dans `claude-os-status`.
 
-**Toute la pilule ouvre la Console**, bords compris. Jusqu'au 11 septembre
-2026, seul son centre répondait : le retrait intérieur était posé sur le
-contour, qui se dessinait comme la pilule sans se cliquer.
+La barre était une pilule opaque, qu'on cliquait pour ouvrir la Console et
+qui sortait de l'écran dès qu'une application passait au premier plan. Les
+trois propriétés sont abandonnées :
 
-La Console, de haut en bas :
+- **Plus de surface.** Ni fond, ni bordure, ni ombre : des tracés clairs
+  posés sur le fond d'écran. Ce qui reste à l'écran en permanence ne doit pas
+  y occuper de place. Même jeton `@avis` et **même opacité** que les avis
+  système, par le même réglage — une seule voix, sinon le bureau a deux
+  blancs.
+- **Plus de clic, ni de survol.** Région d'entrée vide et mode clavier
+  « aucun ». C'est la contrepartie exacte de la permanence : une surface qui
+  reste là pour toujours et qui capterait le pointeur poserait un rectangle
+  mort définitif dans le coin du bureau. La région est **reposée à chaque
+  nouvelle disposition** — par `GdkSurface::layout`, GTK 4 ne publiant plus
+  `size-allocate` — parce que la taille du coin change avec l'heure et avec
+  le pourcentage.
+- **Plus de disparition — à une exception près.** Il ne suit plus le dock
+  hors de l'écran : une information permanente qui s'absente dès qu'une
+  fenêtre s'ouvre n'est pas permanente. Mais **il s'efface sous une fenêtre
+  plein écran**, et cette exception a été concédée à contrecœur, à l'usage :
+  une heure posée sur un film n'est plus un service, et les commandes de
+  lecture de Netflix vivent exactement en bas à droite — deux tracés clairs
+  l'un sur l'autre, illisibles tous les deux. Il n'y a pas d'arrangement
+  possible ; l'un des deux doit partir, et ce n'est pas au film de s'effacer.
 
-| Rangée | Ce qu'elle fait |
-|---|---|
-| Son, luminosité | curseurs, relus en continu tant que la Console est ouverte |
-| Wi-Fi, Bluetooth | un **bouton** qui ouvre le volet de détail à gauche, et sous lui un **interrupteur** qui allume ou éteint le module ; éteint, le bouton est grisé et ne répond plus |
-| Batterie | pourcentage, état, **consommation instantanée en watts**, autonomie |
-| Réglages | ouvre le panneau complet |
-| Travail · Automatique · Nomade | les trois modes de veille, chacun avec son icône — compteur, balance, feuille — qui est aussi celle de la barre |
-| Alimentation | cinq icônes : verrouiller, fermer la session, veille, redémarrer, éteindre. Toutes sauf verrouiller demandent un second appui : le bouton passe au rouge et montre une coche, puis retombe seul après quatre secondes |
+  La question posée est « quelque chose couvre-t-il l'écran », pas « qui a le
+  clavier » : **toute** fenêtre plein écran non réduite compte, et pas
+  seulement l'active — une vidéo qui perd le focus continue d'occuper l'écran.
+  C'est `shell_toplevels_plein_ecran()`, donc
+  `wlr-foreign-toplevel-management-v1`, qui **ne consulte rien** : le
+  compositeur prévient quand un état change et se tait le reste du temps.
+  La fenêtre est masquée, pas vidée ni déplacée — une surface layer-shell
+  masquée ne coûte plus ni composition ni mélange de sa transparence, ce qui
+  est précisément ce qu'on veut pendant une lecture vidéo.
 
-Le titre « Veille de l'écran » et sa roue crantée ont disparu : la roue
-ouvrait les Réglages, que le bouton du dessus ouvre déjà.
+  **Mesuré** sur les trois états, en relevant le contraste dans le bloc du
+  coin : bureau `9–255` (présent), plein écran `249–255` (absent), retour
+  `9–255`.
 
-**Fermer la session** arrête labwc (comme `labwc --exit`) et rend l'écran de
-connexion ; les applications ouvertes se ferment avec lui. **Verrouiller**
-monte l'écran de verrouillage sans rien fermer.
+  **Les avis système, eux, restent.** Ils sont fugaces et ce qu'ils annoncent
+  — « Batterie critique » — vaut d'interrompre un film. Le compte à rebours
+  de la veille, lui, ne se déclenche pas : un lecteur vidéo tient un
+  inhibiteur d'éveil.
 
-Discipline d'énergie, parce que c'est le composant qui risque le plus de
-réveiller la machine :
+**Ce qu'il montre, et dans quel ordre.** À gauche l'heure et la date, les
+seules choses qu'on vient vraiment y lire — la date en toutes lettres, la
+pilule n'étant plus là pour imposer une abréviation. Par-dessus leur droite,
+en grand, **le mode d'énergie** : c'est le seul réglage du bureau dont
+l'effet se produit quand on ne regarde pas, et le seul qu'on doive donc
+pouvoir vérifier sans rien ouvrir. À droite, en colonne : non-lu, réseau,
+Bluetooth, charge — et la fiche secteur quand elle est branchée.
 
-- **une seule** minuterie, alignée sur la minute, pour l'heure *et* la
-  batterie ;
-- le réseau ne consulte rien — il réagit aux signaux D-Bus de NetworkManager ;
-- la minuterie des watts ne tourne **que** pendant que le panneau est ouvert ;
-- les services ne sont contactés qu'à la première ouverture du panneau.
+Le glyphe du mode est **superposé** et non rangé à côté : `GtkOverlay` ne
+mesure pas son enfant superposé, le glyphe occupe donc le vide au-dessus de
+la date sans coûter un pixel de largeur.
+
+**Trois glyphes de mode, et ce sont les nôtres.** C'était la famille
+`power-profile` de GNOME : trois cadrans que seule l'inclinaison d'une
+aiguille distinguait. Cela suffisait dans une rangée de Console où les trois
+se voient côte à côte sous leur nom. Le coin n'en montre qu'**un**, en grand,
+sans libellé : il faut alors que chacun se reconnaisse seul. Trois objets
+différents, donc — **le cadran pour Travail, la balance pour Automatique, la
+feuille pour Nomade**. C'est la famille d'Adwaita, celle que le bureau
+portait avant d'avoir son propre jeu d'icônes, redessinée dans la grammaire
+du projet. Livrés avec le shell et préfixés `claude-os-`, comme la cloche :
+qui bascule sur Adwaita garde ses trois modes.
+
+**Un badge « AUTO » avait été essayé**, puis écarté : dire la chose par un
+mot est l'aveu qu'on n'a pas trouvé l'image, et quatre lettres deviennent
+illisibles dès qu'on descend à la taille de la Console. La balance dit
+« l'équilibre » sans être lue.
+
+**Le glyphe est plus effacé que l'heure** — 0,62 — et c'est ce qui les
+sépare. Les deux se chevauchent et partagent la même encre ; à opacité
+égale, le glyphe se lisait comme un trait de plus dans les chiffres. Reculé
+d'un cran, il passe derrière l'heure sans qu'on ait eu à l'écarter : le
+recouvrement reste, la confusion part. L'opacité se **multiplie** avec celle
+du réglage des avis système, qui continue de commander l'ensemble.
+
+**RIEN NE BOUGE, ET C'EST MESURÉ.** Le coin est ancré à droite : sa largeur
+suit son contenu, donc son bord gauche recule ou avance à chaque changement.
+Trois choses bougeaient, et les trois sont fermées :
+
+- **L'heure.** En chasses proportionnelles, « 11:11 » est plus étroit que
+  « 10:00 ». La boîte heure/date prend la plus large de ses deux lignes, et
+  selon la minute c'était l'heure ou la date qui l'emportait — le bloc entier
+  sautait **une fois par minute**. Chiffres tabulaires
+  (`font-feature-settings: "tnum"`), et la question est close.
+- **La date.** « mardi 15 septembre » et « mercredi 1 octobre » n'ont pas la
+  même longueur. La boîte reçoit donc une largeur **fixe, mesurée** : la plus
+  large date de l'année, obtenue en formatant 28 jours consécutifs — les sept
+  jours de la semaine — sur douze mois, soit 336 mesures d'une chaîne courte,
+  une fois. Mesurée et non écrite en dur : elle dépend de la police, qui se
+  règle.
+- **La fiche secteur**, qui apparaissait et disparaissait de la colonne. Elle
+  est désormais posée à **opacité zéro** plutôt que masquée : un widget
+  masqué ne reçoit plus d'allocation, et la batterie glissait de vingt pixels
+  à chaque branchement. La place est réservée en permanence ; elle se remplit
+  ou reste vide.
+
+Le pourcentage a la même cure : quatre caractères réservés — « 100 % » est le
+plus large — et les mêmes chiffres tabulaires.
+
+**Ce qui est éteint s'efface, il ne disparaît pas.** Une icône qui s'en va
+fait sauter la colonne d'un cran, et l'œil croit qu'autre chose a changé.
+
+**La cloche n'est qu'un témoin.** Elle dit qu'il reste du non-lu ; elle
+n'ouvre plus rien, puisque rien ici ne s'ouvre.
+
+**Le Bluetooth est la seule chose que le coin lit lui-même.** Le réseau vient
+de `status.c`, qui tient un proxy NetworkManager permanent ; la charge vient
+de `batterie.c`. Le Bluetooth n'avait qu'un observateur — la tuile de la
+Console — et `panel.c` ne cherche l'adaptateur qu'au premier affichage du
+panneau, à dessein. Un témoin permanent demande une source permanente : le
+coin ouvre donc son propre proxy sur `Powered`.
+
+### Le tiroir du bord droit
+
+`shell/src/tiroir.c`. Deux volets empilés, tirés du bord droit, qui viennent
+affleurer le bord — coins arrondis à gauche seulement. Celui du bas porte la
+**Console** ; celui du haut attend les widgets à venir, et il le dit : une
+place réservée qu'on voit est une promesse, une place absente est un oubli.
+
+**Deux façons de l'ouvrir, et elles ne se valent pas.**
+
+- **Au doigt** : un glissé depuis le bord droit vers la gauche, seuil de
+  32 px. Le geste de tous les tiroirs latéraux.
+- **Au pointeur** : le curseur **posé** contre le bord droit et tenu là
+  **une seconde**. Pas un clic, pas une entrée : une attente. Le bord droit
+  est l'endroit où finit tout mouvement de souris un peu vif, et un tiroir
+  qui s'ouvrirait au contact s'ouvrirait surtout par accident. La minuterie
+  est réarmée à **chaque mouvement dans la bande** : tant que le curseur
+  bouge, le compte repart de zéro.
+
+**Tout clic ailleurs le referme**, par la nappe — une surface transparente
+qui couvre l'écran tant que le tiroir est ouvert. Même mécanisme que le dock
+rappelé par-dessus une application, et pour la même raison : labwc ne signale
+rien quand on revient à la fenêtre déjà active.
+
+**La fenêtre du tiroir est plein écran dès sa création**, et c'est un
+`GtkRevealer` qui bouge. Redimensionner une surface layer-shell qui porte un
+popover ouvert fait partir ce popover hors de l'écran sous labwc 0.8.3 —
+règle payée le 11 septembre 2026 — et la Console ouvre des popovers.
+
+**La nappe et les volets sont séparés par un `GtkOverlay`**, pas par un test
+dans un gestionnaire de clic. Un geste posé sur le conteneur aurait attrapé
+les deux ; avec une superposition, GTK désigne le widget le plus haut sous le
+pointeur — le volet s'il y en a un, la nappe sinon. La distinction n'est pas
+codée, elle est structurelle.
+
+**La Console n'est plus un popover.** `panel_new()` rend le contenu, et la
+relecture périodique suit `map` et `unmap` plutôt que `show` et `closed` :
+ces deux signaux disent exactement « la Console est à l'écran », ce que
+l'ouverture d'un popover ne garantissait pas. La rangée d'alimentation reçoit
+un **rappel de fermeture** au lieu d'un widget — elle dit « ferme-toi » et ne
+sait pas à quoi elle parle.
+
+**Ce que cette bascule a coûté, et qui est assumé :** le centre de
+notifications n'a plus d'entrée. La cloche de la barre l'ouvrait ; le témoin
+du coin ne s'ouvre pas. L'historique attend qu'un widget du volet haut lui
+redonne une porte. **La bannière, elle, continue d'annoncer ce qui arrive** —
+elle s'accroche au coin comme elle s'accrochait à la pilule, et c'était la
+moitié qu'on ne pouvait pas perdre.
 
 ### Le centre de notifications
 
@@ -145,6 +275,173 @@ La cloche l'ouvre, au-dessus de la Console si elle est ouverte — les deux
 coexistent. **Un clic à côté le ferme** : une surface transparente, la
 « nappe », recueille ce clic, et laisse passer ceux qui visent la barre
 elle-même. La cloche, allumée à l'accent, signale du non-lu.
+
+### Les avis système
+
+Une surface unique, **au centre de l'écran et juste au-dessus du dock**, pour
+tout ce que le système a à dire en passant. Elle montre aujourd'hui deux
+choses : le **compte à rebours** avant que l'écran ne baisse, et de **courts
+messages** — « En charge » au branchement, « Batterie faible » à un seuil.
+`shell/src/avis.c`, dans `claude-os-status`.
+
+**C'est le lieu qui fait l'avis, pas le module qui l'émet.** Un signal
+périphérique ne vaut que si l'œil sait d'avance où le trouver : deux coins
+d'écran différents pour deux messages du même genre obligeraient à chercher,
+ce qui est exactement le contraire du service rendu. Tout ce qui passe par là
+partage donc la même place, la même couleur, la même opacité — réglable dans
+le panneau Énergie — et la même absence de prise.
+
+**Ni clic, ni survol, ni focus.** Mode clavier « aucun », pour qu'une frappe
+en cours ne soit jamais interceptée, et **région d'entrée vide**, pour que la
+surface ne pose pas un rectangle mort par-dessus le bureau. Elle se voit et ne
+s'attrape pas. La région est reposée à chaque affichage : la fenêtre ne
+changeait jamais de taille tant qu'elle ne montrait qu'un cadran, elle passe
+maintenant d'un disque de 168 px à une ligne de texte et retour.
+
+**Blanche.** La teinte vient du jeton `@avis`, blanc dans les quatre thèmes :
+un avis n'appartient à aucune application et ne colore rien, il éclaire. Un
+accent l'aurait rattaché au thème, un gris l'aurait fait passer pour éteint.
+**La contrepartie est réelle et doit être connue** : posée sur une fenêtre
+claire — et le centre de l'écran en porte souvent une, ce que le coin bas
+droit évitait — une trace blanche se lit mal. Le remède disponible est
+l'opacité, qui se règle ; une ombre portée relèverait la lisibilité mais
+contredirait le choix, documenté et tenu, de n'avoir ni ombre ni fond.
+
+**UNE OMBRE PORTÉE SOUS CHAQUE ÉLÉMENT, ET C'EST CE QUI REND LE BLANC
+LISIBLE.** Le coin écrit en blanc sur ce qui se trouve dessous. Sur un fond
+d'écran cela va de soi ; sur **une page web blanche en plein écran**, le
+blanc écrit sur du blanc et le coin disparaît.
+
+**Deux ombres par élément**, sur le modèle de celles du dock : une courte et
+dense décalée d'un pixel vers le bas, qui donne le contour, et une large sans
+décalage, qui pose le halo. L'une sans l'autre donne soit un liseré dur, soit
+un flou qui ne détache rien. `text-shadow` pour les libellés,
+**`-gtk-icon-shadow`** pour les icônes — GTK 4 a renommé la propriété, et
+l'ancien nom `icon-shadow` est refusé au chargement de la feuille sans que
+rien d'autre ne s'arrête ; les deux ont été soumis au parseur avant d'écrire
+la règle.
+
+**UN VIGNETTAGE AVAIT ÉTÉ ESSAYÉ D'ABORD, en deux temps, et écarté.** C'est
+la piste qui vient naturellement, et elle a deux défauts qu'il faut connaître
+avant de la reprendre :
+
+- **Court, il se lit comme une tache.** Le premier essai tenait dans 500 px
+  et culminait à 0,55 d'opacité. Il faisait son travail — 4,7:1 mesurés sous
+  l'heure sur une page blanche — mais son bord se voyait : une pastille grise
+  posée dans le coin.
+- **Long, il occupe l'écran.** Pour s'éteindre sans qu'on voie où, il lui
+  fallait près de **800 px de course** en diagonale et cinq paliers. La
+  transition devenait invisible, mais le voile couvrait alors un quart de
+  l'écran et tirait l'œil — et à une densité assez basse pour ne plus gêner
+  (0,30), il ne donnait plus que 1,6:1 sous l'heure.
+
+**Les deux exigences ne se cumulent pas pour un voile de région** : assez
+dense pour porter du blanc sur du blanc, il se voit. Une ombre portée, elle,
+obtient le même détachement **sur quelques pixels** et ne prend aucune place
+— mesuré, le gris de la page reste à 255 dès 200 px du coin. C'est ce que
+font les sous-titres, et pour la même raison : elle suit le glyphe au lieu
+d'assombrir la région.
+
+Le thème dit **de quelle couleur** l'ombre est faite — `@ombre-encre`, noir
+dans les quatre, par nécessité et non par goût, puisque l'encre du coin est
+blanche partout. Le **combien** vient de `shell.conf`, groupe `[appearance]`,
+relu à chaud comme tout le reste :
+
+| clé | défaut | ce qu'elle fait |
+|---|---|---|
+| `ombre_opacite` | 62 | l'opacité des deux ombres, en pourcent |
+| `ombre_flou` | 5 | le rayon du halo, en pixels |
+| `ombre_contour` | 2 | le rayon de l'ombre courte |
+| `ombre_decalage` | 1 | de combien l'ombre courte descend |
+
+On écrit, on enregistre, le coin change sous les yeux — sans recompiler.
+**Ce n'est pas dans le panneau de réglages, et c'est délibéré** : on y règle
+des habitudes, pas des détails de dessin. « Rayon de diffusion de l'ombre »
+n'est pas un choix d'utilisateur, c'est un choix qu'on fait une fois, à
+l'œil, sur son propre fond d'écran — après quoi il devient le défaut et
+personne n'y revient.
+
+**LE GLYPHE DU MODE EST DERRIÈRE L'HEURE, et l'ombre l'a prouvé.** Il était
+l'enfant *superposé* de la `GtkOverlay`, donc dessiné par-dessus le bloc
+heure/date. Tant qu'il n'était qu'une forme claire en retrait, cela ne se
+voyait pas ; dès qu'il a porté une ombre, cette ombre est tombée sur les
+chiffres et les a salis. Un filigrane se met derrière — c'est la définition
+d'un filigrane. Le glyphe est donc l'enfant principal, le bloc heure/date lui
+est superposé, et `gtk_overlay_set_measure_overlay()` rend à ce dernier le
+soin de dicter la taille.
+
+**Deux pièges payés au passage, tous deux muets :**
+
+- **`window.shell { background: transparent }` gagnait sur `.coin`** par
+  spécificité, du temps du vignettage : le dégradé n'était jamais peint, et
+  rien ne le disait — 255 mesurés sous le texte là où on attendait 115.
+- **Le padding et le dégradé posés sur le nœud `window` ont fait DISPARAÎTRE
+  le coin.** La surface layer-shell gardait la taille du contenu seul, GTK
+  plaçait l'enfant hors d'elle, et il n'en restait que le fond. Un coin
+  entièrement vide, sans une ligne de journal. Ce qui décore le coin vit donc
+  sur la **rangée**, jamais sur la fenêtre.
+
+**Position fixe, et elle ne suit pas le dock.** Le dock sort de l'écran dès
+qu'une application passe au premier plan ; l'avis, lui, ne bouge pas. Un
+signal qui monterait et descendrait selon ce qui est au premier plan
+demanderait à l'œil de le chercher.
+
+**Un cadran et non un nombre**, pour le décompte. La première version
+affichait « Veille dans 8 s » : un texte appelle la lecture, l'œil quitte le
+paragraphe pour déchiffrer trois mots — l'interruption même qu'on voulait
+éviter. Un disque qui se vide se perçoit sans se lire. Soixante graduations,
+trois longueurs, celles d'un cadran horloger : avec dix secondes de préavis un
+trait s'éteint toutes les 167 ms, ce n'est plus une disparition mais un
+balayage. Les messages, eux, sont du texte parce qu'ils n'ont **pas d'échelle
+à montrer** : « En charge » n'a pas de fraction.
+
+**Le diamètre ne se mesure plus.** Le cadran valait la largeur de la pilule de
+la barre d'état — 172 px relevés le 9 septembre 2026 — parce qu'il partageait
+son bord droit et qu'un écart de quelques pixels s'y serait vu. Au centre de
+l'écran il n'y a plus de bord à partager : faire dépendre un diamètre de la
+largeur de l'heure affichée était devenu une coïncidence entretenue pour rien.
+168 px, fixes.
+
+**Une icône devant, et ce n'est pas un ornement.** C'est elle qu'on reconnaît
+de loin, avant même d'avoir lu : « En charge » et « Sur batterie » se
+distinguent d'un coup d'œil par la fiche ou la pile, jamais par la longueur du
+mot. La fiche — `ac-adapter-symbolic` — a été dessinée pour l'occasion dans le
+thème de la distribution ; l'icône de « Sur batterie » est celle du **niveau
+réel**, pas une pile générique, parce qu'au moment où l'on débranche ce qu'on
+veut savoir est précisément combien il reste. Les noms en `-symbolic` sont
+recolorés par GTK : l'icône prend donc exactement la couleur et l'opacité du
+texte, à condition que `color` soit posé sur la **ligne** et non sur
+l'étiquette — sur l'étiquette seule, les deux auraient divergé au premier
+réglage d'opacité.
+
+**Ce n'est pas le centre de notifications, et les deux ne se remplacent pas.**
+Un avis est fugace et ne laisse aucune trace ; ce qui doit se retrouver plus
+tard passe par `org.freedesktop.Notifications`, la cloche et l'historique.
+`batterie.c` fait les deux aux seuils — l'avis est l'écho immédiat, la
+notification est l'archive. Aux deux bascules de la prise il ne fait que
+l'avis : brancher ou débrancher est un geste qu'on vient de faire, on veut la
+confirmation tout de suite et aucune raison de la retrouver dans la cloche une
+heure plus tard.
+
+**Et l'avis doit répondre au geste, pas au minuteur.** « En charge »
+n'apparaissait qu'à la lecture suivante de la batterie — jusqu'à cinq minutes
+après le branchement, l'intervalle sur secteur. `batterie.h` explique
+longuement pourquoi la **charge** se scrute : mesuré, cette machine n'émet
+aucun événement quand le pourcentage change. **Mais cela ne valait que pour le
+pourcentage.** Brancher est un événement matériel, et le noyau l'annonce : le
+pilote de l'adaptateur appelle `power_supply_changed()`, qui émet un uevent
+sur la classe `power_supply`. Le shell s'y abonne par un socket **netlink**,
+groupe 1 — celui des uevents du noyau, déclaré `NL_CFG_F_NONROOT_RECV`, donc
+ouvert à un processus ordinaire : **ni privilège, ni libudev**. La rafale
+— cinq messages, un par alimentation — est regroupée, et une seule lecture
+suit. **Mesuré le 15 septembre 2026 dans `claude-os-status` :** événement à
+09:26:54, une lecture, une seule. La scrutation reste en filet : si le socket
+ne s'ouvrait pas, on retombe sur le comportement d'avant — plus lent, jamais
+muet, et le journal le dit.
+
+**Le compte à rebours l'emporte** sur un message : les deux se disputeraient
+la même surface, et le décompte est le seul des deux qui ait une échéance. Le
+message écarté est écrit au journal, et sa notification part quand même.
 
 ### Le lanceur
 
@@ -207,11 +504,140 @@ d'Anthropic — hommage, pas habillage officiel.
 Ajouter un thème, c'est ajouter un fichier et une ligne dans la table de
 `src/config.c`. Aucune règle de `shell.css` n'est à toucher.
 
+Deux calques peuvent se poser **par-dessus** le thème, et ne redéfinissent que
+des jetons : la couleur de contraste et le verre. Les deux sections qui
+suivent les décrivent ; la mécanique est la même, et elle tient à une
+propriété de GTK vérifiée à la mesure — une couleur nommée se résout en
+parcourant les fournisseurs de la plus haute priorité vers la plus basse,
+quel que soit celui où la règle qui l'utilise est écrite.
+
 Les ombres sont **doublées** : une large et diffuse pour l'élévation, une
 courte et dense pour asseoir le contact. C'est ce doublement qui donne la
 profondeur de ChromeOS, là où une ombre unique paraît plate. Elle est calculée
 une fois par le compositeur, jamais réévaluée — rien à voir avec un flou
 permanent, qui aurait coûté un rendu par image.
+
+### La couleur de contraste
+
+Un thème décide de tout à la fois : les surfaces, le texte, les ombres **et**
+l'accent. On voulait pouvoir garder les surfaces d'un thème en changeant ce
+qui les souligne — le bouton activé, la sélection, le point sous une
+application ouverte, la ligne en surbrillance d'un menu.
+
+Le mécanisme est **le même que celui des thèmes, d'un cran au-dessus** :
+`style/accent-<id>.css` ne définit que quatre jetons — `@accent`,
+`@accent-hover`, `@accent-press`, `@on-accent` — et le shell le charge comme
+un fournisseur CSS de priorité supérieure à celle du thème. GTK résout une
+couleur nommée en parcourant les fournisseurs du plus prioritaire au moins
+prioritaire, quel que soit celui où la règle qui l'utilise est écrite :
+`shell.css` n'a donc pas une ligne à changer, et décocher la couleur rend la
+main au thème d'elle-même. **Vérifié dans les deux sens**, y compris après
+vidage du calque.
+
+Huit couleurs, et **elles ne sont pas choisies à l'œil** : chacune est la
+teinte la plus vive de sa famille qui tienne encore **4,5:1 sous du texte
+blanc**, seuil du texte de petit corps. C'est ce seuil qui a fixé la valeur,
+pas l'inverse — un réglage qui s'appelle « couleur de contraste » et qui
+rendrait les libellés illisibles serait une plaisanterie. Le ratio mesuré est
+écrit en tête de chaque fichier, avec celui du survol et celui contre la
+surface d'un thème sombre.
+
+Une seule valeur par couleur sert les quatre thèmes. Une variante claire et
+une variante sombre auraient mieux rendu sur les thèmes sombres, au prix de
+seize fichiers à tenir d'accord — et la contrepartie mesurée est faible :
+3,6:1 contre la surface sombre, au-dessus du 3:1 demandé à un élément
+d'interface.
+
+`claude-os-theme` lit le même fichier pour teindre les menus de labwc. Il n'en
+recopie pas la table : il compose le nom du fichier depuis `shell.conf` et
+s'arrête s'il n'existe pas. **Le fichier fait foi des deux côtés.**
+
+### La transparence
+
+Décochée par défaut, et **pas par prudence d'affichage**. Une surface opaque
+est annoncée comme telle au compositeur, qui peut la poser sans rien
+mélanger ; une surface translucide l'oblige à fondre ce qu'il y a dessous, à
+chaque image et sur toute la hauteur de la pile. C'est du remplissage GPU,
+donc des watts, sur une machine qui en consomme 6,8 au repos — et l'énergie
+est le fil rouge de ce projet.
+
+`style/verre.css` ne contient **aucune règle**, et c'est tout son intérêt :
+
+```css
+@define-color surface      @verre;
+@define-color surface-alt  @verre-alt;
+@define-color surface-sunk @verre-sunk;
+```
+
+Le dock, la barre d'état, la Console, le lanceur, les fenêtres du système et
+leurs survols ne peignent jamais une couleur : ils peignent l'un de ces trois
+jetons. Les renommer suffit donc à rendre le bureau entier translucide, sans
+qu'on ait à tenir ici la liste des classes qui portent un fond — une liste qui
+aurait vieilli à la première fenêtre ajoutée, en silence.
+
+Les trois valeurs de verre appartiennent **au thème**, qui seul sait de quelle
+couleur il dilue. **Trois et non une, et l'opacité croît avec
+l'enfoncement** : le survol d'une icône se peint par-dessus le fond du dock ;
+plus clairsemé que lui, il se lirait comme un trou creusé dans la surface au
+lieu d'une réaction au doigt.
+
+**Il n'y a pas de flou derrière ce verre, et il ne peut pas y en avoir** :
+labwc ne sait pas flouter ce qui est sous une fenêtre. Les opacités — 0,74 à
+0,95 — sont donc choisies pour rester lisibles sur un fond d'écran chargé, là
+où un flou aurait permis d'aller beaucoup plus loin.
+
+Le réglage s'arrête aux fenêtres que le shell peint lui-même. Les barres de
+titre, les menus et l'affichage à l'écran sont dessinés par labwc, dont le
+`themerc` ne prend que des couleurs opaques : il n'existe aucun moyen de lui
+demander une surface translucide. Le panneau le dit.
+
+### Le thème d'icônes de la distribution
+
+`rootfs/usr/share/icons/Claude-OS`, engendré par
+[`tools/fabrique-icones.py`](../tools/fabrique-icones.py). **C'est le
+générateur qui est la source** ; corriger un SVG installé serait perdu à
+l'exécution suivante.
+
+Ce qui fait qu'un jeu d'icônes paraît dessiné plutôt qu'assemblé, ce n'est pas
+le talent de chaque pictogramme : c'est qu'ils partagent tous la même
+épaisseur de trait, le même rayon d'angle, la même marge. Ces constantes sont
+en tête du fichier, et les changer redessine les cent quinze icônes d'un coup.
+L'épaisseur — 1,5 sur une grille de 16 — est celle de la cloche des
+notifications, seule icône que le projet possédait avant : un jeu plus gras
+aurait été plus net au pixel près, mais c'est la cloche qu'on voit à côté de
+l'heure toute la journée.
+
+**Tout y est une surface pleine, jamais un contour.** GTK recolore une icône
+`-symbolic` en imposant `fill` ; un trait au sens SVG — `stroke` — ne serait
+pas recoloré et resterait noir sur un thème sombre. « Trait » veut donc dire
+« rectangle long », et « cercle vide » veut dire « anneau à deux
+sous-chemins ». Ce que GTK recolore exactement — `rect`, `circle`, `path`,
+`polygon`, y compris dans un groupe transformé — a été **mesuré** : une icône
+d'essai rendue en rouge, puis les pixels relus.
+
+Les icônes en couleur reprennent **exactement** le glyphe des symboliques,
+agrandi par une transformation : le dossier du dock et celui de la barre
+latérale sont le même dessin, et non deux interprétations du même objet.
+
+`Inherits=Papirus`. Le thème couvre ce que Claude OS **affiche** — les
+pictogrammes que le shell demande à GTK, les dossiers de la barre latérale de
+Fichiers, les types de fichiers courants, les applications du bureau. Il ne
+couvre pas les milliers d'icônes du reste du monde et ne prétend pas le
+faire : un thème qui aurait voulu tout redessiner aurait surtout affiché des
+carrés barrés. Chromium et Claude Desktop gardent **délibérément** leur propre
+icône — redessiner la marque de quelqu'un d'autre n'est pas une question de
+style.
+
+Le générateur **contrôle sa propre couverture** : il relève les noms d'icônes
+cités dans `shell/src/*.c` et dit lesquels il ne dessine pas. Ce contrôle
+existe parce que l'erreur est muette — une icône absente ne provoque rien, GTK
+descend dans Papirus et affiche autre chose. C'est ainsi qu'on a trouvé le
+défaut du 14 septembre 2026 : `status.c` ne demande pas un nom écrit en clair,
+il **compose** `battery-level-%d%s-symbolic` depuis la charge arrondie à la
+dizaine. Le thème ne dessinait que le cran 100 ; sur une machine à 67 %, la
+barre d'état affichait la batterie de Papirus au milieu de nos icônes. Les
+vingt-deux crans sont désormais engendrés, et le contrôle sait que ces
+noms-là ne peuvent pas être trouvés par un `grep`.
 
 ### Le thème ne s'arrête pas au shell
 
@@ -235,7 +661,9 @@ option « suivre le thème du système ».
 | `~/.config/labwc/themerc-override` | labwc, au SIGHUP qui suit |
 
 Il prend ses couleurs **dans la feuille de style du thème courant**, pas dans
-une table à lui : `style/theme-<id>.css` reste la source unique. Il en déduit
+une table à lui : `style/theme-<id>.css` reste la source unique — et
+`style/accent-<id>.css` par-dessus, quand une couleur de contraste est
+choisie, exactement comme le shell la superpose. Il en déduit
 même « clair ou sombre » par la luminosité de `@surface`, plutôt que par le
 nom du thème — un thème nommé « nuit » fonctionnerait sans qu'on y touche.
 

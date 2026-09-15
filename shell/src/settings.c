@@ -59,6 +59,8 @@ static void set_reserve   (ShellConfig *c, gpointer d) { c->reserve_space = GPOI
 static void set_fill      (ShellConfig *c, gpointer d) { c->wallpaper_fill = GPOINTER_TO_INT (d); }
 static void set_font      (ShellConfig *c, gpointer d) { g_free (c->font);       c->font       = g_strdup (d); }
 static void set_icons     (ShellConfig *c, gpointer d) { g_free (c->icon_theme); c->icon_theme = g_strdup (d); }
+static void set_accent    (ShellConfig *c, gpointer d) { g_free (c->accent);     c->accent     = g_strdup (d); }
+static void set_verre     (ShellConfig *c, gpointer d) { c->transparence = GPOINTER_TO_INT (d); }
 static void set_wallpaper (ShellConfig *c, gpointer d) { g_free (c->wallpaper);  c->wallpaper  = g_strdup (d); }
 
 /* Widgets que la reapplication doit rafraichir. Un seul panneau par
@@ -99,7 +101,7 @@ propager_theme (const char *theme)
 static void
 reappliquer (const ShellConfig *cfg)
 {
-    shell_styles_load (cfg->theme);
+    shell_styles_load (cfg);
     shell_config_apply (cfg);
     g_object_set (gtk_settings_get_default (),
                   "gtk-application-prefer-dark-theme",
@@ -225,6 +227,20 @@ on_theme (GObject *dd, GParamSpec *ps, gpointer data)
         return;
 
     modifier (set_theme, (gpointer) shell_themes ()[i].id);
+}
+
+/* La couleur de contraste suit l'ordre de la table, comme le theme : la
+ * premiere ligne est « Celle du thème », c'est-a-dire aucun calque. */
+static void
+on_accent (GObject *dd, GParamSpec *ps, gpointer data)
+{
+    (void) ps; (void) data;
+
+    guint i = gtk_drop_down_get_selected (GTK_DROP_DOWN (dd));
+    if (i == GTK_INVALID_LIST_POSITION)
+        return;
+
+    modifier (set_accent, (gpointer) shell_accents ()[i].id);
 }
 
 /* Une liste de familles plutot qu'un GtkFontDialogButton, pour trois
@@ -1132,6 +1148,31 @@ construire_interface (ShellConfig *cfg, GtkWidget *window)
            "d'Anthropic. Hommage, pas habillage officiel.",
            theme);
 
+    /* La couleur de contraste JUSTE SOUS LE THEME, et pas ailleurs : c'est
+     * le second choix qu'on fait, et il se juge en regardant le premier. */
+    GtkStringList *noms_accent = gtk_string_list_new (NULL);
+    guint accent_choisi = 0;
+    for (guint i = 0; shell_accents ()[i].id != NULL; i++) {
+        gtk_string_list_append (noms_accent, shell_accents ()[i].nom);
+        if (g_strcmp0 (shell_accents ()[i].id, cfg->accent) == 0)
+            accent_choisi = i;
+    }
+    GtkWidget *accent = gtk_drop_down_new (G_LIST_MODEL (noms_accent), NULL);
+    gtk_drop_down_set_selected (GTK_DROP_DOWN (accent), accent_choisi);
+    g_signal_connect (accent, "notify::selected", G_CALLBACK (on_accent), NULL);
+    ligne (apparence, "Couleur de contraste",
+           "Ce qui souligne : bouton activé, sélection, point sous une "
+           "application ouverte, menu des barres de titre. Les surfaces et "
+           "le texte restent ceux du thème.",
+           accent);
+
+    ligne (apparence, "Activer la transparence",
+           "Le dock, la barre d'état, la Console et les fenêtres du système "
+           "laissent voir le fond d'écran. Sans flou — labwc n'en fait pas — "
+           "et le compositeur doit mélanger à chaque image : c'est quelques "
+           "dixièmes de watt sur la batterie.",
+           commutateur (cfg->transparence, set_verre));
+
     GtkStringList *polices = familles_polices (window);
     GtkWidget *police = gtk_drop_down_new (G_LIST_MODEL (polices), NULL);
     /* Recherche au clavier : une machine porte facilement deux cents
@@ -1149,7 +1190,8 @@ construire_interface (ShellConfig *cfg, GtkWidget *window)
     selectionner (GTK_DROP_DOWN (icones), cfg->icon_theme);
     g_signal_connect (icones, "notify::selected", G_CALLBACK (on_icones), NULL);
     ligne (apparence, "Thème d'icônes",
-           "Papirus conserve les noms d'icônes hérités qu'Adwaita a abandonnés.",
+           "« Claude OS » est dessiné pour cette distribution : il couvre ce "
+           "que le bureau affiche, et hérite de Papirus pour le reste.",
            icones);
 
     gtk_box_append (GTK_BOX (pile), apparence);
@@ -1485,8 +1527,9 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
            "un geste suffit à l'annuler.",
            LISTE_PREAVIS (cfg->energie_preavis, &M_PREAVIS));
 
-    ligne (ecran, "Opacité du compte à rebours",
-           "Le cadran prend la largeur de la barre d'état.",
+    ligne (ecran, "Opacité des avis système",
+           "Le compte à rebours et les messages courts — « En charge », "
+           "« Batterie faible » — qui passent au centre, au-dessus du dock.",
            liste (OPACITES, OPACITES_NOM, OPACITES_N,
                   cfg->energie_opacite, &M_OPACITE));
     gtk_box_append (GTK_BOX (pile), ecran);

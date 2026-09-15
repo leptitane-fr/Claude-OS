@@ -99,7 +99,8 @@ struct _Panel {
     Tile       wifi;
     Tile       bluetooth;
     GtkWidget *reveleur;        /* colonne de detail, a gauche de la Console */
-    GtkWidget *popover;
+    ConsoleFermer fermer;       /* referme le tiroir avant d'agir     */
+    gpointer      fermer_data;
     GtkWidget *bat_pct;
     GtkWidget *bat_detail;
     GtkWidget *bat_icon;
@@ -612,10 +613,10 @@ on_reglages (GtkButton *b, gpointer data)
     Panel *p = data;
     (void) b;
 
-    /* Refermer d'abord : le panneau est une surface layer-shell posee
+    /* Refermer d'abord : le tiroir est une surface layer-shell posee
      * par-dessus tout, la fenetre de reglages s'ouvrirait derriere. */
-    if (p->popover != NULL)
-        gtk_popover_popdown (GTK_POPOVER (p->popover));
+    if (p->fermer != NULL)
+        p->fermer (p->fermer_data);
 
     g_autoptr(GError) error = NULL;
     g_autoptr(GDesktopAppInfo) info =
@@ -735,10 +736,10 @@ on_page_changee (GObject *pile, GParamSpec *ps, gpointer data)
 }
 
 static void
-on_panel_show (GtkWidget *popover, gpointer data)
+on_panel_show (GtkWidget *contenu, gpointer data)
 {
     Panel *p = data;
-    (void) popover;
+    (void) contenu;
 
     /* Les services ne sont contactes qu'a la premiere ouverture du panneau.
      * Rien de tout cela n'interesse quelqu'un qui n'a pas encore clique. */
@@ -774,10 +775,10 @@ on_panel_show (GtkWidget *popover, gpointer data)
 }
 
 static void
-on_panel_closed (GtkPopover *popover, gpointer data)
+on_panel_closed (GtkWidget *contenu, gpointer data)
 {
     Panel *p = data;
-    (void) popover;
+    (void) contenu;
 
     /* Toujours rouvrir colonne repliee : retrouver le panneau la ou on
      * l'avait laisse trois heures plus tot serait deroutant. Et cela
@@ -817,10 +818,12 @@ panel_free (gpointer data)
 
 /* ------------------------------------------------------------------------- */
 GtkWidget *
-panel_new (gboolean apercu)
+panel_new (gboolean apercu, ConsoleFermer fermer, gpointer fermer_data)
 {
     Panel *p = g_new0 (Panel, 1);
-    p->apercu = apercu;
+    p->apercu      = apercu;
+    p->fermer      = fermer;
+    p->fermer_data = fermer_data;
 
     GtkWidget *box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
     gtk_widget_add_css_class (box, "qs");
@@ -966,38 +969,20 @@ panel_new (gboolean apercu)
     g_signal_connect (pile, "notify::visible-child-name",
                       G_CALLBACK (on_page_changee), p);
 
-    GtkWidget *popover = gtk_popover_new ();
-    p->popover = popover;
-    gtk_popover_set_child (GTK_POPOVER (popover), rangee);
-    gtk_popover_set_has_arrow (GTK_POPOVER (popover), FALSE);
-    gtk_widget_add_css_class (popover, "qs-popover");
-    /* Aligne le panneau sur le bord droit de la barre plutot que sur son
-     * centre : sinon il deborderait de l'ecran, la barre etant deja collee
-     * au bord. */
-    gtk_widget_set_halign (popover, GTK_ALIGN_END);
-    /* DEGAGER LA BARRE D'ETAT.
-     *
-     * Sans decalage, GTK colle le bas du popover au haut du bouton qui
-     * l'ouvre : mesure au banc d'essai, le popover finissait a y=1037 et la
-     * barre commencait a y=1038. Zero pixel entre les deux, et l'ombre
-     * portee de la Console — 12 px de decalage, 36 px de flou — retombait
-     * en plein sur la barre, dont les coins arrondis semblaient coupes.
-     *
-     * 12 px, parce que c'est deja l'ecart que le dock et la barre gardent
-     * avec le bord de l'ecran (« margin: 0 12px 12px 0 » dans shell.css).
-     * La Console se pose donc sur la meme trame que le reste du bureau. */
-    gtk_popover_set_offset (GTK_POPOVER (popover), 0, -PANEL_ECART_BARRE_PX);
-
     /* La veille juste avant l'alimentation : ce sont deux facons de gerer
      * la meme chose -- ce que la machine fait quand on ne s'en sert plus. */
     p->energie = console_energie_new (apercu);
     gtk_box_append (GTK_BOX (box), p->energie);
 
-    gtk_box_append (GTK_BOX (box), console_alimentation_new (popover, apercu));
+    gtk_box_append (GTK_BOX (box),
+                    console_alimentation_new (fermer, fermer_data, apercu));
 
-    g_signal_connect (popover, "show",   G_CALLBACK (on_panel_show),   p);
-    g_signal_connect (popover, "closed", G_CALLBACK (on_panel_closed), p);
-    g_object_set_data_full (G_OBJECT (popover), "panel", p, panel_free);
+    /* « map » et « unmap » plutot que « show » et « closed » : voir panel.h.
+     * Ils disent que la Console est REELLEMENT a l'ecran, ce que l'ouverture
+     * d'un popover ne garantissait pas. */
+    g_signal_connect (rangee, "map",   G_CALLBACK (on_panel_show),   p);
+    g_signal_connect (rangee, "unmap", G_CALLBACK (on_panel_closed), p);
+    g_object_set_data_full (G_OBJECT (rangee), "panel", p, panel_free);
 
-    return popover;
+    return rangee;
 }

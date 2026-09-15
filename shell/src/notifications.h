@@ -43,8 +43,22 @@ typedef struct _Notifs Notifs;
  * disputer le nom avec la barre d'etat de la vraie session. */
 Notifs *notifs_new (gboolean apercu);
 
-/* La cloche, a poser dans la barre a GAUCHE de la pilule. */
+/* La cloche, a poser dans la barre a GAUCHE de la pilule.
+ *
+ * PLUS PERSONNE NE LA POSE depuis que la barre a laisse place au coin. Le
+ * coin porte son propre temoin, qu'il ne faut PAS confondre avec celle-ci :
+ * ce temoin ne s'ouvre pas. La fonction reste pour le banc d'essai visuel
+ * et pour le jour ou un widget du tiroir redonnera une entree au centre. */
 GtkWidget *notifs_cloche (Notifs *n);
+
+/* Previent a chaque changement de « il reste du non-lu ».
+ *
+ * C'est par la que le coin allume son temoin. La cloche de ce fichier porte
+ * la meme information sous forme de classe CSS, mais elle vit dans un
+ * widget que plus rien n'affiche : un rappel, et le coin n'a pas a
+ * connaitre la structure interne du centre. */
+typedef void (*NotifsNonLuFunc) (gboolean il_y_en_a, gpointer data);
+void notifs_sur_non_lu (Notifs *n, NotifsNonLuFunc f, gpointer data);
 
 /* Accroche le centre et la banniere a l'ancre de la Console — le bouton de
  * la barre d'etat. A appeler une fois la barre construite, et avant toute

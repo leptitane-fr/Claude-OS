@@ -24,6 +24,7 @@ struct _ShellWindow {
     char     *title;
     gboolean  activated;
     gboolean  minimized;
+    gboolean  plein_ecran;
     gpointer  handle;      /* zwlr_foreign_toplevel_handle_v1 *             */
     guint64   serie;       /* identite stable, jamais reutilisee            */
 };
@@ -48,6 +49,20 @@ const GPtrArray *shell_toplevels_get (void);
  * change » serait alors vrai a tort -- le dock resterait a l'ecran au
  * lancement d'une application. */
 guint64 shell_toplevels_serie_active (void);
+
+/* Une fenetre occupe-t-elle l'ecran entier en ce moment ?
+ *
+ * POURQUOI LE COIN EN A BESOIN. Il est permanent et insensible au clic, ce
+ * qui est exactement ce qu'on lui demande -- jusqu'au moment ou l'on regarde
+ * un film. Une heure posee sur une image plein ecran n'est plus un service,
+ * c'est une gene ; et sur Netflix, dont les commandes de lecture vivent en
+ * bas a droite, les deux se superposent et deviennent illisibles. Le coin
+ * s'efface donc, et revient en sortant du plein ecran.
+ *
+ * TOUTE fenetre plein ecran non reduite compte, et pas seulement l'active :
+ * une video qui perd le focus continue d'occuper l'ecran. La question posee
+ * est « quelque chose couvre-t-il l'ecran », pas « qui a le clavier ». */
+gboolean shell_toplevels_plein_ecran (void);
 
 /* Ramene une fenetre au premier plan. */
 void shell_toplevel_activate (const ShellWindow *win);

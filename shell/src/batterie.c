@@ -3,9 +3,17 @@
 #include "batterie.h"
 #include "sysfs.h"
 #include "logind.h"
+#include "avis.h"
 
 #include <gio/gio.h>
+#include <glib-unix.h>
+#include <errno.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#include <sys/socket.h>
+#include <linux/netlink.h>
 
 /* Marge de rearmement, en points de pourcentage. Un seuil qui vient de
  * parler se tait jusqu'a ce que la charge soit remontee de CE tant au-dessus
@@ -26,6 +34,17 @@
  * on ne peut rien estimer : cadence de repli. */
 #define INTERVALLE_AVEUGLE 120
 
+/* Duree des avis, en secondes -- ceux qui passent au centre de l'ecran,
+ * au-dessus du dock, et disparaissent seuls (avis.h).
+ *
+ * DEUX VALEURS ET NON UNE. Le branchement est une confirmation : on vient de
+ * faire le geste, on attend juste de savoir qu'il a pris, et quatre secondes
+ * suffisent -- au-dela l'avis devient un reproche. Un seuil de batterie, lui,
+ * n'a ete demande par personne : il doit survivre au temps qu'on met a lever
+ * les yeux. */
+#define AVIS_SECTEUR  4
+#define AVIS_SEUIL    7
+
 typedef enum { SEUIL_PREVENIR = 0, SEUIL_INSISTER, SEUIL_ABRI, SEUILS } Seuil;
 
 static struct {
@@ -39,6 +58,13 @@ static struct {
 
     gboolean etait_sur_secteur;
     gboolean abri_engage;     /* on a deja agi : ne pas le refaire en boucle */
+
+    ShellBatterieLueFunc lue_fn;
+    gpointer             lue_data;
+
+    int      prise_fd;        /* netlink : les uevents du noyau              */
+    guint    prise_source;    /* la surveillance de ce descripteur           */
+    guint    prise_rebond;    /* le regroupement des rafales                 */
 } B;
 
 /* -------------------------------------------------------------------------
@@ -228,9 +254,138 @@ mettre_a_l_abri (void)
     shell_logind_appeler (methode);
 }
 
-/* ------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------
+ * LA PRISE, ELLE, PREVIENT -- ET C'EST MESURE
+ *
+ * batterie.h explique pourquoi la CHARGE se scrute : sept minutes d'ecoute
+ * pendant une charge active, neuf changements de pourcentage, zero
+ * evenement ; l'essai refait en decharge, meme resultat. Cette conclusion
+ * tient, et la scrutation ci-dessous reste.
+ *
+ * MAIS ELLE NE VAUT QUE POUR LE POURCENTAGE. Brancher ou debrancher est un
+ * evenement materiel, et le noyau l'annonce : le pilote ACPI de l'adaptateur
+ * appelle power_supply_changed(), qui emet un uevent sur la classe
+ * power_supply. Mesure du 15 septembre 2026 sur MADOO, socket netlink en
+ * ecoute et « udevadm trigger --subsystem-match=power_supply » : cinq
+ * messages recus, dont celui de l'adaptateur, POWER_SUPPLY_ONLINE dans la
+ * charge utile.
+ *
+ * ET C'EST EXACTEMENT LA DIFFERENCE QUI COMPTAIT. Un pourcentage qui change
+ * peut attendre la prochaine lecture -- il aura a peine bouge. Un cable
+ * qu'on branche, non : l'avis « En charge » doit repondre au geste, pas
+ * arriver jusqu'a cinq minutes plus tard, ce qui etait le comportement
+ * observe et rapporte.
+ *
+ * SANS PRIVILEGE, ET SANS LIBUDEV. Le groupe 1 de NETLINK_KOBJECT_UEVENT est
+ * celui des uevents du NOYAU ; il est declare NL_CFG_F_NONROOT_RECV, donc un
+ * processus ordinaire peut s'y abonner -- verifie en s'y abonnant. Le groupe
+ * 2 est celui que rediffuse udevd, et lui demanderait libudev pour un
+ * service identique : une dependance de plus pour lire les memes octets.
+ *
+ * LA SCRUTATION RESTE, en filet. Si ce socket ne s'ouvrait pas -- noyau
+ * different, bac a sable -- on retombe simplement sur le comportement
+ * d'avant : plus lent, jamais muet.
+ * ------------------------------------------------------------------------- */
 
 static gboolean on_lecture (gpointer data);
+
+/* Une rafale d'uevents -- cinq d'un coup, un par alimentation -- ne doit
+ * declencher qu'une lecture. */
+static gboolean
+prise_relire (gpointer data)
+{
+    (void) data;
+    B.prise_rebond = 0;
+
+    /* DIT, ET PAS SEULEMENT FAIT. C'est la seule trace qui distingue « le
+     * noyau a prevenu » de « la scrutation est passee par la » -- et sans
+     * elle, un avis tardif ne dirait pas si l'abonnement a echoue ou si le
+     * pilote est muet. Rare par nature : sept minutes de charge active
+     * n'avaient produit aucun evenement (batterie.h). */
+    g_message ("batterie : uevent d'alimentation — lecture immediate");
+
+    if (B.source != 0) {
+        g_source_remove (B.source);
+        B.source = 0;
+    }
+    on_lecture (NULL);
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean
+on_uevent (gint fd, GIOCondition cond, gpointer data)
+{
+    (void) data;
+
+    if (cond & (G_IO_ERR | G_IO_HUP)) {
+        g_message ("batterie : netlink ferme — retour a la seule scrutation");
+        B.prise_source = 0;
+        return G_SOURCE_REMOVE;
+    }
+
+    /* Le message est une suite de chaines nul-terminees. On ne cherche qu'une
+     * chose : le sous-systeme. Le groupe 1 porte TOUS les uevents du noyau --
+     * USB, entrees, blocs -- et se reveiller pour eux serait payer une
+     * scrutation deguisee. */
+    char tampon[8192];
+    ssize_t n;
+    gboolean concerne = FALSE;
+
+    while ((n = recv (fd, tampon, sizeof tampon - 1, MSG_DONTWAIT)) > 0) {
+        tampon[n] = '\0';
+        for (ssize_t i = 0; i < n; i += (ssize_t) strlen (tampon + i) + 1)
+            if (g_strcmp0 (tampon + i, "SUBSYSTEM=power_supply") == 0) {
+                concerne = TRUE;
+                break;
+            }
+    }
+
+    if (!concerne)
+        return G_SOURCE_CONTINUE;
+
+    if (B.prise_rebond != 0)
+        g_source_remove (B.prise_rebond);
+    B.prise_rebond = g_timeout_add (250, prise_relire, NULL);
+    return G_SOURCE_CONTINUE;
+}
+
+static void
+prise_init (void)
+{
+    B.prise_fd = socket (PF_NETLINK, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK,
+                         NETLINK_KOBJECT_UEVENT);
+    if (B.prise_fd < 0) {
+        g_message ("batterie : netlink indisponible (%s) — seule la "
+                   "scrutation previendra du branchement",
+                   g_strerror (errno));
+        return;
+    }
+
+    struct sockaddr_nl sa;
+    memset (&sa, 0, sizeof sa);
+    sa.nl_family = AF_NETLINK;
+    sa.nl_groups = 1;   /* les uevents du noyau ; 2 serait ceux de udevd */
+
+    if (bind (B.prise_fd, (struct sockaddr *) &sa, sizeof sa) < 0) {
+        /* DIT, ET NON AVALE. Sans ce message, un noyau qui refuserait
+         * l'abonnement rendrait simplement l'avis « En charge » tardif, et
+         * l'on chercherait la cause dans l'affichage. */
+        g_message ("batterie : abonnement netlink refuse (%s) — seule la "
+                   "scrutation previendra du branchement",
+                   g_strerror (errno));
+        close (B.prise_fd);
+        B.prise_fd = -1;
+        return;
+    }
+
+    B.prise_source = g_unix_fd_add (B.prise_fd,
+                                    G_IO_IN | G_IO_ERR | G_IO_HUP,
+                                    on_uevent, NULL);
+    g_message ("batterie : branchement et debranchement suivis par uevent");
+}
+
+/* ------------------------------------------------------------------------- */
+
 
 static void
 reprogrammer (int secondes)
@@ -262,11 +417,14 @@ franchir (Seuil s, int pourcent, double heures)
         corps = g_strdup_printf ("Il reste %d %%.%s Pensez à brancher.",
                                  pourcent, reste ? reste : "");
         prevenir ("Batterie faible", corps, FALSE);
+        shell_avis_message ("battery-low-symbolic", "Batterie faible", AVIS_SEUIL);
         break;
     case SEUIL_INSISTER:
         corps = g_strdup_printf ("Il reste %d %%.%s Branchez maintenant.",
                                  pourcent, reste ? reste : "");
         prevenir ("Batterie très faible", corps, TRUE);
+        shell_avis_message ("battery-caution-symbolic", "Batterie très faible",
+                            AVIS_SEUIL);
         break;
     case SEUIL_ABRI:
         if (B.abri_engage)
@@ -274,6 +432,8 @@ franchir (Seuil s, int pourcent, double heures)
         B.abri_engage = TRUE;
         corps = g_strdup_printf ("Il reste %d %%. %s.", pourcent, B.abri->nom);
         prevenir ("Batterie critique", corps, TRUE);
+        shell_avis_message ("battery-caution-symbolic", "Batterie critique",
+                            AVIS_SEUIL);
         mettre_a_l_abri ();
         break;
     default:
@@ -297,13 +457,37 @@ on_lecture (gpointer data)
         return G_SOURCE_REMOVE;
     }
 
-    /* Rebrancher remet tout a zero : les seuils reparleront au prochain
-     * debranchement, meme si la charge n'a pas eu le temps de remonter. */
+    /* LES DEUX BASCULES DE LA PRISE.
+     *
+     * UN AVIS, ET PAS DE NOTIFICATION. Brancher ou debrancher est un geste
+     * qu'on vient de faire : on veut la confirmation tout de suite, et on
+     * n'a aucune raison de la retrouver dans la cloche une heure plus tard.
+     * C'est exactement ce que la surface d'avis sait faire et que le centre
+     * de notifications ferait mal -- l'inverse des seuils, qui meritent les
+     * deux.
+     *
+     * AUCUNE DES DEUX NE PEUT SE DECLENCHER A L'OUVERTURE DE SESSION : la
+     * bascule se mesure contre « etait_sur_secteur », que
+     * shell_batterie_init renseigne a l'etat reel avant la premiere lecture.
+     * Sans cela, tout demarrage sur secteur aurait affiche « En charge ».
+     *
+     * L'ICONE DE « Sur batterie » EST CELLE DU NIVEAU REEL, pas une pile
+     * generique : au moment ou l'on debranche, ce qu'on veut savoir est
+     * precisement combien il reste. Meme famille d'icones que la barre
+     * d'etat, meme arrondi a la dizaine. */
     if (secteur && !B.etait_sur_secteur) {
         for (int s = 0; s < SEUILS; s++)
             B.arme[s] = TRUE;
         B.abri_engage = FALSE;
         g_message ("batterie : sur secteur, seuils rearmes");
+        shell_avis_message ("ac-adapter-symbolic", "En charge", AVIS_SECTEUR);
+    } else if (!secteur && B.etait_sur_secteur) {
+        g_message ("batterie : sur batterie, %d %%", pourcent);
+        int cran = (pourcent + 5) / 10 * 10;
+        if (cran > 100) cran = 100;
+        g_autofree char *icone =
+            g_strdup_printf ("battery-level-%d-symbolic", cran);
+        shell_avis_message (icone, "Sur batterie", AVIS_SECTEUR);
     }
     B.etait_sur_secteur = secteur;
 
@@ -316,8 +500,20 @@ on_lecture (gpointer data)
         }
     }
 
+    /* APRES les seuils et les bascules, jamais avant : celui qui repeint
+     * doit voir l'etat dans lequel ce tour de lecture l'a laisse. */
+    if (B.lue_fn != NULL)
+        B.lue_fn (B.lue_data);
+
     reprogrammer (prochain_intervalle (dir, pourcent, secteur));
     return G_SOURCE_REMOVE;
+}
+
+void
+shell_batterie_sur_lecture (ShellBatterieLueFunc f, gpointer data)
+{
+    B.lue_fn   = f;
+    B.lue_data = data;
 }
 
 static void
@@ -346,7 +542,9 @@ shell_batterie_init (const ShellConfig *cfg)
     for (int s = 0; s < SEUILS; s++)
         B.arme[s] = TRUE;
     B.etait_sur_secteur = shell_sur_secteur ();
+    B.prise_fd = -1;
     appliquer_config (cfg);
+    prise_init ();
 
     /* Une premiere lecture tout de suite : ouvrir la session avec 4 % de
      * charge doit prevenir, pas attendre le premier intervalle. */

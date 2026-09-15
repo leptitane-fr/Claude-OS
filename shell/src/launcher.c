@@ -749,7 +749,7 @@ static void
 on_config_reloaded (ShellConfig *cfg, gpointer data)
 {
     (void) data;
-    shell_styles_load (cfg->theme);
+    shell_styles_load (cfg);
     shell_config_apply (cfg);
     shell_config_free (cfg);
 }

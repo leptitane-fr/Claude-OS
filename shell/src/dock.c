@@ -897,7 +897,7 @@ on_config_reloaded (ShellConfig *cfg, gpointer window)
     shell_config_free (D.cfg);
     D.cfg = cfg;
 
-    shell_styles_load (cfg->theme);
+    shell_styles_load (cfg);
     shell_config_apply (cfg);
 
     gtk_layer_set_exclusive_zone (GTK_WINDOW (window),

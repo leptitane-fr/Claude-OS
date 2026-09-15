@@ -40,6 +40,26 @@
  * scrutation ci-dessous redeviendrait un simple filet.
  *
  * -------------------------------------------------------------------------
+ * MAIS LA PRISE, ELLE, PREVIENT -- ET C'EST L'EVENEMENT QUI COMPTAIT
+ *
+ * Ce qui precede vaut pour le POURCENTAGE, et pour lui seul. Brancher ou
+ * debrancher est un evenement materiel, que le noyau annonce : le pilote de
+ * l'adaptateur appelle power_supply_changed(), qui emet un uevent sur la
+ * classe power_supply. Mesure du 15 septembre 2026 sur MADOO : socket
+ * netlink en ecoute, cinq messages recus au declenchement, POWER_SUPPLY_ONLINE
+ * dans la charge utile -- et, dans claude-os-status, UNE seule lecture
+ * declenchee, la rafale etant regroupee.
+ *
+ * ET C'EST EXACTEMENT LA DIFFERENCE QUI COMPTE. Un pourcentage qui change
+ * peut attendre la prochaine lecture, il aura a peine bouge. Un cable qu'on
+ * branche, non : l'avis « En charge » doit repondre au geste. Il arrivait
+ * jusqu'a cinq minutes plus tard -- l'intervalle sur secteur -- ce qui a ete
+ * rapporte a l'usage le 15 septembre 2026.
+ *
+ * Sans privilege et sans libudev : voir la section « LA PRISE » de
+ * batterie.c pour le detail du socket et ce qui a ete verifie.
+ *
+ * -------------------------------------------------------------------------
  * ALORS ON SCRUTE LE MOINS POSSIBLE : L'INTERVALLE SE CALCULE
  *
  * Scruter a cadence fixe, c'est payer le pire cas en permanence. On calcule
@@ -108,6 +128,22 @@ void shell_batterie_init (const ShellConfig *cfg);
  * rappel de shell_config_watch, comme shell_energie_reconfigurer : le
  * panneau ecrit shell.conf, chaque composant relit. */
 void shell_batterie_reconfigurer (const ShellConfig *cfg);
+
+/* Previent a CHAQUE lecture de la batterie, quelle qu'en soit la cause :
+ * l'intervalle calcule, ou l'uevent de la prise.
+ *
+ * POURQUOI CE RAPPEL EXISTE. Le coin affiche la charge et la fiche secteur,
+ * et il les tenait de la minuterie d'une minute de status.c. Brancher
+ * declenchait donc l'avis « En charge » tout de suite -- l'uevent -- et la
+ * fiche du coin jusqu'a une minute plus tard : deux temoins de la meme
+ * chose, dont l'un mentait pendant une minute. Constate a l'usage le
+ * 15 septembre 2026.
+ *
+ * Ce module est le seul a savoir QUAND l'etat a ete relu. Il le dit, et
+ * status.c repeint. La minuterie de la minute reste : elle couvre la
+ * decharge lente, que rien n'annonce. */
+typedef void (*ShellBatterieLueFunc) (gpointer data);
+void shell_batterie_sur_lecture (ShellBatterieLueFunc f, gpointer data);
 
 /* Etat courant, pour qui veut l'afficher sans relire sysfs lui-meme. Rend
  * FALSE s'il n'y a pas de batterie, ou si la lecture a echoue. « pourcent »

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Claude OS — Bureau -->
+  <defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7d8ea1"/><stop offset="1" stop-color="#5a6877"/></linearGradient></defs>
+  <path d="M17 2H47A15 15 0 0 1 62 17V47A15 15 0 0 1 47 62H17A15 15 0 0 1 2 47V17A15 15 0 0 1 17 2Z" fill="url(#f)"/>
+  <g transform="translate(12 12) scale(2.5)"><path d="M3.4 2.6H12.6A2 2 0 0 1 14.6 4.6V10A2 2 0 0 1 12.6 12H3.4A2 2 0 0 1 1.4 10V4.6A2 2 0 0 1 3.4 2.6ZM3.4 4.1H12.6A0.5 0.5 0 0 1 13.1 4.6V10A0.5 0.5 0 0 1 12.6 10.5H3.4A0.5 0.5 0 0 1 2.9 10V4.6A0.5 0.5 0 0 1 3.4 4.1Z" fill="#faf9f5" fill-rule="evenodd"/><path d="M8 12H8A0.7 0.7 0 0 1 8.7 12.7V12.9A0.7 0.7 0 0 1 8 13.6H8A0.7 0.7 0 0 1 7.3 12.9V12.7A0.7 0.7 0 0 1 8 12Z" fill="#faf9f5"/><path d="M6.1 13H9.9A0.7 0.7 0 0 1 10.6 13.7V13.7A0.7 0.7 0 0 1 9.9 14.4H6.1A0.7 0.7 0 0 1 5.4 13.7V13.7A0.7 0.7 0 0 1 6.1 13Z" fill="#faf9f5"/></g>
+</svg>

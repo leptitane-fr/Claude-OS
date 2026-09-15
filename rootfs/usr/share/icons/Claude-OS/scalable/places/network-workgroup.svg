@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Claude OS — voisinage réseau -->
+  <defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7d8ea1"/><stop offset="1" stop-color="#5a6877"/></linearGradient></defs>
+  <path d="M17 2H47A15 15 0 0 1 62 17V47A15 15 0 0 1 47 62H17A15 15 0 0 1 2 47V17A15 15 0 0 1 17 2Z" fill="url(#f)"/>
+  <g transform="translate(12 12) scale(2.5)"><path d="M6 3.4A2 2 0 1 1 10 3.4A2 2 0 1 1 6 3.4Z" fill="#faf9f5"/><path d="M1.6 12.4A2 2 0 1 1 5.6 12.4A2 2 0 1 1 1.6 12.4Z" fill="#faf9f5"/><path d="M10.4 12.4A2 2 0 1 1 14.4 12.4A2 2 0 1 1 10.4 12.4Z" fill="#faf9f5"/><g transform="translate(8 5.4) rotate(124.695)"><path d="M0.6 -0.6H5.725A0.6 0.6 0 0 1 6.325 0V0A0.6 0.6 0 0 1 5.725 0.6H0.6A0.6 0.6 0 0 1 0 0V0A0.6 0.6 0 0 1 0.6 -0.6Z" fill="#faf9f5"/></g><g transform="translate(8 5.4) rotate(55.305)"><path d="M0.6 -0.6H5.725A0.6 0.6 0 0 1 6.325 0V0A0.6 0.6 0 0 1 5.725 0.6H0.6A0.6 0.6 0 0 1 0 0V0A0.6 0.6 0 0 1 0.6 -0.6Z" fill="#faf9f5"/></g></g>
+</svg>

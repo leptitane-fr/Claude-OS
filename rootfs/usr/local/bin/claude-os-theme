@@ -50,7 +50,7 @@ fi
 # VÉRITÉ : les couleurs ne sont écrites qu'à un seul endroit dans ce projet,
 # et tout ce qui les utilise les y lit.
 jeton() {
-	sed -n "s/^@define-color[[:space:]]\+$1[[:space:]]\+\(#[0-9a-fA-F]\{6\}\).*/\1/p" "$CSS" | head -1
+	sed -n "s/^@define-color[[:space:]]\+$1[[:space:]]\+\(#[0-9a-fA-F]\{6\}\).*/\1/p" "${2:-$CSS}" | head -1
 }
 
 ACCENT="$(jeton accent)"
@@ -63,6 +63,35 @@ SUR_ACCENT="$(jeton on-accent)"
 DANGER="$(jeton danger)"
 
 [ -n "$SURFACE" ] || { echo "claude-os-theme : $CSS illisible" >&2; exit 1; }
+
+# LA COULEUR DE CONTRASTE, SI L'UTILISATEUR EN A CHOISI UNE.
+#
+# Elle se pose PAR-DESSUS le thème, exactement comme dans le shell : un
+# fichier style/accent-<id>.css qui ne redéfinit que les quatre jetons de
+# l'accent. Le shell le charge comme un calque de plus dans la cascade CSS ;
+# ici, on relit simplement les deux jetons qui sortent du shell — celui des
+# menus de labwc et le texte qu'on pose dessus.
+#
+# LE FICHIER FAIT FOI, PAS UNE LISTE. Aucune table des accents n'est recopiée
+# ici : le nom vient de shell.conf, le fichier existe ou n'existe pas. Un
+# accent ajouté au shell sans son fichier laisserait le bureau coloré et les
+# menus à l'ancienne teinte — c'est le seul désaccord possible, et il se voit.
+ACCENT_ID="$(sed -n 's/^[[:space:]]*accent[[:space:]]*=[[:space:]]*//p' "$CONF" 2>/dev/null | head -1)"
+if [ -n "$ACCENT_ID" ]; then
+	ACCENT_CSS="$STYLE/accent-$ACCENT_ID.css"
+	if [ -r "$ACCENT_CSS" ]; then
+		ACCENT="$(jeton accent "$ACCENT_CSS")"
+		SUR_ACCENT="$(jeton on-accent "$ACCENT_CSS")"
+	else
+		echo "claude-os-theme : couleur de contraste « $ACCENT_ID » inconnue ($ACCENT_CSS absent) — celle du thème est conservée" >&2
+	fi
+fi
+
+# LA TRANSPARENCE NE SORT PAS DU SHELL, et ce n'est pas un oubli. Les barres
+# de titre, les menus et l'affichage à l'écran sont dessinés par labwc, dont
+# le themerc ne prend que des couleurs opaques : il n'existe aucun moyen de
+# lui demander une surface translucide. Le réglage s'arrête donc aux fenêtres
+# que le shell peint lui-même, et le panneau le dit.
 
 # SOMBRE OU CLAIR : CALCULÉ, PAS DEVINÉ.
 #

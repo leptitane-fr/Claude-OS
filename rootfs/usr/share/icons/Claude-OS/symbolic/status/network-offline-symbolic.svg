@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- Claude OS — aucun réseau -->
+  <path d="M2.25 8A5.75 5.75 0 1 1 13.75 8A5.75 5.75 0 1 1 2.25 8ZM3.75 8A4.25 4.25 0 1 1 12.25 8A4.25 4.25 0 1 1 3.75 8Z" fill="#222222" fill-rule="evenodd"/>
+  <path d="M8 2.3A3.4 5.7 0 0 1 8 13.7A3.4 5.7 0 0 1 8 2.3ZM8 3.7A2 4.3 0 0 1 8 12.3A2 4.3 0 0 1 8 3.7Z" fill="#222222" fill-rule="evenodd"/>
+  <g transform="translate(2.8 13.2) rotate(-45)"><path d="M0.75 -0.75H13.958A0.75 0.75 0 0 1 14.708 0V0A0.75 0.75 0 0 1 13.958 0.75H0.75A0.75 0.75 0 0 1 0 0V0A0.75 0.75 0 0 1 0.75 -0.75Z" fill="#222222"/></g>
+</svg>

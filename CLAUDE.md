@@ -6,7 +6,7 @@ Ce fichier est chargé automatiquement à l'ouverture d'une session. Il dit
 
 ---
 
-## Où en est le projet — 14 septembre 2026
+## Où en est le projet — 15 septembre 2026
 
 **Le mode tablette est en service** (11 au 14 septembre 2026) : détection du
 retournement, rotation paysage ↔ chevalet, et un **clavier à l'écran** en deux
@@ -18,6 +18,152 @@ variables le long de l'arc du pouce. Suggestions de mots avec contexte
 (Tatoeba), apprentissage, espace et majuscule automatiques. Détail dans
 [`docs/12`](docs/12-mode-tablette.md), fil de la séance dans
 [`docs/07`](docs/07-journal-des-seances.md).
+
+**L'APPARENCE DU BUREAU SE RÈGLE** (14 septembre 2026), et les trois
+nouveautés sont **vues à l'écran** sur MADOO : une **transparence** des
+surfaces — dock, barre d'état, Console, lanceur, fenêtres du système —, une
+**couleur de contraste** à choisir parmi huit, et un **thème d'icônes dessiné
+pour la distribution**, 115 pictogrammes engendrés par
+[`tools/fabrique-icones.py`](tools/fabrique-icones.py).
+
+Les deux premiers sont des **calques CSS posés par-dessus le thème** :
+`style/accent-<id>.css` redéfinit quatre jetons, `style/verre.css` en
+redéfinit trois, et **aucune règle de `shell.css` ne change**. Deux
+conséquences à retenir avant d'y toucher :
+
+- **Ajouter une couleur de contraste, c'est DEUX gestes** — une ligne dans la
+  table de `shell/src/config.c` *et* le fichier `style/accent-<id>.css`. Sans
+  le fichier, le shell garde l'accent du thème et `claude-os-theme` le dit sur
+  sa sortie d'erreur ; sans la ligne, la couleur existe mais n'est pas
+  proposée.
+- **Un nom d'icône absent du thème ne provoque RIEN** : GTK descend dans
+  Papirus et affiche autre chose. C'est ainsi qu'on a servi, pendant une
+  heure, la batterie de Papirus au milieu de nos icônes — `status.c` compose
+  `battery-level-%d%s-symbolic` à l'exécution, et le thème ne dessinait que le
+  cran 100. Le générateur contrôle désormais sa couverture ; le lancer après
+  toute icône ajoutée au shell.
+
+Détail dans [`docs/04`](docs/04-environnement-bureau.md) §4.3.
+
+**LA BARRE D'ÉTAT N'EXISTE PLUS** (15 septembre 2026). À sa place, deux
+choses : le **coin** et le **tiroir**.
+
+Le **coin** (`shell/src/coin.c`) est permanent, en blanc sur le fond d'écran,
+sans fond ni bordure ni ombre, et **insensible au clic comme au survol** —
+région d'entrée vide, reposée à chaque disposition. Heure, date en toutes
+lettres, le **mode d'énergie en grand** par-dessus la droite de l'heure, et
+en colonne : non-lu, réseau, Bluetooth, charge, fiche secteur quand elle est
+branchée. Il ne suit plus le dock hors de l'écran : une information
+permanente ne s'absente pas.
+
+Le **tiroir** (`shell/src/tiroir.c`) se tire du bord droit et porte deux
+volets : widgets à venir en haut, **Console** en bas. Il s'ouvre au **glissé
+du doigt** depuis le bord, ou au **pointeur posé une seconde** contre ce bord
+— une attente, pas un contact, pour que le geste reste volontaire. Tout clic
+ailleurs le referme.
+
+Quatre points à retenir avant d'y toucher :
+
+- **LE COIN S'EFFACE SOUS UNE FENÊTRE PLEIN ÉCRAN**, et c'est sa seule
+  disparition. Concédée à l'usage : une heure sur un film gêne, et les
+  commandes de Netflix sont au même endroit. `shell_toplevels_plein_ecran()`
+  — `wlr-foreign-toplevel-management-v1`, aucune consultation périodique —
+  et **toute** fenêtre plein écran non réduite compte, pas seulement
+  l'active. Mesuré sur les trois états. Les avis système, eux, restent :
+  « Batterie critique » vaut d'interrompre un film.
+- **LE COIN PORTE UNE OMBRE SOUS CHAQUE ÉLÉMENT**, et c'est ce qui le rend
+  lisible sur une page blanche en plein écran — sans elle, blanc sur blanc,
+  il disparaît. `text-shadow` pour les libellés, **`-gtk-icon-shadow`** pour
+  les icônes (GTK 4 refuse l'ancien nom `icon-shadow`, en silence). Le thème
+  dit la couleur (`@ombre-encre`, noir dans les quatre) ; le **combien** vient
+  de `shell.conf` — `ombre_opacite`, `ombre_flou`, `ombre_contour`,
+  `ombre_decalage`, groupe `[appearance]`, relus à chaud. Pas dans le panneau :
+  on y règle des habitudes, pas des détails de dessin.
+  **Le glyphe du mode est passé DERRIÈRE l'heure** au passage : enfant
+  superposé de la `GtkOverlay`, il était dessiné par-dessus, et son ombre
+  salissait les chiffres. Il est désormais l'enfant principal, l'heure lui est
+  superposée, et `measure_overlay` rend à celle-ci le soin de dicter la
+  taille.
+  **Un vignettage a été essayé en deux temps et écarté** : court il se lit
+  comme une tache, long il lui faut 800 px de course et il occupe un quart de
+  l'écran. Les deux exigences ne se cumulent pas pour un voile de région —
+  assez dense pour porter du blanc sur du blanc, il se voit. Ne pas y
+  revenir sans avoir relu `docs/04` §4.2.
+  **Deux pièges muets rencontrés là :** `window.shell { background:
+  transparent }` gagne sur `.coin` par spécificité, et padding + fond posés
+  sur le nœud `window` font DISPARAÎTRE le coin — la surface layer-shell
+  garde la taille du contenu seul pendant que GTK place l'enfant hors d'elle.
+  Ce qui décore le coin vit sur `.coin-rangee`.
+- **RIEN NE BOUGE DANS LE COIN, et c'est fragile par nature.** Il est ancré
+  à droite : toute largeur qui change déplace son bord gauche. Trois pièges
+  ont été fermés — chiffres **tabulaires** pour l'heure et le pourcentage
+  (« 11:11 » est plus étroit que « 10:00 » en chasses proportionnelles :
+  le bloc sautait une fois par minute), **largeur fixe mesurée** pour la
+  boîte heure/date (336 formatages, la plus large date de l'année), et la
+  fiche secteur posée à **opacité zéro** plutôt que masquée, un widget
+  masqué ne recevant plus d'allocation. Tout ajout au coin doit se plier à
+  la même règle.
+- **La Console n'est plus un popover.** `panel_new()` rend le contenu ; la
+  relecture périodique suit `map`/`unmap`, et la rangée d'alimentation reçoit
+  un rappel de fermeture au lieu d'un widget.
+- **La fenêtre du tiroir est plein écran dès sa création**, et c'est le
+  `GtkRevealer` qui bouge. Ne jamais la redimensionner : la Console ouvre des
+  popovers, et labwc 0.8.3 les envoie hors de l'écran quand la surface qui
+  les porte change de taille.
+- **Le centre de notifications n'a plus d'entrée**, par choix — le volet haut
+  est vide en attendant un widget. La **bannière**, elle, reste : elle
+  s'accroche au coin. Ne pas croire que les notifications sont mortes.
+- **Les trois modes d'énergie ont des glyphes à eux**, livrés avec le shell
+  (`claude-os-mode-*-symbolic`) : **cadran, balance, feuille** — la famille
+  d'Adwaita, redessinée dans la grammaire du projet. Le coin n'en montre
+  qu'un, en grand et sans libellé : trois cadrans que seule une aiguille
+  distinguait ne pouvaient plus faire l'affaire, et un badge « AUTO » non
+  plus — quatre lettres illisibles à la taille de la Console. Dans le coin,
+  le glyphe est **plus effacé que l'heure**, sans quoi les deux se
+  confondent là où ils se chevauchent.
+
+Détail dans [`docs/04`](docs/04-environnement-bureau.md) §4.2.
+
+**LES AVIS SYSTÈME ONT UNE SURFACE À EUX** (15 septembre 2026).
+`shell/src/preavis.c` est devenu `shell/src/avis.c` : ce n'est plus le seul
+compte à rebours de la veille, c'est **l'endroit unique** où le système
+affiche ce qu'il a à dire en passant. **Au centre de l'écran, au-dessus du
+dock, en blanc**, opacité toujours réglable dans le panneau Énergie, et
+toujours ni clic ni survol ni focus.
+
+Deux contenus aujourd'hui — le cadran, et de courts messages : « En charge »
+au branchement, « Batterie faible / très faible / critique » aux trois seuils.
+Trois points à retenir :
+
+- **C'est le lieu qui fait l'avis.** Ajouter un message, c'est appeler
+  `shell_avis_message()` ; ne pas lui inventer un autre coin d'écran, sans
+  quoi l'œil devra chercher.
+- **L'avis n'est pas la notification, et les deux coexistent.** L'avis est
+  fugace et ne laisse aucune trace ; ce qui doit se retrouver plus tard passe
+  par `org.freedesktop.Notifications`. `batterie.c` fait les deux aux seuils,
+  et **l'avis seul** aux deux bascules de la prise — on ne va pas chercher
+  dans la cloche la confirmation d'un geste qu'on vient de faire.
+- **CE QUI LIT LA BATTERIE LE DIT.** `shell_batterie_sur_lecture()` prévient
+  à chaque lecture, d'où qu'elle vienne. Sans lui, l'uevent du branchement
+  affichait l'avis « En charge » tout de suite et la fiche du coin jusqu'à
+  une minute plus tard — deux témoins de la même chose, dont l'un mentait.
+- **LA PRISE PRÉVIENT, LE POURCENTAGE NON.** `batterie.h` dit, mesures à
+  l'appui, que cette machine n'émet aucun événement quand la charge change —
+  et c'est vrai. Mais **brancher en émet un** : le shell écoute les uevents
+  `power_supply` sur un socket **netlink** (groupe 1, sans privilège ni
+  libudev), regroupe la rafale de cinq messages et relit aussitôt. Sans cela
+  « En charge » arrivait jusqu'à cinq minutes après le geste. La scrutation
+  reste en filet, et le journal dit lequel des deux chemins a parlé.
+- **Le blanc se paie au centre de l'écran.** Le cadran vivait dans le coin bas
+  droit, sur le fond d'écran ; au centre il recouvre souvent une fenêtre
+  claire, et une trace blanche s'y lit mal. Le remède prévu est l'opacité. Une
+  ombre portée relèverait la lisibilité mais contredirait le choix — documenté
+  et tenu depuis le 9 septembre — de n'avoir ni ombre ni fond.
+
+Le diamètre ne se mesure plus sur la pilule de la barre d'état :
+`shell_preavis_reference()` a disparu, et avec elle l'appel de `status.c`.
+
+Détail dans [`docs/04`](docs/04-environnement-bureau.md) §4.2.
 
 **UNE ZONE MORTE TACTILE EST APPARUE PUIS A DISPARU** (13-14 septembre). Un
 rectangle de 28 × 114 mm au bord gauche ne répondait plus — mesuré par deux

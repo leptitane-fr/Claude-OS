@@ -1,0 +1,26 @@
+/* =========================================================================
+   Claude-OS — couleur de contraste « Ardoise »
+
+   Choisie dans les Réglages, volet Interface. Chargée PAR-DESSUS le thème :
+   elle ne remplace que les quatre jetons ci-dessous, le reste du thème —
+   surfaces, texte, ombres, alertes — ne bouge pas.
+
+   Le choix sobre : un gris bleuté qui souligne sans colorer. Sur un bureau
+   où le fond d'écran porte déjà la couleur, c'est souvent le bon.
+
+   CE QUI A ÉTÉ MESURÉ, et pourquoi ces trois valeurs-là. Le blanc posé
+   dessus tient 4,59:1, au-dessus du 4,5:1 que demande un texte de petit
+   corps — c'est ce seuil qui a fixé la teinte, pas l'inverse. Contre la
+   surface d'un thème sombre (#1f1f1d) elle se détache à 3,59:1, au-dessus
+   du 3:1 demandé à un élément d'interface : une seule valeur sert donc les
+   quatre thèmes, et il n'y a pas deux palettes à tenir d'accord.
+
+   Le survol s'éclaircit de 9 % vers le blanc et l'appui s'assombrit de
+   15 % vers le noir. Assez pour qu'on voie la réaction du doigt ; pas assez
+   pour que le libellé blanc descende sous 4:1 (3,87:1 au survol).
+   ========================================================================= */
+
+@define-color accent        #66778a;
+@define-color accent-hover  #748395;
+@define-color accent-press  #576575;
+@define-color on-accent     #ffffff;

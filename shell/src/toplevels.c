@@ -150,8 +150,9 @@ on_state (void *data, struct zwlr_foreign_toplevel_handle_v1 *handle,
     if (w == NULL)
         return;
 
-    w->activated = FALSE;
-    w->minimized = FALSE;
+    w->activated    = FALSE;
+    w->minimized    = FALSE;
+    w->plein_ecran  = FALSE;
 
     uint32_t *s;
     wl_array_for_each (s, states) {
@@ -159,6 +160,8 @@ on_state (void *data, struct zwlr_foreign_toplevel_handle_v1 *handle,
             w->activated = TRUE;
         if (*s == ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_MINIMIZED)
             w->minimized = TRUE;
+        if (*s == ZWLR_FOREIGN_TOPLEVEL_HANDLE_V1_STATE_FULLSCREEN)
+            w->plein_ecran = TRUE;
     }
 }
 
@@ -298,6 +301,18 @@ const GPtrArray *
 shell_toplevels_get (void)
 {
     return T.windows;
+}
+
+gboolean
+shell_toplevels_plein_ecran (void)
+{
+    const GPtrArray *fenetres = shell_toplevels_get ();
+    for (guint i = 0; i < fenetres->len; i++) {
+        const ShellWindow *w = g_ptr_array_index (fenetres, i);
+        if (w->plein_ecran && !w->minimized)
+            return TRUE;
+    }
+    return FALSE;
 }
 
 guint64

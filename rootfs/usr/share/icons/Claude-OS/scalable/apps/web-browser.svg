@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Claude OS — Navigateur -->
+  <defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a87e6"/><stop offset="1" stop-color="#2a62bd"/></linearGradient></defs>
+  <path d="M17 2H47A15 15 0 0 1 62 17V47A15 15 0 0 1 47 62H17A15 15 0 0 1 2 47V17A15 15 0 0 1 17 2Z" fill="url(#f)"/>
+  <g transform="translate(12 12) scale(2.5)"><path d="M1.85 8A6.15 6.15 0 1 1 14.15 8A6.15 6.15 0 1 1 1.85 8ZM3.35 8A4.65 4.65 0 1 1 12.65 8A4.65 4.65 0 1 1 3.35 8Z" fill="#faf9f5" fill-rule="evenodd"/><path d="M3.3 7.3H12.7A0.7 0.7 0 0 1 13.4 8V8A0.7 0.7 0 0 1 12.7 8.7H3.3A0.7 0.7 0 0 1 2.6 8V8A0.7 0.7 0 0 1 3.3 7.3Z" fill="#faf9f5"/><path d="M8 1.9A3.6 6.1 0 0 1 8 14.1A3.6 6.1 0 0 1 8 1.9ZM8 3.3A2.2 4.7 0 0 1 8 12.7A2.2 4.7 0 0 1 8 3.3Z" fill="#faf9f5" fill-rule="evenodd"/></g>
+</svg>

@@ -15,17 +15,40 @@
  * ========================================================================= */
 #include "energie.h"
 
-/* LES ICONES, choisies le 11 septembre 2026 pour la Console et la barre
- * d'etat : la famille « power-profile » que GNOME emploie pour ses profils
- * d'energie. Voir shell_energie_mode_icone() pour le theme ou on les prend. */
+/* LES ICONES SONT DESORMAIS LES NOTRES, et c'est un changement de nature.
+ *
+ * C'etait la famille « power-profile » de GNOME, choisie le 11 septembre
+ * 2026 : trois cadrans que seule l'inclinaison d'une aiguille distinguait.
+ * Cela suffisait dans une rangee de Console ou les trois se voient cote a
+ * cote et portent leur nom en dessous. Le coin, lui, n'en montre qu'UN, en
+ * grand, sans libelle : il faut alors que chacun se reconnaisse SEUL. Un
+ * cadran a 214 degres ne se distingue pas d'un cadran a 270 quand on n'a
+ * pas l'autre sous les yeux.
+ *
+ * Trois objets differents, donc, et non trois nuances du meme : le cadran
+ * pour Travail, la balance pour Automatique, la feuille pour Nomade.
+ * C'est la famille d'Adwaita -- celle que le bureau portait avant d'avoir
+ * son propre jeu d'icones --, redessinee dans la grammaire du projet par
+ * tools/fabrique-icones.py.
+ *
+ * UN BADGE « AUTO » AVAIT ETE ESSAYE pour Automatique, puis ecarte : dire
+ * la chose par un mot est l'aveu qu'on n'a pas trouve l'image, et quatre
+ * lettres deviennent illisibles des qu'on descend a la taille de la
+ * Console. La balance dit « l'equilibre » sans etre lue.
+ *
+ * LIVREES AVEC LE SHELL, prefixees « claude-os- » : elles vivent dans
+ * shell/data/icons et non dans le theme d'icones, pour la raison etablie
+ * par la cloche du centre de notifications -- qui bascule sur Adwaita garde
+ * ses trois modes, la ou un nom emprunte au theme aurait donne un carre
+ * barre. */
 static const ShellModeEnergie MODES[] = {
-    { "travail", "Travail", "power-profile-performance-symbolic",
+    { "travail", "Travail", "claude-os-mode-travail-symbolic",
       "L'ordinateur ne dort jamais et le réseau reste actif. L'écran "
       "s'atténue puis s'éteint, précédé d'un compte à rebours.", FALSE },
-    { "automatique", "Automatique", "power-profile-balanced-symbolic",
+    { "automatique", "Automatique", "claude-os-mode-automatique-symbolic",
       "L'équilibre. L'écran s'atténue, s'éteint, puis l'ordinateur se met "
       "en veille.", TRUE },
-    { "nomade", "Nomade", "power-profile-power-saver-symbolic",
+    { "nomade", "Nomade", "claude-os-mode-nomade-symbolic",
       "Le plus économe. Délais courts et veille rapide.", TRUE },
     { NULL, NULL, NULL, NULL, FALSE },
 };

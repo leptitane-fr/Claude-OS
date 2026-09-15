@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <!-- Claude OS — dossier -->
+  <defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dda171"/><stop offset="1" stop-color="#c07d4d"/></linearGradient></defs>
+  <g transform="translate(8 7.25) scale(3)"><path d="M3.0 3.3 H6.3 L7.9 5.1 H13.0 A1.3 1.3 0 0 1 14.3 6.4 V11.9 A1.3 1.3 0 0 1 13.0 13.2 H3.0 A1.3 1.3 0 0 1 1.7 11.9 V4.6 A1.3 1.3 0 0 1 3.0 3.3 Z" fill="url(#f)"/></g>
+</svg>

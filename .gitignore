@@ -25,3 +25,9 @@ shell/build/
 
 # Binaires des essais du lecteur vidéo (voir shell/essais/construire.sh)
 shell/essais/build/
+
+# Sous-produits de tools/fabrique-icones.py. Le thème, lui, SE COMMITTE :
+# il est déployé par rootfs/, et une machine fournie ne fait pas tourner le
+# générateur.
+tools/__pycache__/
+/planche-icones.png

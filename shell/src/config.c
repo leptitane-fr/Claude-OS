@@ -76,6 +76,48 @@ shell_config_set_theme (ShellConfig *cfg, const char *id)
     return TRUE;
 }
 
+/* -------------------------------------------------------------------------
+ * Couleurs de contraste
+ * ------------------------------------------------------------------------- */
+/* La premiere ligne porte un identifiant VIDE : c'est « celle du theme »,
+ * c'est-a-dire aucun fichier charge par-dessus. Elle est en tete parce que
+ * c'est le defaut, et parce qu'un identifiant inconnu y retombe.
+ *
+ * MIROIR : /usr/local/bin/claude-os-theme lit le meme fichier accent-<id>.css
+ * pour teindre les menus et les barres de titre de labwc. Il n'a pas besoin
+ * de cette table -- il compose le nom du fichier a partir de shell.conf et
+ * s'arrete si le fichier n'existe pas -- mais un accent ajoute ici sans son
+ * fichier laisserait le shell colore et le reste du bureau a l'ancienne
+ * couleur. Le fichier fait foi des deux cotes. */
+static const ShellAccent accents[] = {
+    { "",           "Celle du thème" },
+    { "bleu",       "Bleu"           },
+    { "turquoise",  "Turquoise"      },
+    { "emeraude",   "Émeraude"       },
+    { "ocre",       "Ocre"           },
+    { "argile",     "Argile"         },
+    { "framboise",  "Framboise"      },
+    { "violet",     "Violet"         },
+    { "ardoise",    "Ardoise"        },
+    { NULL, NULL },
+};
+
+const ShellAccent *
+shell_accents (void)
+{
+    return accents;
+}
+
+const ShellAccent *
+shell_accent_actif (const ShellConfig *cfg)
+{
+    if (cfg->accent != NULL)
+        for (guint i = 0; accents[i].id != NULL; i++)
+            if (g_strcmp0 (accents[i].id, cfg->accent) == 0)
+                return &accents[i];
+    return &accents[0];
+}
+
 gboolean
 shell_police_installee (const char *famille)
 {
@@ -107,12 +149,18 @@ config_path (void)
  * que de rendre zero -- un delai de zero seconde eteindrait l'ecran
  * immediatement, ce qui est la pire facon de traiter une faute de frappe. */
 static void
-lire_entier (GKeyFile *kf, const char *cle, int *cible)
+lire_entier_de (GKeyFile *kf, const char *groupe, const char *cle, int *cible)
 {
     g_autoptr(GError) e = NULL;
-    int v = g_key_file_get_integer (kf, "energie", cle, &e);
+    int v = g_key_file_get_integer (kf, groupe, cle, &e);
     if (e == NULL && v >= 0)
         *cible = v;
+}
+
+static void
+lire_entier (GKeyFile *kf, const char *cle, int *cible)
+{
+    lire_entier_de (kf, "energie", cle, cible);
 }
 
 static void
@@ -137,18 +185,34 @@ shell_config_load (void)
      * sur les quatre themes a la fois, ce que personne ne demande par
      * defaut. */
     cfg->font   = g_strdup ("");
-    /* Papirus plutot qu'Adwaita : Adwaita a abandonne les noms d'icones
-     * herites (web-browser, utilities-terminal...) que la plupart des
-     * fichiers .desktop declarent encore, et affiche donc un pictogramme
-     * generique pour la moitie des applications. Papirus les conserve, et
-     * son style plat et arrondi est plus proche de ChromeOS. */
-    cfg->icon_theme = g_strdup ("Papirus");
+    /* Le theme de la distribution, dessine pour elle : voir
+     * tools/fabrique-icones.py et rootfs/usr/share/icons/Claude-OS.
+     *
+     * IL N'EST PAS COMPLET, ET C'EST ASSUME. Il couvre ce que Claude OS
+     * affiche -- les pictogrammes que le shell demande, les dossiers de la
+     * barre laterale, les types de fichiers courants, les applications du
+     * bureau -- et herite de Papirus pour tout le reste. Papirus reste donc
+     * le filet, pour la raison qui l'avait fait choisir : il conserve les
+     * noms d'icones herites (web-browser, utilities-terminal...) qu'Adwaita
+     * a abandonnes, et que la moitie des fichiers .desktop declarent
+     * encore. */
+    cfg->icon_theme = g_strdup ("Claude-OS");
     cfg->theme  = g_strdup ("clair");
     cfg->dark   = FALSE;
     /* Par defaut le dock ne repousse rien : afficher ou masquer le dock ne
      * doit pas redimensionner la fenetre en dessous, il doit passer par
      * dessus. Voir le commentaire de la zone exclusive dans dock.c. */
     cfg->reserve_space = FALSE;
+    /* Vide : l'accent du theme. Un bureau neuf est cense ressembler a son
+     * theme, pas a un reglage qu'on n'a pas fait. */
+    cfg->accent        = g_strdup ("");
+    cfg->transparence  = FALSE;
+    /* L'ombre du coin. Ces quatre valeurs sont celles qu'on a trouvees a
+     * l'oeil sur MADOO, et non des rondeurs choisies d'avance. */
+    cfg->ombre_opacite  = 62;
+    cfg->ombre_flou     = 5;
+    cfg->ombre_contour  = 2;
+    cfg->ombre_decalage = 1;
     cfg->wallpaper      = g_strdup ("");
     cfg->wallpaper_fill = TRUE;
 
@@ -237,6 +301,26 @@ shell_config_load (void)
         g_message ("thème « %s » inconnu, « %s » utilisé", theme, cfg->theme);
     }
 
+    /* Un accent inconnu -- fichier d'une version ulterieure, ou faute de
+     * frappe -- retombe sur celui du theme sans un mot : contrairement au
+     * theme, il n'y a rien a expliquer, l'aspect reste celui du theme
+     * choisi. */
+    g_autofree char *accent = g_key_file_get_string (kf, "appearance", "accent", NULL);
+    if (accent != NULL) {
+        g_free (cfg->accent);
+        cfg->accent = g_steal_pointer (&accent);
+    }
+
+    lire_entier_de (kf, "appearance", "ombre_opacite",  &cfg->ombre_opacite);
+    lire_entier_de (kf, "appearance", "ombre_flou",     &cfg->ombre_flou);
+    lire_entier_de (kf, "appearance", "ombre_contour",  &cfg->ombre_contour);
+    lire_entier_de (kf, "appearance", "ombre_decalage", &cfg->ombre_decalage);
+
+    g_autoptr(GError) e3 = NULL;
+    gboolean verre = g_key_file_get_boolean (kf, "appearance", "transparence", &e3);
+    if (e3 == NULL)
+        cfg->transparence = verre;
+
     g_autoptr(GError) e = NULL;
     gboolean reserve = g_key_file_get_boolean (kf, "dock", "reserve_space", &e);
     if (e == NULL)
@@ -322,6 +406,7 @@ shell_config_free (ShellConfig *cfg)
     g_free (cfg->font);
     g_free (cfg->icon_theme);
     g_free (cfg->theme);
+    g_free (cfg->accent);
     g_free (cfg->wallpaper);
     g_free (cfg->energie_mode);
     g_free (cfg->energie_bat_abri_action);
@@ -353,6 +438,13 @@ shell_config_save (const ShellConfig *cfg, GError **error)
     g_key_file_set_string  (kf, "appearance", "font", cfg->font);
     g_key_file_set_string  (kf, "appearance", "icon_theme", cfg->icon_theme);
     g_key_file_set_string  (kf, "appearance", "theme", cfg->theme);
+    g_key_file_set_string  (kf, "appearance", "accent",
+                            cfg->accent != NULL ? cfg->accent : "");
+    g_key_file_set_boolean (kf, "appearance", "transparence", cfg->transparence);
+    g_key_file_set_integer (kf, "appearance", "ombre_opacite",  cfg->ombre_opacite);
+    g_key_file_set_integer (kf, "appearance", "ombre_flou",     cfg->ombre_flou);
+    g_key_file_set_integer (kf, "appearance", "ombre_contour",  cfg->ombre_contour);
+    g_key_file_set_integer (kf, "appearance", "ombre_decalage", cfg->ombre_decalage);
     g_key_file_set_string  (kf, "wallpaper", "image", cfg->wallpaper);
     g_key_file_set_boolean (kf, "wallpaper", "fill", cfg->wallpaper_fill);
 
@@ -445,46 +537,108 @@ shell_config_watch (ShellConfigChangedFunc cb, gpointer user_data)
     g_signal_connect (w->monitor, "changed", G_CALLBACK (on_config_changed), w);
 }
 
-void
-shell_styles_load (const char *theme)
+/* Un fournisseur cree une seule fois, garde entre les appels, et VIDE quand
+ * le reglage est decoche plutot que retire du display.
+ *
+ * Retirer puis remettre un fournisseur marche aussi, mais laisse une fenetre
+ * de quelques millisecondes pendant laquelle les regles de shell.css
+ * resolvent @surface sur le theme : on voyait le dock clignoter a chaque
+ * enregistrement du panneau. Un fournisseur charge d'une chaine vide ne
+ * definit rien et ne coute rien. */
+static GtkCssProvider *
+fournisseur (GtkCssProvider **garde, int priorite)
 {
-    /* Deux fournisseurs, gardes entre les appels. Celui du theme est
-     * RECHARGE a chaque changement ; celui des regles n'est charge qu'une
-     * fois. En creer de nouveaux a chaque appel empilerait les anciennes
-     * couleurs dans la cascade.
-     *
-     * Recharger le seul fichier de jetons suffit : GTK re-resout les
-     * couleurs nommees des regles quand le fournisseur qui les definit
-     * change. Verifie dans les deux sens plutot que suppose -- le dock suit
-     * bien le theme sans que shell.css soit relu. */
-    static GtkCssProvider *theme_provider = NULL;
-    static GtkCssProvider *rules_provider = NULL;
+    if (*garde == NULL) {
+        *garde = gtk_css_provider_new ();
+        gtk_style_context_add_provider_for_display (
+            gdk_display_get_default (), GTK_STYLE_PROVIDER (*garde), priorite);
+    }
+    return *garde;
+}
 
+/* Charge un fichier de style/ dans un fournisseur, ou le vide si le nom est
+ * NULL. Rend FALSE quand le fichier demande n'existe pas -- le fournisseur
+ * est alors vide, et l'aspect reste celui du theme. */
+static gboolean
+charger_calque (GtkCssProvider *p, const char *nom)
+{
+    if (nom == NULL) {
+        gtk_css_provider_load_from_string (p, "");
+        return TRUE;
+    }
+
+    g_autofree char *chemin = g_build_filename (SHELL_DATA_DIR, "style", nom, NULL);
+    if (!g_file_test (chemin, G_FILE_TEST_EXISTS)) {
+        /* Dit, et non avale : un calque absent est soit une installation
+         * incomplete, soit un identifiant ecrit a la main dans shell.conf.
+         * Les deux se diagnostiquent en une ligne de journal ; aucun des
+         * deux ne se devine devant un bureau qui n'a simplement pas
+         * change. */
+        g_message ("calque de style « %s » absent (%s)", nom, chemin);
+        gtk_css_provider_load_from_string (p, "");
+        return FALSE;
+    }
+
+    gtk_css_provider_load_from_path (p, chemin);
+    return TRUE;
+}
+
+void
+shell_styles_load (const ShellConfig *cfg)
+{
+    /* QUATRE FOURNISSEURS, ET L'ORDRE DES PRIORITES EST LE SUJET.
+     *
+     *   APPLICATION      le theme -- tous les jetons, et lui seul
+     *   APPLICATION      les regles de shell.css, qui ne citent que des
+     *                    jetons ; a egalite, le dernier ajoute l'emporte
+     *   APPLICATION + 2  la couleur de contraste : quatre jetons redefinis
+     *   APPLICATION + 3  le verre : trois jetons redefinis
+     *
+     * Les deux derniers ne portent AUCUNE regle, seulement des
+     * @define-color. GTK resout une couleur nommee en parcourant les
+     * fournisseurs de la plus haute priorite vers la plus basse, quel que
+     * soit celui ou la regle qui l'utilise est ecrite -- verifie dans les
+     * deux sens, y compris apres vidage du calque, ou les valeurs du theme
+     * reprennent la main d'elles-memes.
+     *
+     * APPLICATION + 1 est deja pris par la regle de police de
+     * shell_config_apply (), qui est une REGLE et non un jeton : elle doit
+     * passer devant shell.css, pas devant les couleurs. */
+    static GtkCssProvider *theme_provider  = NULL;
+    static GtkCssProvider *rules_provider  = NULL;
+    static GtkCssProvider *accent_provider = NULL;
+    static GtkCssProvider *verre_provider  = NULL;
+
+    const char *theme = cfg->theme;
     if (theme_par_id (theme) == NULL)
         theme = "clair";
 
-    if (theme_provider == NULL) {
-        theme_provider = gtk_css_provider_new ();
-        gtk_style_context_add_provider_for_display (
-            gdk_display_get_default (), GTK_STYLE_PROVIDER (theme_provider),
-            GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    }
+    g_autofree char *nom = g_strdup_printf ("theme-%s.css", theme);
+    charger_calque (fournisseur (&theme_provider,
+                                 GTK_STYLE_PROVIDER_PRIORITY_APPLICATION), nom);
 
-    g_autofree char *nom  = g_strdup_printf ("theme-%s.css", theme);
-    g_autofree char *path = g_build_filename (SHELL_DATA_DIR, "style", nom, NULL);
-    gtk_css_provider_load_from_path (theme_provider, path);
+    const ShellAccent *a = shell_accent_actif (cfg);
+    g_autofree char *nom_accent = (*a->id != '\0')
+                                ? g_strdup_printf ("accent-%s.css", a->id)
+                                : NULL;
+    charger_calque (fournisseur (&accent_provider,
+                                 GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 2),
+                    nom_accent);
+
+    charger_calque (fournisseur (&verre_provider,
+                                 GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 3),
+                    cfg->transparence ? "verre.css" : NULL);
 
     if (rules_provider != NULL)
         return;
 
     /* Les regles apres le theme, a priorite egale : a egalite, le dernier
-     * fournisseur ajoute l'emporte. */
-    rules_provider = gtk_css_provider_new ();
-    g_autofree char *rules = g_build_filename (SHELL_DATA_DIR, "style", "shell.css", NULL);
-    gtk_css_provider_load_from_path (rules_provider, rules);
-    gtk_style_context_add_provider_for_display (
-        gdk_display_get_default (), GTK_STYLE_PROVIDER (rules_provider),
-        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+     * fournisseur ajoute l'emporte. Charge une seule fois -- elles ne
+     * citent que des jetons, et GTK re-resout ceux-ci quand le fournisseur
+     * qui les definit change. */
+    charger_calque (fournisseur (&rules_provider,
+                                 GTK_STYLE_PROVIDER_PRIORITY_APPLICATION),
+                    "shell.css");
 }
 
 /* LES ICONES LIVREES AVEC LE SHELL.
@@ -512,7 +666,7 @@ void
 shell_styles_startup (GtkApplication *app, gpointer cfg)
 {
     (void) app;
-    shell_styles_load (((const ShellConfig *) cfg)->theme);
+    shell_styles_load ((const ShellConfig *) cfg);
     shell_icones_load ();
 }
 

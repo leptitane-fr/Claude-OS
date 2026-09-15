@@ -1,0 +1,26 @@
+/* =========================================================================
+   Claude-OS — couleur de contraste « Turquoise »
+
+   Choisie dans les Réglages, volet Interface. Chargée PAR-DESSUS le thème :
+   elle ne remplace que les quatre jetons ci-dessous, le reste du thème —
+   surfaces, texte, ombres, alertes — ne bouge pas.
+
+   Un cyan profond, la seule teinte froide de la palette qui ne soit pas un
+   bleu.
+
+   CE QUI A ÉTÉ MESURÉ, et pourquoi ces trois valeurs-là. Le blanc posé
+   dessus tient 4,65:1, au-dessus du 4,5:1 que demande un texte de petit
+   corps — c'est ce seuil qui a fixé la teinte, pas l'inverse. Contre la
+   surface d'un thème sombre (#1f1f1d) elle se détache à 3,55:1, au-dessus
+   du 3:1 demandé à un élément d'interface : une seule valeur sert donc les
+   quatre thèmes, et il n'y a pas deux palettes à tenir d'accord.
+
+   Le survol s'éclaircit de 9 % vers le blanc et l'appui s'assombrit de
+   15 % vers le noir. Assez pour qu'on voie la réaction du doigt ; pas assez
+   pour que le libellé blanc descende sous 4:1 (4,00:1 au survol).
+   ========================================================================= */
+
+@define-color accent        #118091;
+@define-color accent-hover  #268b9b;
+@define-color accent-press  #0e6d7b;
+@define-color on-accent     #ffffff;

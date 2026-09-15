@@ -1,0 +1,94 @@
+# Claude OS — le thème d'icônes de la distribution.
+#
+# ENGENDRÉ PAR tools/fabrique-icones.py. Ne pas modifier à la main : la
+# prochaine exécution réécrirait le répertoire entier.
+#
+# INHERITS=Papirus : ce thème couvre ce que Claude OS AFFICHE — les 85
+# pictogrammes que le shell demande à GTK, les dossiers de la barre latérale
+# de Fichiers, les types de fichiers courants et les applications du dock.
+# Il ne couvre pas les milliers d'icônes du reste du monde, et ne prétend pas
+# le faire : tout ce qu'il ne dessine pas retombe sur Papirus, exactement
+# comme avant. Un thème qui aurait voulu tout redessiner aurait surtout
+# affiché des carrés barrés.
+#
+# Les applications d'éditeurs — Chromium, Claude Desktop — gardent DÉLIBÉ-
+# RÉMENT leur propre icône : redessiner la marque de quelqu'un d'autre n'est
+# pas une question de style.
+
+[Icon Theme]
+Name=Claude OS
+Comment=Icônes dessinées pour Claude OS — 85 symboliques, 31 en couleur
+Inherits=Papirus,hicolor
+Example=system-file-manager
+
+Directories=scalable/apps,scalable/devices,scalable/mimetypes,scalable/places,symbolic/actions,symbolic/categories,symbolic/devices,symbolic/mimetypes,symbolic/places,symbolic/status
+
+[scalable/apps]
+Context=Applications
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+
+[scalable/devices]
+Context=Devices
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+
+[scalable/mimetypes]
+Context=MimeTypes
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+
+[scalable/places]
+Context=Places
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+
+[symbolic/actions]
+Context=Actions
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+
+[symbolic/categories]
+Context=Categories
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+
+[symbolic/devices]
+Context=Devices
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+
+[symbolic/mimetypes]
+Context=MimeTypes
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+
+[symbolic/places]
+Context=Places
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable
+
+[symbolic/status]
+Context=Status
+Size=16
+MinSize=8
+MaxSize=512
+Type=Scalable

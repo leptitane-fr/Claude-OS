@@ -1,7 +1,7 @@
 #include "energie.h"
 #include "retroeclairage.h"
 #include "sysfs.h"
-#include "preavis.h"
+#include "avis.h"
 #include "logind.h"
 
 #include <gtk/gtk.h>
@@ -314,11 +314,11 @@ on_idled (void *data, struct ext_idle_notification_v1 *n)
     case PREAVIS_ETE:
         /* On ne touche a rien : on previent. Le geste de l'utilisateur, s'il
          * vient, annulera la suite par « resumed ». */
-        shell_preavis_montrer (E.preavis_s);
+        shell_avis_cadran (E.preavis_s);
         break;
 
     case ATTENUER:
-        shell_preavis_cacher ();
+        shell_avis_cacher ();
         /* On note la luminosite AVANT de la baisser, et une seule fois :
          * un second passage enregistrerait la valeur attenuee et la
          * « restauration » laisserait l'ecran sombre. */
@@ -334,7 +334,7 @@ on_idled (void *data, struct ext_idle_notification_v1 *n)
         break;
 
     case ETEINDRE:
-        shell_preavis_cacher ();
+        shell_avis_cacher ();
         if (son_en_lecture ())
             break;
         if (E.avant < 0)
@@ -376,7 +376,7 @@ on_resumed (void *data, struct ext_idle_notification_v1 *n)
     /* Le decompte disparait avant tout le reste : c'est la reponse
      * immediate au geste de l'utilisateur, et la seule qu'il verra si
      * l'ecran n'avait pas encore baisse. */
-    shell_preavis_cacher ();
+    shell_avis_cacher ();
 
     /* Chaque etage deja inactif emet son « resumed » : ce rappel arrive
      * plusieurs fois pour une seule touche pressee. Le garde ci-dessous le
@@ -438,7 +438,7 @@ appliquer_config (const ShellConfig *cfg)
     E.niveau           = cfg->energie_niveau;
     E.suspendre_permis = cfg->energie_suspendre_permis;
     E.mode             = shell_energie_mode_actif (cfg);
-    shell_preavis_opacite (cfg->energie_opacite);
+    shell_avis_opacite (cfg->energie_opacite);
 
     int pre, att, ete, sus;
     shell_energie_delais (cfg, &pre, &att, &ete, &sus);
@@ -582,7 +582,7 @@ shell_energie_reconfigurer (const ShellConfig *cfg)
 
     /* Un changement de reglage pendant que l'ecran est attenue laisserait
      * l'utilisateur dans le noir : on remonte d'abord. */
-    shell_preavis_cacher ();
+    shell_avis_cacher ();
     if (E.avant >= 0) {
         shell_retro_ecrire (E.avant);
         E.avant = -1;

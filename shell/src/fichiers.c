@@ -2018,7 +2018,7 @@ static void
 on_config_reloaded (ShellConfig *cfg, gpointer data)
 {
     (void) data;
-    shell_styles_load (cfg->theme);
+    shell_styles_load (cfg);
     shell_config_apply (cfg);
     g_object_set (gtk_settings_get_default (),
                   "gtk-application-prefer-dark-theme", cfg->dark, NULL);
