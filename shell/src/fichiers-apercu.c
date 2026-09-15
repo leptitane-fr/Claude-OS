@@ -1,4 +1,6 @@
 #include "fichiers-apercu.h"
+#include "nuage.h"
+#include "reseau.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -346,6 +348,29 @@ admissible (FichierItem *it)
      * remplirait le cache de lui-meme a chaque visite. */
     g_autofree char *chemin = g_file_get_path (it->file);
     if (chemin != NULL && g_str_has_prefix (chemin, A.racine))
+        return FALSE;
+
+    /* PAS D'APERCU SUR UN LECTEUR DISTANT, ET C'EST MESURE.
+     *
+     * Le seuil de taille ci-dessus disait deja l'intention -- « lire un
+     * fichier entier sur un lecteur reseau pour en tirer 128 pixels n'a pas
+     * de sens » -- mais 64 Mo ne la servait pas : ce qui coute cher sur un
+     * lecteur distant n'est pas la taille d'un fichier, c'est LE NOMBRE de
+     * fichiers.
+     *
+     * Mesure du 15 septembre 2026 sur la racine du Google Drive de
+     * l'utilisateur : 627 fichiers, dont 173 eligibles a une vignette, pour
+     * 71 Mo a telecharger -- fichier median a 0,2 Mo, donc un seuil plus bas
+     * n'aurait rien change au nombre. Ces 173 telechargements partent en
+     * rafale, et c'est precisement ce qui fait saturer le quota de l'API
+     * Google, dont depend toute la navigation (voir docs/13). Le cache
+     * disque des vignettes fait que le prix n'est paye qu'une fois par
+     * fichier, mais il est paye a la PREMIERE visite, celle ou l'on attend.
+     *
+     * Les dossiers locaux gardent leurs apercus : rien ne change pour eux. */
+    if (chemin != NULL
+        && (g_str_has_prefix (chemin, nuage_base_montage ())
+            || g_str_has_prefix (chemin, reseau_base_montage ())))
         return FALSE;
 
     return TRUE;

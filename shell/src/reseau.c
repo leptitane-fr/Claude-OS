@@ -241,6 +241,12 @@ reseau_id_depuis_nom (const char *nom, GPtrArray *existants)
 }
 
 /* ------------------------------------------------------------------------- */
+const char *
+reseau_base_montage (void)
+{
+    return RESEAU_BASE;
+}
+
 char *
 reseau_point_montage (const Lecteur *l)
 {

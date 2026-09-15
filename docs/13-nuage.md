@@ -224,6 +224,52 @@ Mesures avant / après, même machine, même compte :
 
 ---
 
+## Les aperçus ne se font plus sur un lecteur distant
+
+Le premier usage réel a montré une lenteur que `ls` ne pouvait pas révéler :
+le gestionnaire de fichiers fabrique des vignettes, donc il TÉLÉCHARGE.
+
+Le garde-fou existant était un seuil de taille — 64 Mo — et son commentaire
+disait déjà l'intention : « lire un fichier entier sur un lecteur réseau pour
+en tirer 128 pixels n'a pas de sens ». Mais un seuil de taille ne servait pas
+cette intention, parce que **ce qui coûte cher sur un lecteur distant n'est
+pas la taille d'un fichier, c'est le nombre de fichiers**.
+
+Mesure du 15 septembre 2026 sur la racine du Drive : 627 fichiers, dont
+**173 éligibles à une vignette, pour 71 Mo à télécharger**. Fichier médian à
+0,2 Mo — un seuil plus bas n'aurait donc rien changé au nombre. Ces
+téléchargements partent en rafale, et c'est précisément ce qui fait saturer
+le quota de l'API Google dont dépend toute la navigation.
+
+Comparaison isolée des deux binaires — bus et `HOME` séparés, cache de
+vignettes vierge, même dossier, même durée :
+
+| | trafic en 35 s | vignettes |
+|---|---|---|
+| Avant | **24,5 Mo**, et le téléchargement continuait | 40 |
+| Après | **2,1 Mo** | 0 |
+
+Les dossiers **locaux gardent leurs aperçus** : la règle ne vise que les
+chemins sous les racines de montage du nuage et du réseau, que `nuage.h` et
+`reseau.h` exposent désormais — une seule source de vérité, plutôt que des
+préfixes recopiés.
+
+**Ce qui a été rectifié en cours de route :** il avait été affirmé que les
+71 Mo étaient rechargés à chaque visite. C'est faux — le cache de vignettes
+sur disque (spécification freedesktop, `~/.cache/thumbnails`) fait que le
+prix n'est payé qu'une fois par fichier. Il est payé à la **première** visite,
+celle où l'on attend, ce qui suffit à justifier la règle ; mais le chiffre
+était inexact et l'utilisateur avait choisi sur sa foi.
+
+**Et un piège de méthode, déjà consigné et repris quand même :**
+`GtkApplication` est mono-instance. Le premier essai lançait le binaire neuf
+alors qu'une instance installée tournait : celle-ci a reçu l'ouverture, le
+binaire d'essai est sorti aussitôt, et **c'est l'ancien code qui a été
+mesuré**. Le remède : `dbus-run-session` et un `HOME` séparé, qui isolent
+l'essai sans toucher à la session de l'utilisateur.
+
+---
+
 ## Quatre pièges payés
 
 ### 1. `--daemon` coûte une demi-minute pour rien

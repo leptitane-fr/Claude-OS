@@ -181,8 +181,8 @@ nuage_enregistrer (GPtrArray *lecteurs, GError **erreur)
 /* Sous $XDG_RUNTIME_DIR, et non sous /run comme les lecteurs reseau : le
  * montage appartient a l'utilisateur, root n'a rien a y faire. Le chemin est
  * calcule ici ET dans claude-os-nuage ; les deux doivent rester d'accord. */
-static const char *
-base_montage (void)
+const char *
+nuage_base_montage (void)
 {
     static char *base = NULL;
     if (base == NULL)
@@ -193,7 +193,7 @@ base_montage (void)
 char *
 nuage_point_montage (const LecteurNuage *l)
 {
-    return g_build_filename (base_montage (), l->id, NULL);
+    return g_build_filename (nuage_base_montage (), l->id, NULL);
 }
 
 gboolean
@@ -214,7 +214,7 @@ nuage_nom_du_point (const char *chemin)
     /* Sortie immediate hors de l'arborescence : cette fonction est appelee a
      * chaque changement de dossier, et relire un fichier de configuration
      * pour afficher /home/stef/Documents serait du gaspillage. */
-    g_autofree char *prefixe = g_strconcat (base_montage (), "/", NULL);
+    g_autofree char *prefixe = g_strconcat (nuage_base_montage (), "/", NULL);
     if (chemin == NULL || !g_str_has_prefix (chemin, prefixe))
         return NULL;
 

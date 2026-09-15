@@ -92,6 +92,11 @@ gboolean nuage_enregistrer (GPtrArray *lecteurs, GError **erreur);
  * Etat
  * ------------------------------------------------------------------------- */
 
+/* La racine sous laquelle tous les lecteurs nuage se montent. Rendue pour
+ * que d'autres modules reconnaissent un chemin distant sans recopier le
+ * chemin -- une seule source de verite. Ne pas liberer. */
+const char *nuage_base_montage (void);
+
 /* Le repertoire ou ce lecteur se monte, sous $XDG_RUNTIME_DIR : un tmpfs qui
  * appartient a l'utilisateur, efface a la fermeture de session. A liberer. */
 char     *nuage_point_montage (const LecteurNuage *l);

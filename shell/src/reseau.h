@@ -87,6 +87,11 @@ char *reseau_id_depuis_nom (const char *nom, GPtrArray *existants);
  * Etat
  * ------------------------------------------------------------------------- */
 
+/* La racine sous laquelle tous les lecteurs reseau se montent. Rendue pour
+ * que d'autres modules reconnaissent un chemin distant sans recopier le
+ * chemin. Ne pas liberer. */
+const char *reseau_base_montage (void);
+
 /* Le repertoire ou ce lecteur se monte. Sous /run : un tmpfs, donc aucun
  * point de montage mort ne survit a un redemarrage. A liberer. */
 char    *reseau_point_montage (const Lecteur *l);
