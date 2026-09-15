@@ -1623,6 +1623,66 @@ prouve rien » — vaut aussi pour le banc lui-même.
 
 ---
 
+## 15 septembre 2026, suite — le doigt manquait la lisière, et un doigt virtuel l'a montré
+
+Le volet de gauche ne s'ouvrait pas au glissé du doigt. Signalé d'usage, le
+jour même de sa mise en service.
+
+**Trois fausses pistes, toutes de ma main, et toutes du même genre : le banc
+se sabotait lui-même.**
+
+1. J'ai cru la lisière gauche **sourde** : au pointeur virtuel, elle ne
+   répondait pas. Elle répondait très bien — le volet DROIT était resté
+   ouvert, et sa nappe plein écran couvre le bord gauche. C'est le
+   comportement documenté la veille, retourné contre son auteur.
+2. J'ai cru l'avoir confirmé en relançant la barre : le pointeur était resté
+   garé contre le bord droit, le volet droit s'est rouvert tout seul à la
+   première image, et j'ai rejoué le même piège.
+3. J'ai enfin cru le bord droit sourd à son tour : mes essais refermaient en
+   **cliquant sur le fond d'écran**, ce qui ouvre le menu racine de labwc, qui
+   capte tout ce qui suit. `essais/pointeur.c` le dit en tête, en toutes
+   lettres, depuis le 11 septembre. Il a fallu le relire.
+
+**Puis la mesure, et elle a été nette.** Un `uinput` monté en écran tactile
+(`shell/essais/doigt.py`) fabrique un contact qui traverse libinput et le
+`touch.c` de labwc — le vrai chemin du doigt, celui que le pointeur virtuel
+n'emprunte pas. Balayage du point de premier contact :
+
+| premier contact | volet gauche | | premier contact | volet droit |
+|---|---|---|---|---|
+| 0, 2, 6, 9 px | ouvre | | 1919, 1915, 1910 | ouvre |
+| 11, 14, 20, 30 px | **rien** | | 1908, 1900, 1890 | **rien** |
+
+La lisière faisait **10 px**, et elle n'ouvrait que si le contact y tombait.
+Symétrique, donc : rien de propre au bord gauche. Ce qui diffère, c'est le
+geste — le bord **bas** se prend perpendiculairement, en butant contre le
+châssis, les bords latéraux se prennent en biais, et la dalle rapporte la pose
+une trame après le contact : un doigt qui entre vite a déjà parcouru dix à
+vingt pixels quand sa position arrive.
+
+**Le correctif : 24 px pour le doigt, 10 px pour la pose du pointeur.** La
+lisière s'élargit à 24 px — le contact peut atterrir n'importe où dedans —,
+mais l'ouverture au pointeur immobilisé reste bornée à 10 px du bord
+(`POSE_PX`). Une souris posée sur la bordure d'une fenêtre ne doit pas faire
+sortir un volet au bout d'une seconde ; le doigt est imprécis, le pointeur ne
+l'est pas. Vérifié sur la session : au doigt 0→23 px ouvre, 26 px non ; au
+pointeur 4 et 9 px ouvrent, 14 et 20 px non — et les mêmes chiffres, en
+miroir, à droite.
+
+**Ce que cela coûte, et c'est dit :** les applications ne reçoivent plus ni
+contact ni clic dans les 24 premiers pixels de gauche et de droite. 3,9 mm sur
+cette dalle. Une ligne à changer pour le rendre.
+
+**Et un piège de plus, payé sur le doigt virtuel lui-même :** `struct.pack`
+écrit « l » sur **quatre** octets en mode standard, si bien que mes
+`input_event` faisaient 16 octets là où le noyau en attend 24. Le noyau
+refusait par `EINVAL`, sans un mot de plus. C'est « q » qu'il faut.
+
+**Le banc gagne une étape** — pointeur posé à 16 px, qui ne doit rien
+ouvrir — et passe neuf étapes sur neuf.
+
+---
+
 ## Ce qui reste à faire — au 10 septembre 2026
 
 Par ordre d'importance.

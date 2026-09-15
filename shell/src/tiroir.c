@@ -2,11 +2,35 @@
 
 #include <gtk4-layer-shell.h>
 
-/* Largeur de la bande sensible, au ras du cadre. 10 px : la meme que celle
- * du bord bas qui rappelle le dock, et pour la meme raison -- assez large
- * pour qu'un doigt venu du cadre la trouve, assez etroite pour ne jamais
- * gener ce qui se trouve dessous. */
-#define BANDE_PX 10
+/* LARGEUR DE LA LISIERE, ET POURQUOI ELLE N'EST PLUS CELLE DU BORD BAS.
+ *
+ * Elle a fait 10 px, comme la bande qui rappelle le dock. Mesure au banc le
+ * 15 septembre 2026, doigt virtuel par uinput -- donc par libinput et le
+ * touch.c de labwc, le vrai chemin du contact : le glissé n'ouvrait QUE si
+ * le premier contact tombait entre 0 et 9 px du bord. A 11 px, plus rien,
+ * des deux cotes.
+ *
+ * C'est assez pour le pointeur, qu'on vise. Ce ne l'est pas pour le doigt :
+ * la dalle rapporte la pose une trame apres le contact, et un doigt qui
+ * entre vite depuis le cadre a deja parcouru dix a vingt pixels quand sa
+ * position est rapportee. Le bord BAS s'en tire a 10 px parce qu'on l'aborde
+ * perpendiculairement, en butant contre le chassis ; les bords lateraux se
+ * prennent en biais.
+ *
+ * CE QUE CES 24 PX COUTENT : les applications ne recoivent plus ni contact
+ * ni clic dans les 24 premiers pixels de gauche et de droite -- 3,9 mm sur
+ * cette dalle, qui fait 310 mm pour 1920 px. C'est le prix du geste, et il
+ * se rend en changeant cette seule ligne. */
+#define BANDE_PX 24
+
+/* CE QUE LE POINTEUR, LUI, GARDE : dix pixels.
+ *
+ * La lisiere elargie sert le doigt ; l'ouverture au pointeur pose reste
+ * bornee aux 10 px du bord. Une souris immobilisee a 20 px du cadre -- sur
+ * la bordure d'une fenetre, par exemple -- ne doit pas faire sortir un volet
+ * au bout d'une seconde. Le doigt est imprecis, le pointeur ne l'est pas :
+ * il n'y a aucune raison de leur donner la meme tolerance. */
+#define POSE_PX 10
 
 /* Ce qu'il faut parcourir vers l'interieur pour que le glisser compte.
  * 32 px : la valeur retenue pour le bord bas. En dessous, un simple appui au
@@ -171,14 +195,25 @@ attente_echue (gpointer data)
  * bande en diagonale la declencherait aussi. On rearme donc a chaque
  * mouvement DANS la bande : tant que le curseur bouge, le compte repart de
  * zero, et il ne s'acheve que s'il s'immobilise contre le bord. */
+/* La distance au bord de l'ecran, depuis les coordonnees de la lisiere :
+ * celle de gauche a son bord en x = 0, celle de droite a l'autre bout. */
+static double
+au_bord (const Cote *c, double x)
+{
+    return c->sens > 0 ? x : BANDE_PX - x;
+}
+
 static void
 on_bande_entree (GtkEventControllerMotion *ctrl, double x, double y, gpointer d)
 {
-    (void) ctrl; (void) x; (void) y;
+    (void) ctrl; (void) y;
     Cote *c = d;
     if (c->ouvert)
         return;
     attente_annuler (c);
+    /* Hors des dix premiers pixels, on n'arme meme pas : voir POSE_PX. */
+    if (au_bord (c, x) > POSE_PX)
+        return;
     c->attente = g_timeout_add (ATTENTE_MS, attente_echue, c);
 }
 
@@ -195,7 +230,8 @@ on_bande_sortie (GtkEventControllerMotion *ctrl, gpointer d)
     attente_annuler (d);
 }
 
-/* Le glisser du doigt : vers l'interieur de l'ecran, depuis le bord. */
+/* Le glisser du doigt : vers l'interieur de l'ecran, depuis le bord. Il part
+ * d'OU QU'IL SOIT dans la lisiere -- c'est tout l'objet de ses 24 px. */
 static void
 on_bande_glisse (GtkGestureDrag *g, double dx, double dy, gpointer d)
 {

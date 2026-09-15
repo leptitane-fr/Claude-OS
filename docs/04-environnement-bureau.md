@@ -256,6 +256,27 @@ volet vide, n'était centrée sur rien.
   est réarmée à **chaque mouvement dans la bande** : tant que le curseur
   bouge, le compte repart de zéro.
 
+**LA LISIÈRE FAIT 24 PX POUR LE DOIGT, ET LA POSE N'EN GARDE QUE 10.**
+Elle a fait 10 px, comme la bande du bord bas qui rappelle le dock. Mesure au
+banc le 15 septembre 2026, **doigt virtuel par uinput** — donc par libinput et
+le `touch.c` de labwc, le vrai chemin du contact : le glissé n'ouvrait **que
+si le premier contact tombait entre 0 et 9 px du bord**, des deux côtés ; à
+11 px, plus rien. C'est assez pour le pointeur, qu'on vise ; ce ne l'est pas
+pour le doigt, la dalle rapportant la pose une trame après le contact — un
+doigt qui entre vite a déjà parcouru dix à vingt pixels. Le bord **bas** s'en
+tire à 10 px parce qu'on l'aborde perpendiculairement, en butant contre le
+châssis ; les bords latéraux se prennent en biais.
+
+Ce que ces 24 px coûtent : les applications ne reçoivent plus ni contact ni
+clic dans les **24 premiers pixels** de gauche et de droite — 3,9 mm sur cette
+dalle, qui fait 310 mm pour 1920 px. C'est le prix du geste, et il se rend en
+changeant une ligne (`BANDE_PX`).
+
+**L'ouverture au pointeur posé, elle, reste bornée à 10 px** (`POSE_PX`) : une
+souris immobilisée à 20 px du cadre — sur la bordure d'une fenêtre — ne doit
+pas faire sortir un volet au bout d'une seconde. Le doigt est imprécis, le
+pointeur ne l'est pas ; rien n'oblige à leur donner la même tolérance.
+
 **Tout clic ailleurs les referme**, par la nappe — une surface transparente
 qui couvre l'écran tant qu'un tiroir est ouvert. Même mécanisme que le dock
 rappelé par-dessus une application, et pour la même raison : labwc ne signale
@@ -271,7 +292,7 @@ seulement alors : la minuterie de retrait relit l'état des deux.
 **Conséquence à connaître : tant qu'un volet est dehors, l'autre bord
 n'ouvre rien.** Les lisières sont créées avant la fenêtre du tiroir, donc
 sous elle ; se poser contre le bord opposé ne fait que toucher la nappe. C'est
-vérifié au banc (`shell/essais/banc-tiroirs.sh`, étape 7) et c'est voulu : le
+vérifié au banc (`shell/essais/banc-tiroirs.sh`) et c'est voulu : le
 geste qui suit l'ouverture d'un tiroir est presque toujours de le refermer.
 
 **La fenêtre du tiroir est plein écran dès sa création**, et c'est un

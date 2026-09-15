@@ -65,6 +65,16 @@ ailleurs les referme. Les widgets ont quitté le bord droit, où ils
 partageaient une colonne avec la Console, le 15 septembre 2026 : deux choses
 sans rapport empilées au même bord se lisaient comme une seule.
 
+**LA LISIÈRE FAIT 24 PX POUR LE DOIGT, 10 PX POUR LA POSE DU POINTEUR.** À
+10 px, mesuré au doigt virtuel (`shell/essais/doigt.py`, uinput), le glissé
+n'ouvrait que si le premier contact tombait entre 0 et 9 px du bord — des deux
+côtés. La dalle rapporte la pose une trame après le contact, et un doigt qui
+entre en biais a déjà parcouru dix à vingt pixels. Le bord bas s'en tire à
+10 px parce qu'on l'aborde perpendiculairement. Ce que ça coûte : les
+applications ne reçoivent plus rien dans les 24 premiers pixels de gauche et
+de droite (3,9 mm). L'ouverture au pointeur POSÉ, elle, reste à 10 px : une
+souris arrêtée sur la bordure d'une fenêtre ne doit pas sortir un volet.
+
 Les points à retenir avant d'y toucher — ils étaient quatre, le coin et les
 tiroirs les ont multipliés :
 

@@ -5,7 +5,9 @@
 # Lance un labwc sans écran, sur un bus de session jetable, avec la barre
 # d'état compilée et le pointeur virtuel, puis joue les gestes qui ouvrent et
 # ferment chaque tiroir : le pointeur POSÉ contre un bord, le glisser depuis
-# ce bord, et le clic à côté. Chaque étape est vérifiée dans le journal de
+# ce bord, et le clic à côté. Le glissé au DOIGT, lui, ne s'éprouve pas ici :
+# un labwc sans écran n'a aucun périphérique d'entrée. Voir essais/doigt.py,
+# qui fabrique un écran tactile par uinput et s'emploie sur la machine. Chaque étape est vérifiée dans le journal de
 # la barre — « tiroir gauche : ouvert », « tiroir droite : fermé » —, parce
 # qu'une capture montre un volet sorti sans dire lequel des deux côtés l'a
 # décidé.
@@ -122,6 +124,15 @@ attendre ouvert ferme "glisser depuis le bord gauche"
 
 "$POINTEUR" clic 900 400
 attendre ferme ferme "clic à côté, de nouveau"
+
+# LA LISIÈRE EST LARGE POUR LE DOIGT, PAS POUR LE POINTEUR. Elle fait 24 px
+# — un contact rapporté une trame après la pose a déjà quitté les dix
+# premiers —, mais le pointeur POSÉ n'arme qu'à moins de 10 px du bord
+# (POSE_PX) : une souris immobilisée sur la bordure d'une fenêtre ne doit pas
+# faire sortir un volet.
+"$POINTEUR" va 16 500; sleep 1.4
+attendre ferme ferme "pointeur posé à 16 px : hors de portée de la pose"
+"$POINTEUR" va 900 400
 
 "$POINTEUR" va 1917 540; sleep 1.4
 attendre ferme ouvert "pointeur posé contre le bord droit"
