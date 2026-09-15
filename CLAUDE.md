@@ -46,7 +46,7 @@ conséquences à retenir avant d'y toucher :
 Détail dans [`docs/04`](docs/04-environnement-bureau.md) §4.3.
 
 **LA BARRE D'ÉTAT N'EXISTE PLUS** (15 septembre 2026). À sa place, deux
-choses : le **coin** et le **tiroir**.
+choses : le **coin** et les **tiroirs des bords latéraux**.
 
 Le **coin** (`shell/src/coin.c`) est permanent, en blanc sur le fond d'écran,
 sans fond ni bordure ni ombre, et **insensible au clic comme au survol** —
@@ -56,13 +56,17 @@ en colonne : non-lu, réseau, Bluetooth, charge, fiche secteur quand elle est
 branchée. Il ne suit plus le dock hors de l'écran : une information
 permanente ne s'absente pas.
 
-Le **tiroir** (`shell/src/tiroir.c`) se tire du bord droit et porte deux
-volets : widgets à venir en haut, **Console** en bas. Il s'ouvre au **glissé
-du doigt** depuis le bord, ou au **pointeur posé une seconde** contre ce bord
-— une attente, pas un contact, pour que le geste reste volontaire. Tout clic
-ailleurs le referme.
+Les **tiroirs** (`shell/src/tiroir.c`) sont **deux, un par bord latéral** :
+les **widgets à venir** à gauche, sur toute la hauteur, et la **Console** à
+droite, **centrée verticalement**. Chacun s'ouvre au **glissé du doigt**
+depuis son bord, ou au **pointeur posé une seconde** contre ce bord — une
+attente, pas un contact, pour que le geste reste volontaire. Tout clic
+ailleurs les referme. Les widgets ont quitté le bord droit, où ils
+partageaient une colonne avec la Console, le 15 septembre 2026 : deux choses
+sans rapport empilées au même bord se lisaient comme une seule.
 
-Quatre points à retenir avant d'y toucher :
+Les points à retenir avant d'y toucher — ils étaient quatre, le coin et les
+tiroirs les ont multipliés :
 
 - **LE COIN S'EFFACE SOUS UNE FENÊTRE PLEIN ÉCRAN**, et c'est sa seule
   disparition. Concédée à l'usage : une heure sur un film gêne, et les
@@ -110,8 +114,16 @@ Quatre points à retenir avant d'y toucher :
   `GtkRevealer` qui bouge. Ne jamais la redimensionner : la Console ouvre des
   popovers, et labwc 0.8.3 les envoie hors de l'écran quand la surface qui
   les porte change de taille.
-- **Le centre de notifications n'a plus d'entrée**, par choix — le volet haut
-  est vide en attendant un widget. La **bannière**, elle, reste : elle
+- **UNE SEULE FENÊTRE POUR LES DEUX CÔTÉS**, et ce n'est pas une économie :
+  deux nappes plein écran superposées se disputeraient le clic extérieur, et
+  l'une fermerait le mauvais tiroir. Elle est montrée dès qu'un côté s'ouvre,
+  masquée quand le **dernier** est rentré — la minuterie de retrait relit
+  l'état des deux. Conséquence connue et voulue : **tant qu'un volet est
+  dehors, l'autre bord n'ouvre rien**, les lisières étant créées avant la
+  fenêtre, donc sous elle. Vérifié par `shell/essais/banc-tiroirs.sh`, qui
+  joue huit gestes au pointeur virtuel et les lit dans le journal.
+- **Le centre de notifications n'a plus d'entrée**, par choix — le volet de
+  gauche est vide en attendant un widget. La **bannière**, elle, reste : elle
   s'accroche au coin. Ne pas croire que les notifications sont mortes.
 - **Les trois modes d'énergie ont des glyphes à eux**, livrés avec le shell
   (`claude-os-mode-*-symbolic`) : **cadran, balance, feuille** — la famille

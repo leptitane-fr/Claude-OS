@@ -1,5 +1,5 @@
 /* =========================================================================
- * Claude-OS Shell — le tiroir du bord droit
+ * Claude-OS Shell — les tiroirs des bords lateraux
  *
  * CE QUI S'OUVRAIT AU CLIC S'OUVRE MAINTENANT AU GESTE.
  *
@@ -9,28 +9,39 @@
  * fallait donc une autre porte, et elle ne pouvait plus etre une cible de
  * quelques pixels.
  *
- * DEUX VOLETS, EMPILES, ET C'EST UNE PLACE RESERVEE AUTANT QU'UNE MISE EN
- * PAGE. Celui du bas porte la Console. Celui du haut attend les widgets a
- * venir : il est vide, et il le dit. Un tiroir a un seul volet aurait
- * demande d'etre redessine le jour ou le second arrive ; celui-ci n'aura
- * qu'a se remplir.
+ * DEUX TIROIRS, UN PAR BORD, ET ILS NE SE CONSULTENT PAS.
  *
- * DEUX FACONS DE L'OUVRIR, ET ELLES NE SE VALENT PAS.
+ *   - A GAUCHE, LES WIDGETS A VENIR. Le volet est vide, et il le dit ; il
+ *     prend toute la hauteur. C'est une place reservee autant qu'une mise en
+ *     page : le jour ou le premier widget arrive, le volet n'aura qu'a se
+ *     remplir. Il a quitte le bord droit le 15 septembre 2026, ou il
+ *     partageait une colonne avec la Console : deux choses sans rapport
+ *     empilees au meme bord se lisaient comme une seule.
  *
- *   - AU DOIGT : un glisser depuis le bord droit vers la gauche. C'est le
- *     geste de tous les tiroirs lateraux, celui qu'on essaie sans qu'on
- *     vous l'explique.
+ *   - A DROITE, LA CONSOLE, centree verticalement. Le volet fait sa hauteur
+ *     et pas davantage -- etire, il laisserait la rangee d'alimentation
+ *     flotter au bas d'un grand vide.
  *
- *   - AU POINTEUR : le curseur POSE contre le bord droit, et tenu la une
- *     seconde. Pas un clic, pas une entree : une ATTENTE. Le bord droit de
- *     l'ecran est l'endroit ou finit tout mouvement de souris un peu vif,
- *     et un tiroir qui s'ouvrirait a l'instant du contact s'ouvrirait
- *     surtout par accident. La seconde est le prix a payer pour que le
- *     geste soit toujours volontaire -- demande explicitement, et pour
- *     cette raison.
+ * Les deux s'ouvrent et se ferment chacun de leur cote, et partagent LA
+ * fenetre plein ecran qui porte la nappe : deux nappes superposees se
+ * seraient disputees le clic exterieur.
  *
- * TOUT CLIC AILLEURS LE REFERME. Une nappe transparente couvre l'ecran tant
- * que le tiroir est ouvert et recueille ce clic -- exactement le mecanisme
+ * DEUX FACONS DE LES OUVRIR, ET ELLES NE SE VALENT PAS.
+ *
+ *   - AU DOIGT : un glisser depuis le bord vers l'interieur de l'ecran.
+ *     C'est le geste de tous les tiroirs lateraux, celui qu'on essaie sans
+ *     qu'on vous l'explique. Le sens compte : un glisser qui s'eloigne de
+ *     l'ecran n'ouvre rien.
+ *
+ *   - AU POINTEUR : le curseur POSE contre le bord, et tenu la une seconde.
+ *     Pas un clic, pas une entree : une ATTENTE. Les bords lateraux sont
+ *     l'endroit ou finit tout mouvement de souris un peu vif, et un tiroir
+ *     qui s'ouvrirait a l'instant du contact s'ouvrirait surtout par
+ *     accident. La seconde est le prix a payer pour que le geste soit
+ *     toujours volontaire -- demande explicitement, et pour cette raison.
+ *
+ * TOUT CLIC AILLEURS LES REFERME. Une nappe transparente couvre l'ecran tant
+ * qu'un tiroir est ouvert et recueille ce clic -- exactement le mecanisme
  * du dock rappele par-dessus une application, et pour la meme raison :
  * labwc ne signale rien quand on revient a la fenetre deja active.
  * ========================================================================= */
@@ -38,16 +49,23 @@
 
 #include <gtk/gtk.h>
 
-/* Cree la bande du bord et le tiroir, referme. `console` est le contenu a
- * poser dans le volet du bas -- celui de panel_new(). */
+/* Cree les deux lisieres et les deux tiroirs, fermes. `console` est le
+ * contenu a poser dans le volet de droite -- celui de panel_new(). */
 void shell_tiroir_init (GtkApplication *app, GtkWidget *console,
                         gboolean apercu);
 
-/* Ouvre, ferme, bascule. `shell_tiroir_fermer` sert de ConsoleFermer a la
- * rangee d'alimentation : elle ferme le tiroir avant d'eteindre. */
-void shell_tiroir_ouvrir  (void);
-void shell_tiroir_fermer  (gpointer inutilise);
-void shell_tiroir_basculer (void);
+/* La Console, au bord droit. */
+void shell_tiroir_console_ouvrir   (void);
+void shell_tiroir_console_basculer (void);
 
-/* Le tiroir est-il deploye ? */
+/* Les widgets, au bord gauche. */
+void shell_tiroir_widgets_ouvrir   (void);
+void shell_tiroir_widgets_basculer (void);
+
+/* LES DEUX A LA FOIS. Sert de ConsoleFermer a la rangee d'alimentation :
+ * ce qu'elle demande avant d'eteindre ou d'ouvrir les Reglages, c'est que
+ * l'ecran soit rendu, pas qu'un volet precis rentre. */
+void shell_tiroir_fermer (gpointer inutilise);
+
+/* L'un ou l'autre est-il deploye ? */
 gboolean shell_tiroir_ouvert (void);

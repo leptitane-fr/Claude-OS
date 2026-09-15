@@ -27,6 +27,12 @@
  * le bureau puis ailleurs mesure le menu, pas le shell.
  * ========================================================================= */
 
+/* nanosleep() N'EST PAS DANS LE C11 NU, et le banc compile en -std=c11
+ * depuis qu'on l'a aligne sur meson : sans cette ligne, gcc declare la
+ * fonction implicitement et refuse. Constate le 15 septembre 2026, en
+ * voulant eprouver les deux tiroirs. */
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

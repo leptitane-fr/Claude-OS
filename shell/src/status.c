@@ -50,7 +50,7 @@ typedef struct {
 
 typedef struct {
     ShellConfig *cfg;
-    gboolean     ouvrir;     /* ouvrir le tiroir au demarrage      */
+    gboolean     ouvrir;     /* ouvrir les deux tiroirs au demarrage */
     gboolean     apercu;
 } Options;
 
@@ -247,12 +247,14 @@ on_fenetres_changees (gpointer data)
     shell_coin_plein_ecran (shell_toplevels_plein_ecran ());
 }
 
-/* Banc d'essai seulement. */
+/* Banc d'essai seulement. Les DEUX tiroirs : il y a maintenant un volet a
+ * chaque bord, et c'est l'ensemble qu'on vient juger. */
 static gboolean
 ouvrir_tiroir_une_fois (gpointer data)
 {
     (void) data;
-    shell_tiroir_ouvrir ();
+    shell_tiroir_widgets_ouvrir ();
+    shell_tiroir_console_ouvrir ();
     return G_SOURCE_REMOVE;
 }
 
@@ -267,11 +269,12 @@ on_activate (GtkApplication *app, gpointer user_data)
      * coin clair cote a cote. */
     shell_config_apply (opt->cfg);
 
-    /* LE COIN D'ABORD : le tiroir et le centre de notifications s'y
+    /* LE COIN D'ABORD : les tiroirs et le centre de notifications s'y
      * accrochent, et l'horloge ecrit dedans des la premiere image. */
     shell_coin_init (app, opt->cfg, opt->apercu);
 
-    /* LA CONSOLE VIT DANS LE TIROIR, et c'est le tiroir qu'elle referme
+    /* LA CONSOLE VIT DANS LE TIROIR DU BORD DROIT, et ce sont les tiroirs
+     * qu'elle referme
      * avant d'eteindre ou d'ouvrir les Reglages -- d'ou le rappel passe en
      * argument plutot qu'un widget. */
     GtkWidget *console = panel_new (opt->apercu, shell_tiroir_fermer, NULL);
@@ -283,7 +286,7 @@ on_activate (GtkApplication *app, gpointer user_data)
      * CE QUI N'EST PLUS BRANCHE, ET C'EST UN CHOIX : le centre lui-meme n'a
      * plus d'entree. La cloche de la barre l'ouvrait ; le temoin du coin,
      * lui, ne s'ouvre pas -- le coin ne recoit aucun clic. L'historique des
-     * notifications attend donc qu'un widget du volet haut du tiroir lui
+     * notifications attend donc qu'un widget du volet de gauche lui
      * redonne une porte. La banniere, elle, continue d'annoncer ce qui
      * arrive : c'est la moitie qu'on ne pouvait pas perdre.
      *
@@ -323,7 +326,8 @@ on_activate (GtkApplication *app, gpointer user_data)
 int
 main (int argc, char **argv)
 {
-    /* --ouvrir : ouvre le tiroir au demarrage, avec les vraies sources.
+    /* --ouvrir : ouvre les deux tiroirs au demarrage, avec les vraies
+     *            sources.
      * --apercu : idem, mais avec des valeurs fixes, pour juger la mise en
      *            page quand aucun service n'est present. Une aide au banc
      *            d'essai, qui ne prouve rien du branchement D-Bus. */

@@ -672,34 +672,40 @@ window.coin { background: none; background-color: transparent; }
 .coin-cloche { opacity: 0.3; }
 .coin-cloche.nouvelles { opacity: 1; }
 
-/* --- Le tiroir du bord droit -----------------------------------------------
+/* --- Les tiroirs des bords latéraux ----------------------------------------
  *
- * Deux volets empilés, tirés du bord droit. Ils viennent AFFLEURER le bord :
- * coins arrondis à gauche seulement, aucune marge à droite. C'est ce qui les
- * fait lire comme un tiroir qu'on sort, et non comme deux cartes posées près
- * du bord.
+ * Un volet par bord, tiré du bord. Ils viennent AFFLEURER le cadre : coins
+ * arrondis du seul côté intérieur, aucune marge du côté du bord. C'est ce qui
+ * les fait lire comme des tiroirs qu'on sort, et non comme des cartes posées
+ * près des bords.
  *
- * Le bas s'arrête bien avant le bas de l'écran : le coin y est, et un volet
- * qui passerait devant l'heure prendrait la place de ce qu'on est venu
- * consulter. */
+ * À gauche les widgets, sur toute la hauteur ; à droite la Console, centrée
+ * verticalement et de sa seule hauteur. Même largeur pour les deux — celle de
+ * la Console, « .qs { min-width } » — pour que les deux bords se répondent. */
 .tiroir { background: none; background-color: transparent; }
 
 .tiroir-nappe { background-color: transparent; }
 
-.tiroir-colonne {
-  margin: 16px 0 180px 0;
-}
-
 .tiroir-volet {
   background-color: @surface;
   border: 1px solid @border;
-  border-right: none;
-  border-radius: 18px 0 0 18px;
   padding: 12px 14px;
+  margin: 16px 0;
   /* Même doublement d'ombre que le dock : une large pour l'élévation, une
      courte pour asseoir le contact. */
   box-shadow: 0 8px 28px @shadow,
               0 2px  6px @shadow-close;
+}
+
+.tiroir-widgets {
+  border-left: none;
+  border-radius: 0 18px 18px 0;
+  min-width: 296px;
+}
+
+.tiroir-console {
+  border-right: none;
+  border-radius: 18px 0 0 18px;
 }
 
 /* Le volet des widgets est vide, et il le dit. Il n'est pas masqué en

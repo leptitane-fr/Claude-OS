@@ -1564,6 +1564,65 @@ sortie n'est pas la lire.
 
 ---
 
+## 15 septembre 2026, suite — les widgets passent à gauche, la Console se centre
+
+Une demande d'une ligne, et la bonne : le volet des widgets à venir quitte le
+bord droit pour **un tiroir à lui, au bord gauche** ; la Console reste à
+droite, **centrée verticalement**.
+
+**Pourquoi c'est mieux que la colonne d'avant.** Les deux volets empilés au
+même bord se lisaient comme une seule chose en deux morceaux, alors qu'ils
+n'ont rien à voir l'un avec l'autre. Et la Console, poussée vers le bas par un
+volet vide qui prenait toute la hauteur restante, n'était centrée sur rien :
+elle flottait entre un vide en haut et le coin en bas.
+
+**Ce qui a changé dans le code.** `tiroir.c` ne connaît plus un tiroir mais un
+**côté** : une structure `Cote` porte la lisière, le révélateur, la minuterie,
+l'état, et **le signe du glissé** qui l'ouvre — `+1` vers la droite depuis le
+bord gauche, `-1` vers la gauche depuis le bord droit. Deux instances, `G` et
+`D`, et tout le reste est commun. L'API suit : `shell_tiroir_console_*`,
+`shell_tiroir_widgets_*`, et `shell_tiroir_fermer()` qui **ferme les deux** —
+c'est ce que demande la rangée d'alimentation avant d'éteindre, l'écran rendu,
+pas un volet précis rentré.
+
+**Une seule fenêtre pour les deux côtés, et c'est le point de conception.**
+Deux nappes plein écran superposées se seraient disputé le clic extérieur, et
+l'une des deux aurait fermé le mauvais tiroir. La fenêtre est donc partagée :
+montrée dès qu'un côté s'ouvre, masquée quand le dernier est rentré — la
+minuterie de retrait relit l'état des deux avant de masquer, sans quoi fermer
+un volet escamoterait l'autre.
+
+**Conséquence assumée, et vérifiée au banc : tant qu'un volet est dehors,
+l'autre bord n'ouvre rien.** Les lisières sont créées avant la fenêtre du
+tiroir, donc sous elle ; se poser contre le bord opposé ne touche que la
+nappe. Le geste qui suit l'ouverture d'un tiroir est presque toujours de le
+refermer.
+
+**Le centrage de la Console ne demande pas de marge basse.** L'ancienne
+colonne s'arrêtait 180 px avant le bas pour ne pas passer devant le coin. Le
+volet droit fait maintenant **sa seule hauteur** — 459 px mesurés sur 1080,
+centre à 540 exactement — et s'arrête à 769 px : le coin, qui commence vers
+940, reste dégagé. Il faudrait 340 px de contenu en plus pour que la question
+se pose.
+
+**Un banc pour les deux tiroirs.** `shell/essais/banc-tiroirs.sh`, sur le
+modèle de `banc-dock.sh` : labwc sans écran, bus jetable, pointeur virtuel, et
+huit étapes lues **dans le journal** — pointeur posé à gauche, clic à côté,
+glissé depuis le bord, pointeur posé à droite, bord opposé sans effet. Une
+capture montre un volet sorti ; elle ne dit pas lequel des deux côtés l'a
+décidé. D'où les deux lignes `g_debug ("tiroir %s : %s")`, sur le modèle de
+« visibilité : » dans le dock.
+
+**Au passage, le pointeur virtuel du banc ne compilait plus.** `pointeur.c`
+appelle `nanosleep()`, qui n'est pas dans le C11 nu ; le banc a été aligné sur
+`-std=c11` après coup, et depuis, `gcc` refusait la déclaration implicite.
+Personne ne s'en était aperçu parce que le binaire déjà construit traînait
+dans `essais/build/`. Un `#define _POSIX_C_SOURCE 200809L` en tête, et la
+remarque de `construire.sh` — « un banc qui ne compile pas comme la cible ne
+prouve rien » — vaut aussi pour le banc lui-même.
+
+---
+
 ## Ce qui reste à faire — au 10 septembre 2026
 
 Par ordre d'importance.

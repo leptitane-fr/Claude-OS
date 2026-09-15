@@ -221,28 +221,58 @@ Console — et `panel.c` ne cherche l'adaptateur qu'au premier affichage du
 panneau, à dessein. Un témoin permanent demande une source permanente : le
 coin ouvre donc son propre proxy sur `Powered`.
 
-### Le tiroir du bord droit
+### Les tiroirs des bords latéraux
 
-`shell/src/tiroir.c`. Deux volets empilés, tirés du bord droit, qui viennent
-affleurer le bord — coins arrondis à gauche seulement. Celui du bas porte la
-**Console** ; celui du haut attend les widgets à venir, et il le dit : une
-place réservée qu'on voit est une promesse, une place absente est un oubli.
+`shell/src/tiroir.c`. **Un volet par bord**, tiré de son bord, venant
+affleurer le cadre — coins arrondis du seul côté intérieur, aucune marge du
+côté du bord. C'est ce qui les fait lire comme des tiroirs qu'on sort, et non
+comme des cartes posées près des bords.
 
-**Deux façons de l'ouvrir, et elles ne se valent pas.**
+- **À gauche, les widgets à venir**, sur toute la hauteur. Le volet est vide,
+  et il le dit : une place réservée qu'on voit est une promesse, une place
+  absente est un oubli.
+- **À droite, la Console**, **centrée verticalement** et de sa seule hauteur —
+  étirée, elle laisserait la rangée d'alimentation flotter au bas d'un grand
+  vide. Sa hauteur (≈ 460 px sur 1080) la tient loin du coin ; le centrage
+  n'a donc pas besoin d'une marge basse pour l'éviter.
 
-- **Au doigt** : un glissé depuis le bord droit vers la gauche, seuil de
-  32 px. Le geste de tous les tiroirs latéraux.
-- **Au pointeur** : le curseur **posé** contre le bord droit et tenu là
-  **une seconde**. Pas un clic, pas une entrée : une attente. Le bord droit
-  est l'endroit où finit tout mouvement de souris un peu vif, et un tiroir
+Les deux volets ont **la même largeur**, celle de la Console (`.qs
+{ min-width: 296px }`), pour que les deux bords se répondent.
+
+**Les widgets ont quitté le bord droit le 15 septembre 2026**, où ils
+partageaient une colonne avec la Console : deux choses sans rapport empilées
+au même bord se lisaient comme une seule, et la Console, poussée en bas par un
+volet vide, n'était centrée sur rien.
+
+**Deux façons de les ouvrir, et elles ne se valent pas.**
+
+- **Au doigt** : un glissé depuis le bord vers l'intérieur de l'écran, seuil
+  de 32 px. Le geste de tous les tiroirs latéraux. **Le sens compte** : un
+  glissé qui s'éloigne de l'écran n'ouvre rien.
+- **Au pointeur** : le curseur **posé** contre le bord et tenu là **une
+  seconde**. Pas un clic, pas une entrée : une attente. Les bords latéraux
+  sont l'endroit où finit tout mouvement de souris un peu vif, et un tiroir
   qui s'ouvrirait au contact s'ouvrirait surtout par accident. La minuterie
   est réarmée à **chaque mouvement dans la bande** : tant que le curseur
   bouge, le compte repart de zéro.
 
-**Tout clic ailleurs le referme**, par la nappe — une surface transparente
-qui couvre l'écran tant que le tiroir est ouvert. Même mécanisme que le dock
+**Tout clic ailleurs les referme**, par la nappe — une surface transparente
+qui couvre l'écran tant qu'un tiroir est ouvert. Même mécanisme que le dock
 rappelé par-dessus une application, et pour la même raison : labwc ne signale
 rien quand on revient à la fenêtre déjà active.
+
+**Les deux côtés s'ignorent, mais partagent LA fenêtre.** Chacun a sa
+lisière, sa minuterie et son révélateur ; une seule fenêtre plein écran porte
+la nappe, parce que deux nappes superposées se seraient disputé le clic
+extérieur et que l'une des deux aurait fermé le mauvais tiroir. La fenêtre est
+montrée dès qu'un côté s'ouvre, masquée quand le dernier est rentré — et
+seulement alors : la minuterie de retrait relit l'état des deux.
+
+**Conséquence à connaître : tant qu'un volet est dehors, l'autre bord
+n'ouvre rien.** Les lisières sont créées avant la fenêtre du tiroir, donc
+sous elle ; se poser contre le bord opposé ne fait que toucher la nappe. C'est
+vérifié au banc (`shell/essais/banc-tiroirs.sh`, étape 7) et c'est voulu : le
+geste qui suit l'ouverture d'un tiroir est presque toujours de le refermer.
 
 **La fenêtre du tiroir est plein écran dès sa création**, et c'est un
 `GtkRevealer` qui bouge. Redimensionner une surface layer-shell qui porte un
@@ -250,7 +280,8 @@ popover ouvert fait partir ce popover hors de l'écran sous labwc 0.8.3 —
 règle payée le 11 septembre 2026 — et la Console ouvre des popovers.
 
 **La nappe et les volets sont séparés par un `GtkOverlay`**, pas par un test
-dans un gestionnaire de clic. Un geste posé sur le conteneur aurait attrapé
+dans un gestionnaire de clic. Les deux révélateurs y sont posés en
+superposition, la nappe en enfant principal. Un geste posé sur le conteneur aurait attrapé
 les deux ; avec une superposition, GTK désigne le widget le plus haut sous le
 pointeur — le volet s'il y en a un, la nappe sinon. La distinction n'est pas
 codée, elle est structurelle.
@@ -264,8 +295,8 @@ sait pas à quoi elle parle.
 
 **Ce que cette bascule a coûté, et qui est assumé :** le centre de
 notifications n'a plus d'entrée. La cloche de la barre l'ouvrait ; le témoin
-du coin ne s'ouvre pas. L'historique attend qu'un widget du volet haut lui
-redonne une porte. **La bannière, elle, continue d'annoncer ce qui arrive** —
+du coin ne s'ouvre pas. L'historique attend qu'un widget du **volet de
+gauche** lui redonne une porte. **La bannière, elle, continue d'annoncer ce qui arrive** —
 elle s'accroche au coin comme elle s'accrochait à la pilule, et c'était la
 moitié qu'on ne pouvait pas perdre.
 
