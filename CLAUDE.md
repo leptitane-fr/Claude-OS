@@ -75,6 +75,15 @@ applications ne reçoivent plus rien dans les 24 premiers pixels de gauche et
 de droite (3,9 mm). L'ouverture au pointeur POSÉ, elle, reste à 10 px : une
 souris arrêtée sur la bordure d'une fenêtre ne doit pas sortir un volet.
 
+**ET TOUS LES CONTACTS SONT SUIVIS, PAS SEULEMENT LE PREMIER.** `GtkGestureDrag`
+ne suit qu'une suite de contacts : un contact fugace né sur la lisière avant
+l'index — la main qui entre par le bord frôle le châssis — prenait le geste, et
+l'index était ignoré. Le volet ne sortait qu'un coup sur deux. `tiroir.c` suit
+donc les suites lui-même (`GtkEventControllerLegacy`) ; le geste GTK ne sert
+plus qu'au pointeur, qui n'a qu'un contact. **Deux bancs** : `banc-tiroirs.sh`
+sans écran pour le pointeur, `banc-doigt.sh` sur la machine pour le doigt —
+celui-ci monte un écran tactile par uinput et demande root.
+
 Les points à retenir avant d'y toucher — ils étaient quatre, le coin et les
 tiroirs les ont multipliés :
 

@@ -96,9 +96,9 @@ def creer():
     return fd
 
 
-def pose(fd, x, y):
-    ecrire(fd, EV_ABS, ABS_MT_SLOT, 0)
-    ecrire(fd, EV_ABS, ABS_MT_TRACKING_ID, 1)
+def pose(fd, x, y, slot=0, ident=1):
+    ecrire(fd, EV_ABS, ABS_MT_SLOT, slot)
+    ecrire(fd, EV_ABS, ABS_MT_TRACKING_ID, ident)
     ecrire(fd, EV_ABS, ABS_MT_POSITION_X, x)
     ecrire(fd, EV_ABS, ABS_MT_POSITION_Y, y)
     ecrire(fd, EV_ABS, ABS_X, x)
@@ -107,8 +107,8 @@ def pose(fd, x, y):
     syn(fd)
 
 
-def bouge(fd, x, y):
-    ecrire(fd, EV_ABS, ABS_MT_SLOT, 0)
+def bouge(fd, x, y, slot=0):
+    ecrire(fd, EV_ABS, ABS_MT_SLOT, slot)
     ecrire(fd, EV_ABS, ABS_MT_POSITION_X, x)
     ecrire(fd, EV_ABS, ABS_MT_POSITION_Y, y)
     ecrire(fd, EV_ABS, ABS_X, x)
@@ -116,10 +116,11 @@ def bouge(fd, x, y):
     syn(fd)
 
 
-def leve(fd):
-    ecrire(fd, EV_ABS, ABS_MT_SLOT, 0)
+def leve(fd, slot=0, dernier=True):
+    ecrire(fd, EV_ABS, ABS_MT_SLOT, slot)
     ecrire(fd, EV_ABS, ABS_MT_TRACKING_ID, -1)
-    ecrire(fd, EV_KEY, BTN_TOUCH, 0)
+    if dernier:
+        ecrire(fd, EV_KEY, BTN_TOUCH, 0)
     syn(fd)
 
 
@@ -139,6 +140,39 @@ def main():
                 bouge(fd, x + (x2 - x) * i // pas, y + (y2 - y) * i // pas)
             time.sleep(0.05)
             leve(fd)
+        elif a[0] == "fantome":
+            # LE CAS QUI FAIT ÉCHOUER UN GESTE GTK : un contact fugace naît
+            # sur la lisière juste avant le vrai glissé — la main qui entre
+            # par le bord frôle le châssis. GtkGestureSingle donne le geste au
+            # premier et ignore le second.
+            #   fantome X Y X2 Y2 [xf yf]
+            x, y, x2, y2 = (int(v) for v in a[1:5])
+            xf = int(a[5]) if len(a) > 5 else 5
+            yf = int(a[6]) if len(a) > 6 else y - 200
+            pose(fd, xf, yf, slot=0, ident=7)        # le fantôme, d'abord
+            time.sleep(0.04)
+            pose(fd, x, y, slot=1, ident=8)          # puis l'index
+            for k in range(1, 13):
+                time.sleep(0.02)
+                bouge(fd, x + (x2 - x) * k // 12, y + (y2 - y) * k // 12, slot=1)
+            leve(fd, slot=0, dernier=False)
+            time.sleep(0.03)
+            leve(fd, slot=1, dernier=True)
+        elif a[0] == "serie":
+            # Plusieurs glissés sans détruire le périphérique entre deux :
+            # c'est ce qui permet à une sonde lancée en parallèle de le
+            # trouver et de le lire (essais/sonde-contacts.py).
+            combien = int(a[1]) if len(a) > 1 else 3
+            time.sleep(1.5)
+            for i in range(combien):
+                depart = 5 + i * 20
+                pose(fd, depart, 500)
+                for k in range(1, 13):
+                    time.sleep(0.02)
+                    bouge(fd, depart + 200 * k // 12, 500)
+                leve(fd)
+                print(f"  glissé {i + 1} : posé à x={depart}")
+                time.sleep(1.5)
         elif a[0] == "touche":
             x, y = int(a[1]), int(a[2])
             pose(fd, x, y); time.sleep(0.08); leve(fd)

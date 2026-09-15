@@ -47,6 +47,10 @@
  * tiroir, assez court pour ne pas attendre. */
 #define GLISSE_MS 200
 
+/* Dix doigts : la limite de la dalle, donc celle du suivi des contacts.
+ * Voir on_bande_contact(). */
+#define SUITES_MAX 10
+
 /* -------------------------------------------------------------------------
  * UN TIROIR PAR BORD, ET UNE SEULE FENETRE POUR LES DEUX.
  *
@@ -70,6 +74,7 @@ typedef struct {
     GtkLayerShellEdge bord;
     const char       *espace;     /* le namespace de la lisiere              */
     const char       *nom;        /* pour le journal, et pour le banc        */
+    struct { GdkEventSequence *suite; double x0; } contacts[SUITES_MAX];
 } Cote;
 
 static Cote G = { .sens = +1, .bord = GTK_LAYER_SHELL_EDGE_LEFT,
@@ -189,12 +194,6 @@ attente_echue (gpointer data)
     return G_SOURCE_REMOVE;
 }
 
-/* LE POINTEUR POSE, ET NON LE POINTEUR QUI PASSE.
- *
- * « enter » suffirait a armer la minuterie, mais un curseur qui traverse la
- * bande en diagonale la declencherait aussi. On rearme donc a chaque
- * mouvement DANS la bande : tant que le curseur bouge, le compte repart de
- * zero, et il ne s'acheve que s'il s'immobilise contre le bord. */
 /* La distance au bord de l'ecran, depuis les coordonnees de la lisiere :
  * celle de gauche a son bord en x = 0, celle de droite a l'autre bout. */
 static double
@@ -203,6 +202,12 @@ au_bord (const Cote *c, double x)
     return c->sens > 0 ? x : BANDE_PX - x;
 }
 
+/* LE POINTEUR POSE, ET NON LE POINTEUR QUI PASSE.
+ *
+ * « enter » suffirait a armer la minuterie, mais un curseur qui traverse la
+ * bande en diagonale la declencherait aussi. On rearme donc a chaque
+ * mouvement DANS la bande : tant que le curseur bouge, le compte repart de
+ * zero, et il ne s'acheve que s'il s'immobilise contre le bord. */
 static void
 on_bande_entree (GtkEventControllerMotion *ctrl, double x, double y, gpointer d)
 {
@@ -230,8 +235,83 @@ on_bande_sortie (GtkEventControllerMotion *ctrl, gpointer d)
     attente_annuler (d);
 }
 
-/* Le glisser du doigt : vers l'interieur de l'ecran, depuis le bord. Il part
- * d'OU QU'IL SOIT dans la lisiere -- c'est tout l'objet de ses 24 px. */
+/* TOUS LES CONTACTS, ET PAS SEULEMENT LE PREMIER.
+ *
+ * GtkGestureDrag est un GtkGestureSingle : il ne suit QU'UNE suite de
+ * contacts a la fois. Le premier doigt pose sur la lisiere prend le geste, et
+ * tout contact qui commence pendant qu'il dure est ignore -- meme apres que
+ * le premier a ete leve.
+ *
+ * Or un glisser venu du cadre n'arrive pas toujours seul. La main qui entre
+ * par le bord frole le chassis, et la dalle rapporte volontiers un contact
+ * fugace avant l'index : ce fantome prend le geste, l'index est ignore, et le
+ * volet ne sort pas. Un coup sur deux, sans rien qui le distingue des autres
+ * pour celui qui le fait.
+ *
+ * On suit donc les suites de contacts SOI-MEME, par le controleur brut : on
+ * retient l'abscisse de chaque debut, et le premier qui parcourt le seuil
+ * vers l'interieur ouvre. Le geste GTK reste en place pour le POINTEUR, qui
+ * n'a pas ce probleme -- une souris n'a qu'un contact.
+ *
+ * SUITES_MAX : dix doigts, c'est la limite de la dalle. Au-dela on ecrase le
+ * plus ancien, ce qui ne coute rien : un contact qu'on ne suit plus n'ouvre
+ * rien, il ne casse rien non plus. */
+static gboolean
+on_bande_contact (GtkEventControllerLegacy *ctrl, GdkEvent *ev, gpointer d)
+{
+    (void) ctrl;
+    Cote *c = d;
+    GdkEventType type = gdk_event_get_event_type (ev);
+
+    if (type != GDK_TOUCH_BEGIN && type != GDK_TOUCH_UPDATE &&
+        type != GDK_TOUCH_END   && type != GDK_TOUCH_CANCEL)
+        return GDK_EVENT_PROPAGATE;
+
+    GdkEventSequence *suite = gdk_event_get_event_sequence (ev);
+    double x = 0, y = 0;
+    gdk_event_get_position (ev, &x, &y);
+
+    int libre = -1, vu = -1;
+    for (int i = 0; i < SUITES_MAX; i++) {
+        if (c->contacts[i].suite == suite)      vu = i;
+        else if (c->contacts[i].suite == NULL && libre < 0) libre = i;
+    }
+
+    switch (type) {
+    case GDK_TOUCH_BEGIN:
+        if (vu < 0)
+            vu = (libre >= 0) ? libre : 0;   /* plus de place : on ecrase */
+        c->contacts[vu].suite = suite;
+        c->contacts[vu].x0    = x;
+        break;
+
+    case GDK_TOUCH_UPDATE:
+        /* Un contact qu'on n'a pas vu commencer -- il a pu naitre ailleurs :
+         * on le prend a partir d'ici plutot que de l'ignorer. */
+        if (vu < 0) {
+            vu = (libre >= 0) ? libre : 0;
+            c->contacts[vu].suite = suite;
+            c->contacts[vu].x0    = x;
+            break;
+        }
+        if (!c->ouvert && (x - c->contacts[vu].x0) * c->sens >= SEUIL_PX) {
+            attente_annuler (c);
+            cote_ouvrir (c);
+        }
+        break;
+
+    default:                                   /* END, CANCEL */
+        if (vu >= 0)
+            c->contacts[vu].suite = NULL;
+        break;
+    }
+
+    return GDK_EVENT_PROPAGATE;
+}
+
+/* Le glisser du POINTEUR : vers l'interieur de l'ecran, depuis le bord. Il
+ * part d'OU QU'IL SOIT dans la lisiere -- c'est tout l'objet de ses 24 px.
+ * Le doigt, lui, passe par on_bande_contact(). */
 static void
 on_bande_glisse (GtkGestureDrag *g, double dx, double dy, gpointer d)
 {
@@ -283,6 +363,10 @@ bande_creer (GtkApplication *app, Cote *c)
     GtkGesture *g = gtk_gesture_drag_new ();
     g_signal_connect (g, "drag-update", G_CALLBACK (on_bande_glisse), c);
     gtk_widget_add_controller (bande, GTK_EVENT_CONTROLLER (g));
+
+    GtkEventController *brut = gtk_event_controller_legacy_new ();
+    g_signal_connect (brut, "event", G_CALLBACK (on_bande_contact), c);
+    gtk_widget_add_controller (bande, brut);
 
     GtkEventController *m = gtk_event_controller_motion_new ();
     g_signal_connect (m, "enter",  G_CALLBACK (on_bande_entree),    c);

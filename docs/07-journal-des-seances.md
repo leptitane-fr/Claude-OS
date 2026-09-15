@@ -1683,6 +1683,66 @@ ouvrir — et passe neuf étapes sur neuf.
 
 ---
 
+## 15 septembre 2026, au soir — le fantôme qui volait le geste
+
+« Le glissé du doigt ne fonctionne que très difficilement. J'ai réussi à
+l'ouvrir deux ou trois fois sans trop savoir comment. » Élargir la lisière à
+24 px avait donc amélioré sans régler.
+
+**Deux mécanismes pouvaient produire cette intermittence**, et il fallait les
+séparer : le contact rapporté trop loin du bord (mesurable seulement sur un
+vrai doigt), ou **un contact de trop**.
+
+**Le second était reproductible seul, et c'était lui.** `GtkGestureDrag` est
+un `GtkGestureSingle` : une suite de contacts à la fois. Le premier doigt posé
+prend le geste, et tout contact né pendant qu'il dure est ignoré — même après
+qu'il a été levé. Or la main qui entre par le bord frôle le châssis, et la
+dalle rapporte volontiers un contact fugace avant l'index.
+
+Le doigt virtuel a reçu un mode `fantome` : un contact dans le slot 0 sur la
+lisière, 40 ms plus tard l'index dans le slot 1, qui glisse. Contre la version
+installée :
+
+    glissé seul          → OUVRE
+    glissé + fantôme     → RIEN
+
+Le symptôme, exactement, et à volonté.
+
+**Le correctif :** `tiroir.c` suit les suites de contacts lui-même, par un
+`GtkEventControllerLegacy` — abscisse de chaque début retenue, et le premier
+qui parcourt le seuil vers l'intérieur ouvre. Dix suites suivies, la limite de
+la dalle. Le geste GTK reste pour le **pointeur**, qui n'a qu'un contact.
+
+**Un banc de plus, parce que celui-ci ne peut pas être sans écran :**
+`shell/essais/banc-doigt.sh` joue neuf gestes au doigt sur la session en
+cours — depuis le cadre, à mi-lisière, au bout, hors lisière, à rebours, une
+tape sans trajet, et le fantôme — relance la barre en mode bavard pour lire
+ses transitions, puis la remet comme elle était. Neuf sur neuf contre le
+binaire installé. Le cas « fantôme » échoue sur toute version antérieure :
+c'est ce qui en fait un banc et non une démonstration.
+
+**Ce qui n'est PAS encore mesuré**, et qui reste la seconde explication
+possible : où la dalle rapporte le premier contact d'un vrai glissé. Deux
+écoutes de la sonde (`essais/sonde-contacts.py`, 3 min puis 15 min) se sont
+terminées sur zéro contact — l'écran n'a pas été touché pendant ces
+fenêtres. La sonde, elle, est éprouvée : protocole B à slots confirmé sur le
+Goodix, et capture vérifiée contre le doigt virtuel. Elle attend une main.
+
+**Trois pièges d'outillage payés dans la séance**, tous du même genre — le
+banc qui se saborde :
+
+- `claude-os-root` **ne transmet pas l'environnement** : la sonde visait le
+  Goodix au lieu du périphérique demandé par variable, et rendait un fichier
+  vide sans rien dire. La cible est passée en argument.
+- `pkill -f claude-os-status` **tue le shell qui porte ces mots** dans sa
+  propre ligne de commande. Deux essais interrompus en plein milieu, code 144.
+  `ps -eo pid,args | awk '$2 ~ /claude-os-status$/'` ne prend que le binaire.
+- Une lecture bloquante sur `/dev/input/event*` **ne se réveille jamais** pour
+  constater que son temps est écoulé : `select` avec délai, sans quoi une
+  écoute sans contact ne rend jamais la main.
+
+---
+
 ## Ce qui reste à faire — au 10 septembre 2026
 
 Par ordre d'importance.

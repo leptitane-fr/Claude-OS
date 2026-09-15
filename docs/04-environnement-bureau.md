@@ -272,6 +272,24 @@ clic dans les **24 premiers pixels** de gauche et de droite — 3,9 mm sur cette
 dalle, qui fait 310 mm pour 1920 px. C'est le prix du geste, et il se rend en
 changeant une ligne (`BANDE_PX`).
 
+**TOUS LES CONTACTS SONT SUIVIS, ET PAS SEULEMENT LE PREMIER.** `GtkGestureDrag`
+est un `GtkGestureSingle` : il ne suit qu'une suite de contacts à la fois, et
+tout contact né pendant qu'une autre dure est ignoré — même après que la
+première a été levée. Or un glissé venu du cadre n'arrive pas toujours seul :
+la main qui entre par le bord frôle le châssis, et la dalle rapporte volontiers
+un contact fugace avant l'index. Ce fantôme prenait le geste, l'index était
+ignoré, et le volet ne sortait pas — **un coup sur deux, sans rien qui le
+distingue pour celui qui le fait**. C'est exactement le symptôme rapporté le
+15 septembre 2026 au soir : « ça ne s'ouvre que très difficilement, deux ou
+trois fois sans savoir comment ».
+
+`tiroir.c` suit donc les suites de contacts lui-même, par un
+`GtkEventControllerLegacy` : il retient l'abscisse de chaque début, et le
+premier qui parcourt le seuil vers l'intérieur ouvre. Le geste GTK reste en
+place pour le **pointeur**, qui n'a pas ce problème — une souris n'a qu'un
+contact. Reproduit et corrigé au banc : `shell/essais/banc-doigt.sh`, cas
+« fantôme puis glissé », qui échoue sur toute version antérieure.
+
 **L'ouverture au pointeur posé, elle, reste bornée à 10 px** (`POSE_PX`) : une
 souris immobilisée à 20 px du cadre — sur la bordure d'une fenêtre — ne doit
 pas faire sortir un volet au bout d'une seconde. Le doigt est imprécis, le
