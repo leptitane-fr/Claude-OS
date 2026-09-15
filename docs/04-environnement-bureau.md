@@ -716,7 +716,7 @@ aucune erreur : les fenêtres redeviennent simplement claires.
 | 8 | Fenêtres maximisées **sous** le dock | fait, et réglable |
 | 9 | Panneau de réglages d'affichage | fait — thème, police, icônes, fond d'écran, dock |
 | 10 | Déposer icônes et dossiers sur le bureau | **non fait** — voir ci-dessous |
-| 11 | Google Drive et OneDrive dans le gestionnaire | reporté, prévu |
+| 11 | Google Drive et OneDrive dans le gestionnaire | **Drive fait** le 15 septembre 2026 — section « Nuage » du volet, voir [`docs/13`](13-nuage.md). OneDrive écrit, jamais monté. |
 | 12 | Écran tactile fonctionnel | fait — natif sous Wayland, sans configuration |
 
 ### Les deux points ouverts
@@ -727,10 +727,12 @@ gestionnaire de bureau. Le faire demande d'ajouter au fond la gestion d'une
 grille d'icônes, du `~/Bureau`, du glisser-déposer et du clic droit —
 c'est-à-dire un septième programme. Reporté, pas oublié.
 
-**Point 11 — le nuage.** Le volet du gestionnaire de fichiers est déjà découpé
-en sections ; il n'y aura qu'à en déclarer une de plus, alimentée par la
-configuration de rclone. Rien ne s'affichera tant que rien n'est configuré :
-une entrée qui ne mène nulle part serait pire que son absence.
+**Point 11 — le nuage.** *Fait pour Google Drive le 15 septembre 2026.* La
+section « Nuage » a été déclarée comme prévu, et rien ne s'affiche tant
+qu'aucun compte n'est connecté — une entrée qui ne mène nulle part serait
+pire que son absence. Reste OneDrive, dont la connexion bute sur Microsoft et
+non sur ce code, et qui n'a **jamais été monté**. Détail dans
+[`docs/13`](13-nuage.md).
 
 ### Les décorations ont changé de camp
 

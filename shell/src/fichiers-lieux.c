@@ -1,4 +1,5 @@
 #include "fichiers-lieux.h"
+#include "nuage.h"
 #include "reseau.h"
 
 #include <string.h>
@@ -14,6 +15,10 @@ typedef struct {
 
     /* Lecteurs reseau declares, relus a chaque reconstruction. */
     GPtrArray       *lecteurs;     /* Lecteur*                              */
+
+    /* Lecteurs nuage, relus de meme. Liste separee : ils n'ont ni serveur ni
+     * mot de passe, et ne passent pas par le guichet root -- voir nuage.h. */
+    GPtrArray       *nuages;       /* LecteurNuage*                         */
     /* Identifiants des lecteurs dont la connexion est en cours. Une
      * connexion peut durer le delai TCP complet quand le serveur est
      * eteint : sans cette marque, la ligne resterait muette et l'on
@@ -67,6 +72,7 @@ favoris_ecrire (Lieux *L)
 /* ------------------------------------------------------------------------- */
 static void reconstruire (Lieux *L);
 static void on_lecteur_active (Lieux *L, const char *id);
+static void on_nuage_active (Lieux *L, const char *id);
 
 static void
 on_ligne_activee (GtkListBox *box, GtkListBoxRow *row, gpointer data)
@@ -91,8 +97,15 @@ on_ligne_activee (GtkListBox *box, GtkListBoxRow *row, gpointer data)
     /* Un lecteur reseau declare mais pas connecte : meme geste, meme
      * attente. Cliquer dessus le connecte, et la navigation suit. */
     const char *id = g_object_get_data (G_OBJECT (row), "lecteur-id");
-    if (id != NULL)
+    if (id != NULL) {
         on_lecteur_active (L, id);
+        return;
+    }
+
+    /* Un lecteur nuage declare mais pas monte : meme geste, meme attente. */
+    const char *nid = g_object_get_data (G_OBJECT (row), "nuage-id");
+    if (nid != NULL)
+        on_nuage_active (L, nid);
 }
 
 static void
@@ -513,6 +526,236 @@ entree_lecteur (Lieux *L, const Lecteur *l)
     return row;
 }
 
+/* -------------------------------------------------------------------------
+ * Les lecteurs nuage
+ *
+ * Meme grammaire que les lecteurs reseau juste au-dessus : la ligne est la
+ * quel que soit l'etat, le clic connecte, le sablier dit l'attente. Un
+ * lecteur qui n'apparaitrait QUE monte obligerait a se souvenir qu'il existe
+ * pour penser a le monter.
+ *
+ * Ce qui change : aucun mot de passe a demander -- le compte a ete connecte
+ * une fois pour toutes par OAuth, et le jeton vit dans la configuration
+ * chiffree de rclone. Il n'y a donc pas d'equivalent de
+ * demander_mot_de_passe() ici, et c'est voulu : rien a saisir.
+ * ------------------------------------------------------------------------- */
+
+static void
+nuages_relire (Lieux *L)
+{
+    g_clear_pointer (&L->nuages, g_ptr_array_unref);
+    L->nuages = nuage_charger ();
+}
+
+static LecteurNuage *
+nuage_par_id (Lieux *L, const char *id)
+{
+    for (guint i = 0; L->nuages != NULL && i < L->nuages->len; i++) {
+        LecteurNuage *l = g_ptr_array_index (L->nuages, i);
+        if (g_strcmp0 (l->id, id) == 0)
+            return l;
+    }
+    return NULL;
+}
+
+/* Les identifiants de lecteurs nuage et de lecteurs reseau vivent dans la
+ * MEME table « en_cours ». Un prefixe les separe : deux lecteurs qu'on
+ * aurait nommes pareil se masqueraient autrement l'un l'autre, et le
+ * sablier de l'un s'afficherait sur la ligne de l'autre. */
+static char *
+cle_en_cours (const char *id)
+{
+    return g_strconcat ("nuage:", id, NULL);
+}
+
+static gboolean
+nuage_en_route (Lieux *L, const char *id)
+{
+    g_autofree char *cle = cle_en_cours (id);
+    return g_hash_table_contains (L->en_cours, cle);
+}
+
+static void
+on_nuage_fini (const LecteurNuage *l, GError *erreur, gpointer data)
+{
+    Attente *a = data;
+    Lieux   *L = a->L;
+
+    g_autofree char *cle = cle_en_cours (a->id);
+    g_hash_table_remove (L->en_cours, cle);
+
+    if (erreur != NULL) {
+        GtkAlertDialog *d = gtk_alert_dialog_new ("Connexion impossible à « %s »", l->nom);
+        gtk_alert_dialog_set_detail (d, erreur->message);
+        gtk_alert_dialog_show (d, fenetre_de (L));
+        g_object_unref (d);
+        reconstruire (L);
+        attente_free (a);
+        return;
+    }
+
+    /* Reconstruire D'ABORD, naviguer ENSUITE : dans l'autre ordre, on lirait
+     * le point de montage depuis une entree que reconstruire() vient de
+     * liberer. Le piege a coute trois usages apres liberation du cote des
+     * lecteurs reseau (docs/08) ; il est le meme ici. */
+    gboolean naviguer = a->naviguer;
+    g_autofree char *id = g_strdup (a->id);
+    attente_free (a);
+    reconstruire (L);
+
+    if (naviguer) {
+        const LecteurNuage *frais = nuage_par_id (L, id);
+        if (frais != NULL && nuage_est_connecte (frais)) {
+            g_autofree char *point = nuage_point_montage (frais);
+            g_autoptr(GFile) f = g_file_new_for_path (point);
+            L->nav (f, L->data);
+        }
+    }
+}
+
+static void
+on_nuage_deconnecte (const LecteurNuage *l, GError *erreur, gpointer data)
+{
+    Attente *a = data;
+
+    g_autofree char *cle = cle_en_cours (a->id);
+    g_hash_table_remove (a->L->en_cours, cle);
+
+    if (erreur != NULL) {
+        GtkAlertDialog *d = gtk_alert_dialog_new ("Déconnexion impossible de « %s »", l->nom);
+        gtk_alert_dialog_set_detail (d, erreur->message);
+        gtk_alert_dialog_show (d, fenetre_de (a->L));
+        g_object_unref (d);
+    }
+    reconstruire (a->L);
+    attente_free (a);
+}
+
+static void
+on_nuage_deconnecter (GtkButton *b, gpointer data)
+{
+    Lieux *L = data;
+    const char *id = g_object_get_data (G_OBJECT (b), "nuage-id");
+    const LecteurNuage *l = nuage_par_id (L, id);
+
+    if (l == NULL || nuage_en_route (L, id))
+        return;
+
+    Attente *a = g_new0 (Attente, 1);
+    a->L  = L;
+    a->id = g_strdup (id);
+
+    g_hash_table_add (L->en_cours, cle_en_cours (id));
+    nuage_deconnecter (l, on_nuage_deconnecte, a);
+}
+
+static void
+on_nuage_active (Lieux *L, const char *id)
+{
+    const LecteurNuage *l = nuage_par_id (L, id);
+
+    if (l == NULL || nuage_en_route (L, id))
+        return;
+
+    if (nuage_est_connecte (l)) {
+        g_autofree char *point = nuage_point_montage (l);
+        g_autoptr(GFile) f = g_file_new_for_path (point);
+        L->nav (f, L->data);
+        return;
+    }
+
+    /* rclone absent : le dire, plutot que de laisser remonter un « fichier
+     * introuvable » que rien ne rattache au nuage. */
+    if (!nuage_outil_present ()) {
+        GtkAlertDialog *d = gtk_alert_dialog_new ("« %s » ne peut pas être connecté", l->nom);
+        gtk_alert_dialog_set_detail (d, "rclone n'est pas installé sur cette machine.");
+        gtk_alert_dialog_show (d, fenetre_de (L));
+        g_object_unref (d);
+        return;
+    }
+
+    Attente *a = g_new0 (Attente, 1);
+    a->L        = L;
+    a->id       = g_strdup (id);
+    a->naviguer = TRUE;
+
+    g_hash_table_add (L->en_cours, cle_en_cours (id));
+    nuage_connecter (l, on_nuage_fini, a);
+    reconstruire (L);
+}
+
+/* Une ligne de lecteur nuage. */
+static GtkWidget *
+entree_nuage (Lieux *L, const LecteurNuage *l)
+{
+    gboolean connecte = nuage_est_connecte (l);
+    gboolean en_route = nuage_en_route (L, l->id);
+
+    GtkWidget *ligne = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+
+    GtkWidget *img;
+    if (en_route) {
+        img = gtk_spinner_new ();
+        gtk_spinner_set_spinning (GTK_SPINNER (img), TRUE);
+        gtk_widget_set_size_request (img, 16, 16);
+    } else {
+        /* L'icone du fournisseur d'abord, puis deux replis. Un nom d'icone
+         * absent du theme ne provoque RIEN : GTK descend dans Papirus et
+         * affiche autre chose -- d'ou les replis explicites (voir CLAUDE.md,
+         * « un nom d'icone absent du theme ne provoque rien »). */
+        g_autoptr(GIcon) ic = g_themed_icon_new (nuage_fournisseur_icone (l->fournisseur));
+        g_themed_icon_append_name (G_THEMED_ICON (ic),
+                                   connecte ? "folder-remote" : "weather-overcast");
+        g_themed_icon_append_name (G_THEMED_ICON (ic), "network-server");
+        img = gtk_image_new_from_gicon (ic);
+        gtk_image_set_pixel_size (GTK_IMAGE (img), 16);
+    }
+    gtk_widget_add_css_class (img, "lieux-icone");
+
+    GtkWidget *lbl = gtk_label_new (l->nom);
+    gtk_widget_add_css_class (lbl, "lieux-nom");
+    gtk_label_set_ellipsize (GTK_LABEL (lbl), PANGO_ELLIPSIZE_END);
+    gtk_widget_set_halign (lbl, GTK_ALIGN_START);
+    gtk_widget_set_hexpand (lbl, TRUE);
+
+    gtk_box_append (GTK_BOX (ligne), img);
+    gtk_box_append (GTK_BOX (ligne), lbl);
+
+    if (connecte && !en_route) {
+        GtkWidget *dc = gtk_button_new_from_icon_name ("media-eject-symbolic");
+        gtk_widget_add_css_class (dc, "lieux-ejecter");
+        gtk_widget_set_valign (dc, GTK_ALIGN_CENTER);
+        gtk_widget_set_tooltip_text (dc, "Se déconnecter");
+        g_object_set_data_full (G_OBJECT (dc), "nuage-id", g_strdup (l->id), g_free);
+        g_signal_connect (dc, "clicked", G_CALLBACK (on_nuage_deconnecter), L);
+        gtk_box_append (GTK_BOX (ligne), dc);
+    }
+
+    GtkWidget *row = gtk_list_box_row_new ();
+    gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), ligne);
+    gtk_widget_add_css_class (row, "lieux-ligne");
+    if (!connecte)
+        gtk_widget_add_css_class (row, "lieux-hors-ligne");
+
+    /* Connecte, la ligne porte son dossier : le surlignage et la navigation
+     * marchent alors comme pour un dossier local, sans cas particulier. */
+    if (connecte) {
+        g_autofree char *point = nuage_point_montage (l);
+        g_autoptr(GFile) f = g_file_new_for_path (point);
+        g_object_set_data_full (G_OBJECT (row), "fichier", g_object_ref (f), g_object_unref);
+    }
+    g_object_set_data_full (G_OBJECT (row), "nuage-id", g_strdup (l->id), g_free);
+
+    g_autofree char *info = g_strdup_printf (
+        "%s\n%s%s",
+        nuage_fournisseur_nom (l->fournisseur),
+        (l->compte != NULL && *l->compte != '\0') ? l->compte : "",
+        connecte ? "\nConnecté" : "\nCliquer pour se connecter");
+    gtk_widget_set_tooltip_text (row, info);
+
+    return row;
+}
+
 /* ------------------------------------------------------------------------- */
 static GtkWidget *
 entete (const char *titre)
@@ -713,10 +956,17 @@ reconstruire (Lieux *L)
     }
 
     /* --- le nuage --- */
-    /* Google Drive et OneDrive viendront ici, lus depuis la configuration de
-     * rclone : une section de plus, construite comme les autres. Rien n'est
-     * affiche tant que rien n'est configure -- une entree qui ne mene nulle
+    /* Une section de plus, construite comme les autres. Rien n'est affiche
+     * tant qu'aucun compte n'est connecte : une entree qui ne mene nulle
      * part serait pire que son absence. */
+    nuages_relire (L);
+
+    if (L->nuages->len > 0) {
+        gtk_list_box_append (GTK_LIST_BOX (L->liste), entete ("Nuage"));
+        for (guint i = 0; i < L->nuages->len; i++)
+            gtk_list_box_append (GTK_LIST_BOX (L->liste),
+                                 entree_nuage (L, g_ptr_array_index (L->nuages, i)));
+    }
 
     fichiers_lieux_suivre (L->boite, L->courant);
 }
@@ -809,12 +1059,18 @@ lieux_free (gpointer data)
     g_clear_object (&L->courant);
     g_ptr_array_unref (L->favoris);
     g_clear_pointer (&L->lecteurs, g_ptr_array_unref);
+    g_clear_pointer (&L->nuages, g_ptr_array_unref);
     g_clear_pointer (&L->en_cours, g_hash_table_unref);
 
     /* Le moniteur des montages est un singleton qui survit au volet. Sans
      * ce debranchement, un partage demonte apres la fermeture de la fenetre
-     * appellerait reconstruire() sur un Lieux libere. */
+     * appellerait reconstruire() sur un Lieux libere.
+     *
+     * Les deux modules s'abonnent au MEME singleton GIO ; se debrancher deux
+     * fois n'est pas une precaution inutile mais une necessite : chaque
+     * abonnement porte son propre signal. */
     reseau_ne_plus_surveiller (L);
+    nuage_ne_plus_surveiller (L);
     g_free (L);
 }
 
@@ -827,6 +1083,7 @@ fichiers_lieux_new (LieuxNavFunc nav, gpointer data)
     L->favoris = g_ptr_array_new_with_free_func (g_free);
     L->en_cours = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
     L->lecteurs = reseau_charger ();
+    L->nuages   = nuage_charger ();
     favoris_lire (L);
 
     L->liste = gtk_list_box_new ();
@@ -862,6 +1119,7 @@ fichiers_lieux_new (LieuxNavFunc nav, gpointer data)
      * tombe, passerait donc inapercu. D'ou ce second moniteur, qui lit la
      * notification du noyau sur la table des montages. */
     reseau_surveiller ((ReseauChangeFunc) reconstruire, L);
+    nuage_surveiller  ((NuageChangeFunc)  reconstruire, L);
 
     GSimpleActionGroup *groupe = g_simple_action_group_new ();
     const GActionEntry actions[] = {

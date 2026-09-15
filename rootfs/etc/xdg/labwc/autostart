@@ -52,3 +52,13 @@ lancer claude-os-status
 # le délai TCP complet ; le placer plus haut ferait attendre le dock derrière
 # un NAS débranché. Ici, il ne retarde rien : le bureau est déjà à l'écran.
 lancer claude-os-lecteurs-auto
+
+# Les lecteurs nuage marqués « à l'ouverture de session ».
+#
+# APRÈS les lecteurs réseau, et pour une raison de plus : la configuration de
+# rclone est chiffrée, et sa phrase vit au trousseau que PAM déverrouille à
+# l'ouverture de session. Rien ne garantit qu'il ait fini ici ; un échec
+# n'est donc pas définitif, il est écrit dans shell.log et un clic dans
+# Fichiers monte le lecteur. On ne boucle pas là-dessus : interroger le
+# trousseau toutes les secondes serait la scrutation que ce projet refuse.
+lancer claude-os-nuage-auto

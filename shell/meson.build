@@ -199,7 +199,7 @@ gdkpixbuf = dependency('gdk-pixbuf-2.0')
 
 executable('claude-os-fichiers',
   'src/fichiers.c', 'src/fichiers-item.c', 'src/fichiers-ops.c',
-  'src/fichiers-lieux.c', 'src/fichiers-apercu.c', 'src/reseau.c', commun,
+  'src/fichiers-lieux.c', 'src/fichiers-apercu.c', 'src/reseau.c', 'src/nuage.c', commun,
   dependencies : [gtk, layershell, giounix, pangocairo, secret, gdkpixbuf],
   install : true)
 
@@ -220,6 +220,22 @@ executable('claude-os-reglages',
 executable('claude-os-lecteurs-auto',
   'src/lecteurs-auto.c', 'src/reseau.c',
   dependencies : [giounix, secret],
+  install : true)
+
+# Montage des lecteurs nuage a l'ouverture de session. Sans GTK, pour la
+# raison donnee en tete du fichier.
+executable('claude-os-nuage-auto',
+  'src/nuage-auto.c', 'src/nuage.c',
+  dependencies : [giounix],
+  install : true)
+
+# La phrase qui ouvre la configuration chiffree de rclone. Ni GTK ni GIO :
+# libsecret et la libc suffisent. Voir la tete du fichier pour la raison
+# d'etre de ce detour -- un jeton de rafraichissement vaut un mot de passe,
+# et ne doit donc pas dormir en clair dans ~/.config.
+executable('claude-os-nuage-phrase',
+  'src/nuage-phrase.c',
+  dependencies : [glib, secret],
   install : true)
 
 # LE VERROU N'EST PAS UNE APPLICATION GTK, et c'est explique en tete de

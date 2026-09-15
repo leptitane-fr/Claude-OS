@@ -1,0 +1,193 @@
+#!/bin/sh
+# =========================================================================
+# claude-os-nuage — monte et démonte les lecteurs nuage déclarés
+#
+# CE PROGRAMME NE DEMANDE AUCUN PRIVILÈGE, ET C'EST LA DIFFÉRENCE
+#
+# Son jumeau claude-os-lecteur passe par le guichet root : monter du CIFS ou
+# du NFS est une opération du noyau, réservée à root. Ici, non. rclone monte
+# par FUSE, sous le compte de l'utilisateur, dans un répertoire qui lui
+# appartient déjà. Faire intervenir le guichet serait demander des droits
+# dont on n'a pas l'usage — et les demander pour rien est la meilleure façon
+# de s'habituer à les demander.
+#
+# D'où le point de montage : /run/user/<uid>/claude-os/nuage/<id>, et non
+# /run/claude-os/reseau/<id>. C'est un tmpfs qui appartient à l'utilisateur,
+# effacé à la fermeture de session — aucun répertoire mort ne s'accumule, et
+# root n'a rien à y faire.
+#
+# LA CONFIGURATION DE rclone EST CHIFFRÉE
+#
+# Elle contient les jetons de rafraîchissement, qui rouvrent les comptes
+# indéfiniment : ils valent des mots de passe. La phrase qui l'ouvre vit au
+# trousseau et arrive par claude-os-nuage-phrase, que rclone exécute
+# lui-même. Elle ne passe ni par « ps » ni par /proc/<pid>/environ.
+#
+# Usage :  claude-os-nuage monter   <id>
+#          claude-os-nuage demonter <id>
+#          claude-os-nuage etat     <id>
+# =========================================================================
+set -eu
+
+mourir () { printf 'claude-os-nuage : %s\n' "$1" >&2; exit 1; }
+
+[ "$(id -u)" -ne 0 ] || mourir "ne doit PAS être lancé en root : rclone monte sous le compte de l'utilisateur"
+
+VERBE="${1:-}"
+ID="${2:-}"
+
+[ -n "$VERBE" ] || mourir "verbe manquant (monter, demonter, etat)"
+[ -n "$ID" ]    || mourir "identifiant de lecteur manquant"
+
+# L'identifiant devient un nom de répertoire ET une section de la
+# configuration de rclone. Le restreindre ici garantit qu'aucun « ../ » ne
+# fait sortir le point de montage de son arborescence — la même précaution
+# que claude-os-lecteur, pour la même raison, même sans root.
+case "$ID" in
+	*[!A-Za-z0-9._-]*|''|.|..|-*) mourir "identifiant invalide : « $ID »" ;;
+esac
+
+BASE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/claude-os/nuage"
+POINT="$BASE/$ID"
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/claude-os/nuage"
+JOURNAL="${XDG_STATE_HOME:-$HOME/.local/state}/claude-os/nuage.log"
+
+# Lit une clé dans la section [<id>]. En awk, et jamais évalué par le shell :
+# une valeur qui contiendrait « ; rm -rf / » reste une chaîne de caractères.
+# Même choix qu'en tête de claude-os-lecteur.
+lire () {
+	[ -f "$CONF" ] || return 0
+	awk -v section="$ID" -v cle="$1" '
+		/^[ \t]*\[/ {
+			ligne = $0
+			sub(/^[ \t]*\[/, "", ligne); sub(/\][ \t]*$/, "", ligne)
+			dedans = (ligne == section); next
+		}
+		dedans && $0 ~ "^[ \t]*" cle "[ \t]*=" {
+			sub("^[ \t]*" cle "[ \t]*=[ \t]*", "")
+			sub(/[ \t]+$/, "")
+			print; exit
+		}
+	' "$CONF"
+}
+
+etat () {
+	if findmnt -rno TARGET "$POINT" >/dev/null 2>&1; then
+		echo connecte
+	else
+		echo deconnecte
+	fi
+}
+
+if [ "$VERBE" = etat ]; then
+	etat; exit 0
+fi
+
+# -------------------------------------------------------------- demonter
+if [ "$VERBE" = demonter ]; then
+	[ "$(etat)" = connecte ] || { echo "déjà déconnecté"; exit 0; }
+
+	# Deux temps, pour la raison déjà donnée dans claude-os-lecteur : un
+	# serveur devenu injoignable — le Wi-Fi coupé — fait bloquer le
+	# démontage propre jusqu'au bout du délai réseau, et l'utilisateur voit
+	# son gestionnaire de fichiers figé. « -z » détache sans attendre.
+	#
+	# rclone s'arrête de lui-même quand sa surface FUSE disparaît : il n'y a
+	# aucun processus à tuer ici, et surtout pas par « pkill -f », qui se
+	# prendrait lui-même pour cible quand le motif figure dans sa propre
+	# ligne de commande (piège payé, voir docs/12).
+	if ! fusermount3 -u "$POINT" 2>/dev/null; then
+		fusermount3 -z -u "$POINT" || mourir "démontage impossible de $POINT"
+	fi
+	rmdir "$POINT" 2>/dev/null || true
+	exit 0
+fi
+
+[ "$VERBE" = monter ] || mourir "verbe inconnu : « $VERBE »"
+
+# ---------------------------------------------------------------- monter
+[ "$(etat)" = deconnecte ] || { echo "déjà connecté"; exit 0; }
+[ -f "$CONF" ] || mourir "aucune configuration : $CONF"
+
+FOURNISSEUR="$(lire fournisseur)"
+[ -n "$FOURNISSEUR" ] || mourir "lecteur « $ID » absent de $CONF"
+
+command -v rclone >/dev/null 2>&1 || mourir "rclone n'est pas installé"
+
+mkdir -p "$POINT" "$(dirname "$JOURNAL")"
+
+# Les options communes, toutes mesurées sur MADOO le 15 septembre 2026.
+#
+# « --vfs-cache-mode writes » n'est pas un réglage de confort : sans lui, un
+# fichier ouvert en écriture non séquentielle est refusé, et la moitié des
+# applications — dont les boîtes « Enregistrer sous » — écrivent ainsi. Le
+# nuage cesserait d'être un dossier ordinaire, ce qui est tout l'objet.
+OPT="--vfs-cache-mode writes --dir-cache-time 30s --poll-interval 15s"
+OPT="$OPT --file-perms 0644 --dir-perms 0755"
+
+case "$FOURNISSEUR" in
+	drive)
+		# Sans cela, les Google Docs natifs n'ont AUCUN contenu
+		# téléchargeable : ils apparaîtraient dans la liste et seraient
+		# vides à l'ouverture. Exportés, ils descendent en .docx — mesuré.
+		OPT="$OPT --drive-export-formats docx,xlsx,pptx,svg"
+		;;
+	onedrive)
+		: ;;
+	*)
+		mourir "fournisseur inconnu : « $FOURNISSEUR »" ;;
+esac
+
+# Le journal, et non /dev/null : l'invariant n°4 du dépôt. Un montage qui
+# échoue doit laisser de quoi dire pourquoi.
+printf '\n=== %s : montage de %s ===\n' "$(date -Iseconds)" "$ID" >> "$JOURNAL"
+
+# Où commence CETTE tentative dans le journal. Sans ce repère, la détection
+# d'échec plus bas relit les lignes des montages précédents et déclare
+# perdue une tentative qui démarre à peine — observé le 15 septembre 2026 :
+# un montage refusé « en 0 s » sur l'erreur d'une tentative vieille d'une
+# minute. Un outil de diagnostic qui ment coûte plus qu'il ne rapporte.
+DEBUT=$(wc -c < "$JOURNAL" 2>/dev/null || echo 0)
+
+# PAS « --daemon », ET C'EST MESURÉ : 34 s contre 5 s sur MADOO le
+# 15 septembre 2026, pour le même montage. Le parent y attend un signal de
+# disponibilité qu'il met une demi-minute à voir, alors que le montage, lui,
+# est utilisable depuis longtemps. On détache donc soi-même, et on attend
+# que le montage APPARAISSE — la seule chose qui nous intéresse, et la seule
+# qui se constate.
+# « --ask-password=false » N'EST PAS UN DÉTAIL. Par défaut, rclone qui
+# n'obtient pas sa phrase la RÉCLAME AU CLAVIER — sur une entrée standard
+# qui, ici, n'existe pas. Il attend alors indéfiniment : ni montage, ni
+# erreur, ni ligne au journal. C'est la panne muette de l'invariant n°4,
+# observée le 15 septembre 2026 sous la forme d'un montage qui ne rendait
+# jamais la main. Refusé, il écrit sa raison et sort.
+setsid rclone --password-command claude-os-nuage-phrase --ask-password=false \
+	mount "$ID:" "$POINT" $OPT >> "$JOURNAL" 2>&1 &
+
+# Soixante secondes au plus. Au-delà, ce n'est plus de la lenteur.
+i=0
+while [ "$i" -lt 120 ]; do
+	[ "$(etat)" = deconnecte ] || exit 0
+
+	# Un échec de rclone ne doit pas coûter une minute d'attente à
+	# l'utilisateur : s'il a renoncé, il l'a écrit, et on le lit tout de
+	# suite. L'invariant n°4 sert ici deux fois — parce que la sortie est
+	# conservée, on peut s'en servir pour abréger.
+	if tail -c "+$((DEBUT + 1))" "$JOURNAL" 2>/dev/null \
+	   | grep -qE "Fatal error|Failed to (create|load|mount)"; then
+		break
+	fi
+	sleep 0.5
+	i=$((i + 1))
+done
+
+# ON NE SUPPRIME PAS LE POINT DE MONTAGE ICI, et c'est un revirement payé.
+# Le nettoyage « pour ne rien laisser derrière soi » coupait l'herbe sous le
+# pied d'un rclone encore en train de démarrer : le répertoire disparaissait
+# entre son lancement et son appel à FUSE, et il mourait sur « mountpoint
+# does not exist » — une panne fabriquée par le remède.
+#
+# Un répertoire vide de plus est sans conséquence : il vit sous
+# $XDG_RUNTIME_DIR, donc il part à la fermeture de session, et l'état d'un
+# lecteur se lit dans findmnt, jamais dans la présence d'un répertoire.
+mourir "montage non établi — voir $JOURNAL"

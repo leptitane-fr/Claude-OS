@@ -1,0 +1,261 @@
+# Les lecteurs nuage
+
+Écrit le 15 septembre 2026, et **vu fonctionner sur MADOO** contre un compte
+Google Drive réel : monté, parcouru, écrit, démonté.
+
+---
+
+## Ce que c'est
+
+Un compte connecté une fois, puis un **dossier ordinaire** dans le volet
+latéral de **Fichiers**, section « Nuage ». Le terminal le voit, Chromium le
+voit, ses boîtes « Enregistrer sous » le voient.
+
+Deux fournisseurs prévus : **Google Drive** et **Microsoft OneDrive**. Au
+15 septembre 2026, **seul Drive est en service** — voir « Ce qui n'est pas
+établi ».
+
+---
+
+## Pourquoi rclone
+
+Le report était inscrit depuis le 8 septembre (`docs/02`, `docs/04` point 11).
+Mesuré avant de s'engager :
+
+| | `gvfs-backends` | `rclone` |
+|---|---|---|
+| Paquets à installer | 43 | **1** |
+| Dépendances | MTP, gphoto2, iOS, codecs | **`libc6` seule** |
+| Poids installé | — | 61 Mo |
+| Qui voit le partage | les applications GIO | **tout le système** |
+| Privilèges au montage | aucun | **aucun** |
+
+Le même raisonnement que pour les lecteurs réseau (`docs/08`), avec une
+conclusion plus nette encore : rclone ne dépend de rien.
+
+---
+
+## Les identifiants OAuth — et le précédent qui obligeait à vérifier
+
+Ce projet a déjà perdu la synchronisation Google de Chromium parce que
+**Google a supprimé l'identifiant OAuth que Debian livrait** : interrogé, il
+répond `deleted_client` (`README.md`, `docs/07`). Rien ne garantissait que
+celui de rclone ait mieux vieilli. Il a donc été interrogé, avant tout
+engagement :
+
+| Identifiant livré par Debian | Réponse au 15 septembre 2026 |
+|---|---|
+| Google `202264815644.apps.googleusercontent.com` | **vivant** — écran de consentement d'une application **vérifiée**, sans avertissement « application non validée » |
+| Microsoft `b15665d9-eda6-4092-8539-0eec376afd59` | **vivant** — page de connexion normale, aucun `AADSTS` |
+
+Le `+dfsg` du paquet Debian **n'a pas retiré ces clés** : elles sont dans le
+binaire, vérifiées par `strings`.
+
+Ce que rclone demande à Google, lu dans la redirection réelle :
+
+```
+scope=https://www.googleapis.com/auth/drive    accès complet aux fichiers
+access_type=offline                            jeton de rafraîchissement durable
+```
+
+**Le rafraîchissement a été éprouvé**, et non supposé : l'expiration a été
+antidatée à 2020 dans la configuration, et rclone a renouvelé le jeton seul
+puis réinscrit une échéance neuve. L'accès ne s'éteindra pas dans l'heure.
+
+### Pourquoi pas une application « Claude OS »
+
+Ce serait mieux : un seul écran de connexion par compte, au nom de la
+distribution, avec des scopes couvrant aussi le courrier, l'agenda et les
+contacts — de quoi servir les fonctionnalités à venir sans reposer d'invite.
+
+**Côté Microsoft, c'est fermé pour un compte personnel.** Mesuré le
+15 septembre 2026 : le portail Entra affiche, à la place du formulaire, une
+erreur bloquante — « la possibilité de créer des applications hors d'un
+répertoire a été déconseillée ». Les trois portes proposées ont chacune un
+prix : créer un annuaire (Microsoft réclame un nom d'entreprise), s'inscrire
+à Azure (vérification par carte bancaire), ou le programme développeur M365
+(locataire de test qui expire — **à écarter** : fonder l'accès permanent d'un
+système d'exploitation sur un locataire temporaire serait fragile).
+
+**Côté Google, l'obstacle est différent** : les scopes restreints (Drive
+complet, Gmail) exigent une vérification Google. Sans elle, l'application
+reste en mode « Test » et, d'après la documentation Google, les jetons de
+rafraîchissement expirent au bout de 7 jours. *Non mesuré ici* — le vérifier
+demanderait d'attendre une semaine.
+
+D'où le choix retenu avec l'utilisateur : **l'identifiant de rclone pour
+Drive**, qui est vérifié par Google et dont les jetons durent. L'architecture
+garde l'identifiant remplaçable par compte : le jour où une application
+propre existe, c'est une ligne de configuration.
+
+**Ce qui est écarté par principe** : se servir de l'application rclone pour
+lire le courrier de l'utilisateur. Techniquement peut-être possible, mais ce
+serait emprunter l'identité d'un tiers auprès de Google et de Microsoft.
+
+---
+
+## Comment cela se range
+
+```
+~/.config/claude-os/nuage             la déclaration — RIEN DE SECRET
+~/.config/rclone/rclone.conf          les jetons, CHIFFRÉ
+trousseau gnome-keyring               la phrase qui ouvre ce fichier
+/run/user/1000/claude-os/nuage/<id>   le point de montage
+/usr/local/bin/claude-os-nuage        monte et démonte — SANS privilège
+/usr/bin/claude-os-nuage-phrase       rend la phrase au seul rclone
+```
+
+### Un jeton de rafraîchissement vaut un mot de passe
+
+Il rouvre le compte indéfiniment, sans mot de passe et sans second facteur.
+La règle du dépôt s'applique donc telle quelle — « le fichier de
+configuration ne contient rien de secret » — et rclone garde ses jetons dans
+**sa** configuration, qu'on chiffre.
+
+La phrase vit au trousseau, et **ne passe ni par la ligne de commande**
+(`ps` la montrerait à tout compte de la machine) **ni par l'environnement**
+(`/proc/<pid>/environ`) : rclone exécute `claude-os-nuage-phrase` et lit sa
+sortie. C'est le raisonnement déjà tenu pour le mot de passe des montages
+CIFS, appliqué au même problème.
+
+Mesures : le déchiffrement coûte **0,33 s** au total, dont 0,19 s pour la
+seule lecture du trousseau en Python — d'où le choix du C, qui la ramène à
+**0,020 s**. Sans la phrase, rclone refuse **explicitement** (« unable to
+decrypt configuration ») : pas d'échec muet.
+
+### Aucun privilège, et c'est la vraie différence avec `docs/08`
+
+Monter du CIFS ou du NFS est une opération du noyau, donc réservée à root :
+`claude-os-lecteur` passe par le guichet. rclone monte par **FUSE**, sous le
+compte de l'utilisateur, dans un répertoire qui lui appartient déjà.
+`claude-os-nuage` **refuse de tourner en root**, et le vérifie à sa première
+ligne. Demander des droits dont on n'a pas l'usage est la meilleure façon de
+s'habituer à les demander.
+
+D'où le point de montage sous `$XDG_RUNTIME_DIR` et non sous `/run`.
+
+---
+
+## Ce qui a été mesuré
+
+| Constat | Valeur |
+|---|---|
+| Compte | Google Drive, 5 Tio, 2,24 Gio utilisés |
+| Racine | 492 entrées |
+| Lecture, écriture, suppression | éprouvées sur le montage réel |
+| Google Docs natifs | 290 exposés en `.docx`, contenu téléchargé (22 659 octets vérifiés) |
+| Mémoire par montage | **53 à 55 Mo** |
+| Connexion | **1 à 2 s** d'ordinaire ; **5 à 35 s** à la première après une pause |
+
+**`--vfs-cache-mode writes` n'est pas un réglage de confort.** Sans lui, un
+fichier ouvert en écriture non séquentielle est refusé — et c'est ainsi
+qu'écrivent la moitié des applications, dont les boîtes « Enregistrer sous ».
+Le nuage cesserait d'être un dossier ordinaire, ce qui est tout l'objet.
+
+**`--drive-export-formats` non plus.** Sans lui, les Google Docs natifs
+apparaissent dans la liste et n'ont aucun contenu téléchargeable.
+
+**La lenteur de la première connexion n'est pas de notre fait** : le montage
+direct a été chronométré à 18,6 s puis 1,6 s et 1,6 s, tandis que le montage
+par `claude-os-nuage-auto` tombait à 1,1 s deux fois de suite. C'est rclone
+qui est lent à rouvrir — jeton à rafraîchir, cache de répertoires vide — puis
+rapide. Le montage se faisant en arrière-plan à l'ouverture de session, cela
+ne retarde rien.
+
+---
+
+## Quatre pièges payés
+
+### 1. `--daemon` coûte une demi-minute pour rien
+
+34 s contre 5 s, pour le même montage. Le parent y attend un signal de
+disponibilité qu'il met longtemps à voir, alors que le montage est utilisable
+depuis longtemps. `claude-os-nuage` détache donc lui-même et attend que le
+montage **apparaisse** — la seule chose qui l'intéresse, et la seule qui se
+constate.
+
+### 2. rclone réclame sa phrase au clavier, et attend indéfiniment
+
+Par défaut, rclone qui n'obtient pas sa phrase la demande sur l'entrée
+standard. Lancé par l'autostart, il n'en a pas : ni montage, ni erreur, ni
+ligne au journal. Un montage qui ne rendait jamais la main — la panne muette
+de l'invariant n°4. **`--ask-password=false`** le fait écrire sa raison et
+sortir.
+
+### 3. Le nettoyage détruisait ce qu'il attendait
+
+« Un montage qui échoue ne doit rien laisser derrière lui » : le `rmdir` de la
+branche d'échec supprimait le point de montage **sous les pieds d'un rclone
+encore en train de démarrer**, qui mourait alors sur `mountpoint does not
+exist`. Une panne fabriquée par son remède. Le répertoire n'est plus
+supprimé : il vit sous `$XDG_RUNTIME_DIR`, donc il part à la fermeture de
+session, et l'état d'un lecteur se lit dans `findmnt`, jamais dans la
+présence d'un répertoire.
+
+### 4. La détection d'échec lisait le passé
+
+`tail -5` sur un journal **cumulatif** attrapait l'erreur de la tentative
+précédente et déclarait perdue une tentative qui démarrait à peine — un
+montage « refusé en 0 s » sur une erreur vieille d'une minute. La position du
+journal est désormais relevée **avant** le lancement, et seule la portion
+ajoutée est lue.
+
+### Et un piège de méthode, payé deux fois dans la même séance
+
+`pkill -f <motif>` **et** `pgrep -f <motif> | kill` se prennent eux-mêmes pour
+cible quand le motif figure dans la ligne de commande du script appelant. Le
+dépôt le documentait déjà pour `pkill` (`docs/12`) ; cela vaut aussi pour
+`pgrep` suivi d'un `kill`. Deux shells tués en séance. Le remède : un motif
+qui ne peut pas se reconnaître, `"rclone .*mount [g]drive:"`.
+
+---
+
+## Les accents perdus — la cause était plus générale qu'on ne croyait
+
+`docs/09` impute les « ? » du journal à l'absence de locale sous systemd. La
+cause est plus large, et a été revue le 15 septembre 2026 : `fr_FR.utf8` est
+bien générée et `LANG=fr_FR.UTF-8` est bien posé dans la session labwc, et
+les accents se perdaient quand même.
+
+**Un programme C n'hérite pas de la locale tout seul** : il faut
+`setlocale()`, et seul `gtk_init()` l'appelle. Un programme **GIO pur** reste
+donc en locale « C », et `g_print`/`g_printerr`, qui transcodent vers elle,
+remplacent tous les accents par des « ? ». `fprintf` écrit les octets tels
+quels.
+
+**Conséquence à traiter, hors de ce chantier :**
+`shell/src/lecteurs-auto.c` porte le même défaut (deux `g_print`) — les
+messages de connexion des lecteurs réseau perdent leurs accents dans
+`shell.log` depuis septembre.
+
+---
+
+## Ce qui n'est PAS établi
+
+Par principe — le même que celui de `docs/07` et `docs/08`.
+
+- **OneDrive n'a jamais été monté.** Le code le prévoit et le chemin est
+  écrit, mais aucun compte Microsoft n'a pu être connecté : la création d'une
+  application Azure est fermée aux comptes personnels (ci-dessus), et
+  l'utilisateur a choisi de reporter. Tant qu'un montage n'a pas eu lieu, ce
+  chemin est *plausible*, pas *prouvé*.
+- **Le montage à l'ouverture de session n'a pas été vu depuis une vraie
+  ouverture de session.** Il a été éprouvé en simulant l'environnement de
+  l'autostart (`env -i`, PATH nu, bus de session) — connecté en 34 s,
+  accents corrects — mais pas encore après une fermeture et une réouverture
+  réelles. Le trousseau, notamment, est déverrouillé par PAM : rien ne
+  garantit encore qu'il ait fini quand l'autostart démarre.
+- **Le clic n'a pas été fait à l'écran.** La section « Nuage » a été vue dans
+  le volet, avec Google Drive et son bouton de déconnexion, et le programme a
+  tourné sous AddressSanitizer sans un signalement. Mais naviguer, se
+  déconnecter et se reconnecter *au doigt* reste à faire.
+- **Aucun panneau de réglages.** Les lecteurs se déclarent à la main dans
+  `~/.config/claude-os/nuage` ; il n'y a ni « Ajouter un compte » ni écran de
+  connexion intégré. La connexion OAuth a été faite en ligne de commande.
+- **Les icônes n'existent pas.** `claude-os-nuage-drive-symbolic` et son
+  équivalent OneDrive sont demandés par le code et absents du thème : GTK
+  descend silencieusement sur les replis. `tools/fabrique-icones.py` reste à
+  compléter — c'est exactement le piège que `CLAUDE.md` décrit.
+
+Une cause plausible n'est pas une cause, et un chemin de code compilé n'est
+pas un chemin de code éprouvé.

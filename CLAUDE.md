@@ -394,6 +394,50 @@ compilation ni à la lecture ; `coredumpctl` a dit où.
 compilés, jamais éprouvés — le NAS ne publie aucun export NFS et son port 22
 est fermé. `docs/08` dit précisément ce qui reste non établi.
 
+### Le nuage — Google Drive
+
+Écrit le 15 septembre 2026, et **vu fonctionner sur MADOO** : compte Google
+connecté, lecteur monté, parcouru, écrit, démonté. Détail complet dans
+[`docs/13`](docs/13-nuage.md).
+
+Une section « Nuage » de plus dans le volet de **Fichiers**, celle que
+`fichiers-lieux.h` annonçait depuis septembre. **rclone : un seul paquet,
+`libc6` pour seule dépendance** — contre 43 paquets pour `gvfs-backends`.
+
+**AUCUN PRIVILÈGE, et c'est la différence avec les lecteurs réseau.** Monter
+du CIFS est une opération du noyau, donc réservée à root ; rclone monte par
+FUSE sous le compte de l'utilisateur. `claude-os-nuage` **refuse de tourner
+en root** et le vérifie à sa première ligne. D'où le point de montage sous
+`$XDG_RUNTIME_DIR`, et non sous `/run`.
+
+**UN JETON DE RAFRAÎCHISSEMENT VAUT UN MOT DE PASSE** — il rouvre le compte
+indéfiniment, sans second facteur. La configuration de rclone est donc
+**chiffrée**, et sa phrase vit au trousseau : elle ne passe ni par `ps` ni
+par `/proc/<pid>/environ`, rclone exécute `claude-os-nuage-phrase` et lit sa
+sortie. Coût mesuré : 0,020 s en C, contre 0,19 s pour la même chose en
+Python.
+
+**Les identifiants OAuth de Debian ont été interrogés AVANT de s'engager**,
+parce que le précédent l'imposait : celui de Chromium répond `deleted_client`
+depuis que Google l'a supprimé. Ceux de rclone sont **vivants**, et Google
+présente l'application comme **vérifiée**. Le rafraîchissement du jeton a été
+éprouvé en antidatant son échéance, pas supposé.
+
+**Quatre pièges payés, tous muets :** `--daemon` coûte 34 s au lieu de 5 ;
+rclone privé de sa phrase la **réclame au clavier** et attend indéfiniment
+(`--ask-password=false`) ; le `rmdir` de nettoyage **supprimait le point de
+montage sous un rclone qui démarrait** ; et la détection d'échec lisait,
+dans un journal cumulatif, l'erreur de la tentative précédente.
+
+**ET UNE CORRECTION À `docs/09` :** les accents perdus dans les journaux ne
+viennent pas de « systemd n'a pas de locale ». Un programme C **n'hérite pas
+de la locale tout seul** — il faut `setlocale()`, et seul `gtk_init()`
+l'appelle. Tout programme **GIO pur** reste en locale « C », et
+`g_print`/`g_printerr` y transcodent : accents remplacés par des « ? », même
+avec `LANG=fr_FR.UTF-8` posé et `fr_FR.utf8` générée. `fprintf` écrit les
+octets tels quels. **`shell/src/lecteurs-auto.c` porte le même défaut et
+reste à corriger.**
+
 ### L'écran de connexion — thème, code PIN, clavier tactile
 
 Écrit le 9 septembre 2026. Détail complet dans
@@ -740,7 +784,8 @@ sur lui — sur un conteneur.
 | **Mode tablette** | **En service** — détection, rotation paysage/chevalet, clavier console, disposition organique CALCULÉE (fréquences du français + zone du pouce mesurée + loi de Fitts, `shell/essais/disposition-pouce.py`), suggestions avec contexte et apprentissage. Reste à l'usage : la colonne DROITE n'a pas été retravaillée, la vitesse de frappe réelle n'est pas constatée, le stylet écran tourné et les boutons de barre de titre en chevalet ne sont pas établis. Voir `docs/12`. |
 | **Zone morte tactile** | Apparue le 13 septembre, **disparue le 14 sans intervention** : intermittente, cause inconnue. Rien n'a été inscrit en dur dans le clavier. Si elle revient : `claude-os-root python3 tools/diag-tactile.py coins`, puis `carte`. |
 | **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
-| Reports | rclone (Drive, OneDrive), icônes sur le bureau. |
+| **Le nuage** | **Google Drive EN SERVICE depuis le 15 septembre 2026** — monté, parcouru, écrit. OneDrive écrit mais **jamais monté** : la création d'une application Azure est fermée aux comptes Microsoft personnels, et le report est un choix de l'utilisateur. Ni panneau de réglages, ni icônes, ni clic éprouvé à l'écran. Voir [`docs/13`](docs/13-nuage.md). |
+| Reports | icônes sur le bureau. |
 
 ---
 
