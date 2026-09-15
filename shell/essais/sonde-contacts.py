@@ -37,6 +37,13 @@ TAILLE = struct.calcsize(EVENT)
 
 L, H = (int(v) for v in os.environ.get("SONDE_ECRAN", "1920x1080").split("x"))
 
+# LES DEUX LARGEURS DE tiroir.c, ET ELLES DIFFÈRENT. La dalle de MADOO ne
+# rapporte aucun contact en deçà de 32 px de son bord gauche ; celle-là fait
+# donc 48 px, celle de droite 24. À tenir en accord avec LISIERE_GAUCHE_PX et
+# LISIERE_DROITE_PX : une sonde qui juge « hors lisière » d'après une largeur
+# périmée rend un verdict faux sur des chiffres justes.
+LISIERE_G, LISIERE_D = 48, 24
+
 
 def trouver_dalle():
     """Le nœud de la dalle, d'après /proc/bus/input/devices.
@@ -89,8 +96,8 @@ def main():
               f"bornes brutes : x {xmin}..{xmax}, y {ymin}..{ymax}"
               f"  →  rendu en pixels d'écran {L}x{H}\n"
               f"écoute {duree:.0f} s à partir de {time.strftime('%H:%M:%S')}\n\n"
-              f"lisière des tiroirs : 24 px de chaque bord"
-              f"  (donc x ≤ 23 à gauche, x ≥ {L - 24} à droite)\n\n"
+              f"lisière des tiroirs : {LISIERE_G} px à gauche, {LISIERE_D} px à droite"
+              f"  (donc x ≤ {LISIERE_G - 1} ou x ≥ {L - LISIERE_D})\n\n"
               f"{'#':>3} {'bord':>7} {'pose x,y':>12} {'x mini':>7} {'trame+1':>8} "
               f"{'+50 ms':>8} {'trajet':>7} {'durée':>7} {'doigts':>6} {'lisière':>8}\n")
     j.write(entete); j.flush()
@@ -148,9 +155,9 @@ def main():
                     # dans la lisière ? C'est TOUTE la question : la lisière ne
                     # voit que ce qui se pose dans ses 24 px.
                     if x0 < L / 2:
-                        bord, dedans = "gauche", mini <= 23
+                        bord, dedans = "gauche", mini <= LISIERE_G - 1
                     else:
-                        bord, dedans = "droite", maxi >= L - 24
+                        bord, dedans = "droite", maxi >= L - LISIERE_D
                     j.write(f"{n:>3} {bord:>7} {x0:>5},{ey(premier[2]):<6} "
                             f"{mini:>7} {ex(suivant[1]):>8} {ex(apres[1]):>8} "
                             f"{maxi - mini:>7} {p[-1][0] - p[0][0]:>6.2f}s "
