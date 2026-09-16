@@ -6,6 +6,7 @@
  * libelles, pas l'evdev ni l'inhibiteur logind.
  * ========================================================================= */
 #include "capot.h"
+#include "energie.h"   /* le mode en vigueur decide desormais du capot */
 
 /* L'ORDRE COMPTE : « suspendre » est en tete, donc le repli d'un
  * identifiant inconnu. C'est aussi ce que logind faisait avant que le shell
@@ -52,11 +53,36 @@ shell_capot_actions (void)
     return ACTIONS;
 }
 
+/* L'identifiant range dans la table, ou le repli. Une seule boucle, pour
+ * que « inconnu -> ACTIONS[0] » ne soit ecrit qu'une fois. */
+static const ShellCapotAction *
+par_id (const char *id)
+{
+    for (const ShellCapotAction *a = ACTIONS; a->id != NULL; a++)
+        if (g_strcmp0 (a->id, id) == 0)
+            return a;
+    return &ACTIONS[0];
+}
+
+const ShellCapotAction *
+shell_capot_action_mode (const ShellConfig *cfg, const ShellModeEnergie *mode)
+{
+    g_return_val_if_fail (cfg != NULL, &ACTIONS[0]);
+
+    /* Un mode absent -- ou inconnu de la table -- vaut celui en vigueur :
+     * l'appelant qui n'en nomme pas veut ce que la machine fait maintenant. */
+    if (mode == NULL)
+        mode = shell_energie_mode_actif (cfg);
+
+    if (g_strcmp0 (mode->id, "travail") == 0)
+        return par_id (cfg->energie_travail_capot);
+    if (g_strcmp0 (mode->id, "nomade") == 0)
+        return par_id (cfg->energie_nomade_capot);
+    return par_id (cfg->energie_auto_capot);
+}
+
 const ShellCapotAction *
 shell_capot_action_active (const ShellConfig *cfg)
 {
-    for (const ShellCapotAction *a = ACTIONS; a->id != NULL; a++)
-        if (g_strcmp0 (a->id, cfg->energie_capot_action) == 0)
-            return a;
-    return &ACTIONS[0];
+    return shell_capot_action_mode (cfg, NULL);
 }

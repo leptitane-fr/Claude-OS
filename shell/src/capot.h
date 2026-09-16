@@ -5,7 +5,9 @@
  *
  * Jusqu'ici, le capot appartenait a logind : « HandleLidSwitch=suspend »,
  * un reglage systeme dans /etc, le meme pour les trois modes d'energie et
- * hors de portee du panneau. Le projet demande l'inverse : les reglages se
+ * hors de portee du panneau. (Le shell a d'abord repris la main SANS lever
+ * le second reproche : un reglage unique, toujours le meme pour les trois
+ * modes. C'est repare depuis le 16 septembre 2026 -- voir plus bas.) Le projet demande l'inverse : les reglages se
  * choisissent dans le panneau Energie, et le panneau ecrit shell.conf. Un
  * panneau qui irait ecrire dans /etc a chaque changement demanderait une
  * elevation de privileges pour choisir ce que fait un capot.
@@ -42,6 +44,7 @@
 
 #include <glib.h>
 #include "config.h"
+#include "energie.h"   /* ShellModeEnergie : le capot depend du mode */
 
 /* Ce que le capot ferme declenche. L'identifiant est ce qui s'ecrit dans
  * shell.conf ; la table vit dans actions-capot.c et fait foi -- le panneau y
@@ -56,9 +59,25 @@ typedef struct {
 /* Table terminee par un id NULL. */
 const ShellCapotAction *shell_capot_actions (void);
 
-/* L'action choisie, jamais NULL : un identifiant inconnu -- fichier d'une
- * version anterieure -- renvoie « suspendre », qui est ce que logind faisait
- * avant que le shell ne prenne la main. Le defaut ne surprend personne. */
+/* L'action d'un mode DONNE, jamais NULL. Le panneau de reglages en a besoin
+ * pour decrire les trois cartes a la fois, comme il le fait deja des durees
+ * : une carte « Travail » qui annoncerait le capot du mode en vigueur
+ * mentirait sur deux cartes sur trois.
+ *
+ * Un mode NULL vaut celui en vigueur. Un identifiant inconnu -- fichier
+ * d'une version anterieure -- renvoie « suspendre », ce que logind faisait
+ * avant que le shell ne prenne la main : le defaut ne surprend personne. */
+const ShellCapotAction *shell_capot_action_mode (const ShellConfig *cfg,
+                                                 const ShellModeEnergie *mode);
+
+/* L'action du mode EN VIGUEUR, jamais NULL. C'est elle que capot.c applique.
+ *
+ * DEPUIS LE 16 SEPTEMBRE 2026 ELLE DEPEND DU MODE, et c'est un changement de
+ * comportement : le capot etait le dernier reglage d'energie que le mode ne
+ * gouvernait pas. En « Travail » -- veille_ordi = FALSE dans la table des
+ * modes, donc aucune inactivite ne peut endormir la machine -- rabattre
+ * l'ecran la suspendait quand meme. Changer de mode change donc maintenant
+ * ce que fait le capot, sans qu'on ait a y revenir. */
 const ShellCapotAction *shell_capot_action_active (const ShellConfig *cfg);
 
 /* Ouvre le commutateur, pose l'inhibiteur, et surveille.

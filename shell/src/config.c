@@ -144,10 +144,11 @@ config_path (void)
                              "claude-os", "shell.conf", NULL);
 }
 
-/* Deux aides pour la section « energie », qui compte a elle seule neuf
- * cles. Une valeur absente ou mal ecrite laisse le defaut en place plutot
- * que de rendre zero -- un delai de zero seconde eteindrait l'ecran
- * immediatement, ce qui est la pire facon de traiter une faute de frappe. */
+/* Trois aides pour la section « energie », qui compte a elle seule une
+ * douzaine de cles. Une valeur absente ou mal ecrite laisse le defaut en
+ * place plutot que de rendre zero -- un delai de zero seconde eteindrait
+ * l'ecran immediatement, ce qui est la pire facon de traiter une faute de
+ * frappe. */
 static void
 lire_entier_de (GKeyFile *kf, const char *groupe, const char *cle, int *cible)
 {
@@ -170,6 +171,20 @@ lire_bool (GKeyFile *kf, const char *cle, gboolean *cible)
     gboolean v = g_key_file_get_boolean (kf, "energie", cle, &e);
     if (e == NULL)
         *cible = v;
+}
+
+/* Une chaine vide vaut une cle absente : le defaut reste. Verifier que
+ * l'identifiant existe n'appartient pas ici mais aux tables --
+ * actions-capot.c pour le capot -- qui font foi et retombent seules sur leur
+ * premiere entree. */
+static void
+lire_texte (GKeyFile *kf, const char *cle, char **cible)
+{
+    g_autofree char *v = g_key_file_get_string (kf, "energie", cle, NULL);
+    if (v == NULL || *v == '\0')
+        return;
+    g_free (*cible);
+    *cible = g_steal_pointer (&v);
 }
 
 ShellConfig *
@@ -241,12 +256,24 @@ shell_config_load (void)
      * s'endort que sur la batterie, au seuil d'abri. */
     cfg->energie_suspendre_permis = FALSE;
 
-    /* CAPOT. « suspendre » : exactement ce que logind faisait avant que le
-     * shell ne prenne la main -- le defaut ne change donc rien au
-     * comportement d'une machine neuve. La veille profonde ayant ete
-     * eprouvee le 14 septembre 2026, « suspendre-hiberner » et « hiberner »
-     * sont des choix sûrs ; ils restent des CHOIX, faits dans le panneau. */
-    cfg->energie_capot_action    = g_strdup ("suspendre");
+    /* CAPOT, UN PAR MODE. Chaque defaut est celui que le mode PROMET, et
+     * non plus le meme pour les trois.
+     *
+     * « Travail » verrouille : la table des modes y pose veille_ordi =
+     * FALSE, donc rien ne doit endormir la machine -- pas plus le capot que
+     * l'inactivite. C'est le mode dans lequel on rabat l'ecran en laissant
+     * une compilation finir.
+     *
+     * « Automatique » suspend puis hiberne : reveil immediat si l'on
+     * revient vite, session sauvee si l'on ne revient pas. « Nomade »
+     * hiberne d'emblee, seul etat dont la consommation est nulle.
+     *
+     * La veille de l'ordinateur est eprouvee : S3 le 16 septembre 2026, cinq
+     * reveils sur cinq -- c'est s2idle qui ne se reveillait jamais, voir
+     * /etc/default/grub.d/99-claude-os.cfg. L'hibernation l'avait ete le 14. */
+    cfg->energie_travail_capot   = g_strdup ("verrouiller");
+    cfg->energie_auto_capot      = g_strdup ("suspendre-hiberner");
+    cfg->energie_nomade_capot    = g_strdup ("hiberner");
 
     /* Seuils de charge. 20 / 10 / 5 : les valeurs usuelles, et a 5 % il
      * reste largement de quoi ecrire la memoire sur le disque avant la
@@ -339,12 +366,29 @@ shell_config_load (void)
     lire_bool   (kf, "verrou",           &cfg->energie_verrou);
     lire_entier (kf, "verrou_delai",     &cfg->energie_verrou_delai);
 
-    g_autofree char *capot = g_key_file_get_string (kf, "energie",
-                                                    "capot_action", NULL);
-    if (capot != NULL && *capot != '\0') {
-        g_free (cfg->energie_capot_action);
-        cfg->energie_capot_action = g_steal_pointer (&capot);
+    /* LE CAPOT, ET LA REPRISE DE L'ANCIENNE CLE UNIQUE.
+     *
+     * « capot_action » d'abord : un fichier ecrit avant le 16 septembre 2026
+     * n'a que celle-la. Elle s'applique alors aux deux modes qui autorisent
+     * la veille -- c'est en pensant a eux qu'on l'avait choisie, « ce que
+     * fait la machine quand je rabats l'ecran et que je m'en vais ». Elle ne
+     * s'applique PAS a « Travail », dont tout le propos est de ne pas
+     * dormir : l'y reporter reconduirait le defaut qu'on corrige.
+     *
+     * Les trois cles par mode ensuite, qui priment -- meme facon de faire
+     * que « travail_preavis » puis « preavis » plus haut. */
+    g_autofree char *ancien_capot = g_key_file_get_string (kf, "energie",
+                                                           "capot_action", NULL);
+    if (ancien_capot != NULL && *ancien_capot != '\0') {
+        g_free (cfg->energie_auto_capot);
+        cfg->energie_auto_capot   = g_strdup (ancien_capot);
+        g_free (cfg->energie_nomade_capot);
+        cfg->energie_nomade_capot = g_strdup (ancien_capot);
     }
+
+    lire_texte (kf, "travail_capot",     &cfg->energie_travail_capot);
+    lire_texte (kf, "automatique_capot", &cfg->energie_auto_capot);
+    lire_texte (kf, "nomade_capot",      &cfg->energie_nomade_capot);
 
     lire_entier (kf, "batterie_prevenir", &cfg->energie_bat_prevenir);
     lire_entier (kf, "batterie_insister", &cfg->energie_bat_insister);
@@ -410,7 +454,9 @@ shell_config_free (ShellConfig *cfg)
     g_free (cfg->wallpaper);
     g_free (cfg->energie_mode);
     g_free (cfg->energie_bat_abri_action);
-    g_free (cfg->energie_capot_action);
+    g_free (cfg->energie_travail_capot);
+    g_free (cfg->energie_auto_capot);
+    g_free (cfg->energie_nomade_capot);
     g_free (cfg);
 }
 
@@ -457,9 +503,20 @@ shell_config_save (const ShellConfig *cfg, GError **error)
     g_key_file_set_integer (kf, "energie", "verrou_delai", cfg->energie_verrou_delai);
     g_key_file_set_boolean (kf, "energie", "suspendre_permis",
                             cfg->energie_suspendre_permis);
-    g_key_file_set_string  (kf, "energie", "capot_action",
-                            cfg->energie_capot_action ?
-                            cfg->energie_capot_action : "suspendre");
+    /* Les trois cles par mode. L'ancienne « capot_action » n'est plus
+     * ecrite, seulement lue : la reecrire ferait vivre deux verites dans le
+     * meme fichier, et c'est la plus ancienne qui gagnerait a la relecture
+     * suivante. */
+    g_key_file_set_string  (kf, "energie", "travail_capot",
+                            cfg->energie_travail_capot ?
+                            cfg->energie_travail_capot : "verrouiller");
+    g_key_file_set_string  (kf, "energie", "automatique_capot",
+                            cfg->energie_auto_capot ?
+                            cfg->energie_auto_capot : "suspendre-hiberner");
+    g_key_file_set_string  (kf, "energie", "nomade_capot",
+                            cfg->energie_nomade_capot ?
+                            cfg->energie_nomade_capot : "hiberner");
+    g_key_file_remove_key  (kf, "energie", "capot_action", NULL);
     g_key_file_set_integer (kf, "energie", "batterie_prevenir", cfg->energie_bat_prevenir);
     g_key_file_set_integer (kf, "energie", "batterie_insister", cfg->energie_bat_insister);
     g_key_file_set_integer (kf, "energie", "batterie_abri",     cfg->energie_bat_abri);

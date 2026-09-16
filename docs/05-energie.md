@@ -41,7 +41,7 @@ Fichier : `rootfs/etc/default/grub.d/99-claude-os.cfg`, appliqué par
 | Paramètre | Effet |
 |---|---|
 | `i915.enable_fbc=1` | Compression du tampon d'affichage : le GPU relit moins souvent la mémoire. Se voit sur l'autonomie en affichage statique, c'est-à-dire l'essentiel du temps quand on lit une page. Sans effet visible sur l'image. |
-| `mem_sleep_default=s2idle` | Les Chromebooks ne proposent pas la veille S3. L'indiquer évite une tentative infructueuse au premier suspend. |
+| `mem_sleep_default=deep` | **Veille S3, et non s2idle.** Le firmware MrChromebox annonce `ACPI: PM: (supports S0 S3 S4 S5)` — il offre le S3, contrairement au firmware ChromeOS d'origine. Mesure du 16 septembre 2026 : s2idle ne se réveille **jamais** sur cette machine (98 tentatives, 98 gels, puis l'EC qui réinitialise le processeur au bout de 64 s) ; en S3, 5 réveils sur 5. Ne pas revenir à s2idle sans remesurer. |
 | `nmi_watchdog=0` | Surveillance de débogage noyau sans objet ici, qui réveille chaque cœur périodiquement. |
 | `i915.enable_psr=1` | **Commenté par défaut.** Panel Self Refresh : gain réel sur affichage statique, mais scintillement sur certaines dalles. À essayer et observer une minute sur une page fixe. |
 
@@ -123,6 +123,37 @@ main, donc l'ancien comportement. Le capot ne devient jamais inerte, il
 redevient ce qu'il était. C'est aussi pourquoi l'inhibiteur n'est posé
 qu'APRÈS avoir réussi à lire le commutateur : prendre la main sans savoir
 lire le capot laisserait la machine allumée, repliée, dans un sac.
+
+### Un capot par mode, depuis le 16 septembre 2026
+
+Reprendre la main à logind n'avait levé que la moitié du reproche. Le réglage
+restait **unique** : le même pour les trois modes, comme dans `/etc`. En
+« Travail » — où la table des modes pose `veille_ordi = FALSE`, où aucune
+inactivité ne peut endormir la machine, et dont le résumé promet que
+« l'ordinateur ne dort jamais » — rabattre l'écran la suspendait quand même.
+Une compilation lancée capot fermé mourait donc dans le mode fait pour la
+laisser finir.
+
+Trois clés désormais, une par mode, réglées dans la carte du mode qu'elles
+concernent et non plus dans une carte à part :
+
+| Mode | Clé | Défaut | Pourquoi |
+|---|---|---|---|
+| Travail | `travail_capot` | `verrouiller` | Le mode promet que la machine ne dort pas. Le capot ne fait donc qu'éteindre et verrouiller l'écran ; téléchargements et compilations vont à leur terme. |
+| Automatique | `automatique_capot` | `suspendre-hiberner` | Réveil immédiat si l'on revient vite, session sauvée sur le disque si l'on ne revient pas. |
+| Nomade | `nomade_capot` | `hiberner` | Le seul état dont la consommation est nulle. |
+
+**Les fichiers écrits avant sont repris.** L'ancienne clé unique
+`capot_action` reste *lue* : elle s'applique alors aux deux modes qui
+autorisent la veille — c'est en pensant à eux qu'on l'avait choisie — mais
+**pas** à « Travail », où la reporter reconduirait le défaut qu'on corrige.
+Elle n'est plus écrite : deux vérités dans le même fichier, et c'est la plus
+ancienne qui gagnerait à la relecture suivante.
+
+Changer de mode change donc maintenant ce que fait le capot, **à chaud** :
+`shell_config_watch` prévient, `shell_capot_reconfigurer` relit. Vérifié le
+16 septembre 2026, dans les trois sens — Travail → `verrouiller`,
+Automatique → `suspendre-hiberner`, Nomade → `hiberner`.
 
 ### La veille profonde MARCHE — ce document disait l'inverse
 

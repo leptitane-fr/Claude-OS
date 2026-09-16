@@ -1267,8 +1267,12 @@ static void set_auto_att   (ShellConfig *c, gpointer d) { c->energie_auto_attenu
 static void set_auto_ete   (ShellConfig *c, gpointer d) { c->energie_auto_eteindre  = GPOINTER_TO_INT (d); }
 static void set_auto_sus   (ShellConfig *c, gpointer d) { c->energie_auto_suspendre = GPOINTER_TO_INT (d); }
 
-static void set_capot      (ShellConfig *c, gpointer d) { g_free (c->energie_capot_action);
-                                                          c->energie_capot_action = g_strdup (d); }
+static void set_capot_trav (ShellConfig *c, gpointer d) { g_free (c->energie_travail_capot);
+                                                          c->energie_travail_capot = g_strdup (d); }
+static void set_capot_auto (ShellConfig *c, gpointer d) { g_free (c->energie_auto_capot);
+                                                          c->energie_auto_capot = g_strdup (d); }
+static void set_capot_nom  (ShellConfig *c, gpointer d) { g_free (c->energie_nomade_capot);
+                                                          c->energie_nomade_capot = g_strdup (d); }
 
 static void set_bat_prev   (ShellConfig *c, gpointer d) { c->energie_bat_prevenir = GPOINTER_TO_INT (d); }
 static void set_bat_ins    (ShellConfig *c, gpointer d) { c->energie_bat_insister = GPOINTER_TO_INT (d); }
@@ -1420,6 +1424,14 @@ on_choix_abri (GObject *dd, GParamSpec *ps, gpointer data)
     modifier (set_bat_act, (gpointer) abris[i].id);
 }
 
+/* Une liste de capot par mode : il lui faut donc savoir LEQUEL elle regle,
+ * en plus du libelle a rafraichir. C'est la meme facon de faire que « Choix »
+ * pour les durees, en plus court -- deux champs suffisent. */
+typedef struct {
+    void      (*set)   (ShellConfig *, gpointer);
+    GtkWidget  *detail;
+} ChoixCapot;
+
 static void
 on_choix_capot (GObject *dd, GParamSpec *ps, gpointer data)
 {
@@ -1435,18 +1447,22 @@ on_choix_capot (GObject *dd, GParamSpec *ps, gpointer data)
     if (actions[i].id == NULL)
         return;
 
-    GtkWidget *detail = data;
-    if (detail != NULL)
-        gtk_label_set_text (GTK_LABEL (detail), actions[i].resume);
+    const ChoixCapot *cc = data;
+    if (cc == NULL)
+        return;
 
-    modifier (set_capot, (gpointer) actions[i].id);
+    if (cc->detail != NULL)
+        gtk_label_set_text (GTK_LABEL (cc->detail), actions[i].resume);
+
+    modifier (cc->set, (gpointer) actions[i].id);
 }
 
 static GtkWidget *
-liste_capot (const ShellConfig *cfg, GtkWidget *detail)
+liste_capot (const ShellConfig *cfg, const ShellModeEnergie *mode,
+             void (*set) (ShellConfig *, gpointer), GtkWidget *detail)
 {
     const ShellCapotAction *actions = shell_capot_actions ();
-    const ShellCapotAction *actif   = shell_capot_action_active (cfg);
+    const ShellCapotAction *actif   = shell_capot_action_mode (cfg, mode);
     GtkStringList          *noms    = gtk_string_list_new (NULL);
     guint                   choisi  = 0;
 
@@ -1456,9 +1472,14 @@ liste_capot (const ShellConfig *cfg, GtkWidget *detail)
             choisi = i;
     }
 
-    GtkWidget *dd = gtk_drop_down_new (G_LIST_MODEL (noms), NULL);
+    GtkWidget  *dd = gtk_drop_down_new (G_LIST_MODEL (noms), NULL);
+    ChoixCapot *cc = g_new0 (ChoixCapot, 1);
+    cc->set = set;
+    cc->detail = detail;
+    g_object_set_data_full (G_OBJECT (dd), "choix-capot", cc, g_free);
+
     gtk_drop_down_set_selected (GTK_DROP_DOWN (dd), choisi);
-    g_signal_connect (dd, "notify::selected", G_CALLBACK (on_choix_capot), detail);
+    g_signal_connect (dd, "notify::selected", G_CALLBACK (on_choix_capot), cc);
     return dd;
 }
 
@@ -1552,26 +1573,18 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
            LISTE_DUREE (cfg->energie_verrou_delai, &M_VERROU_D));
     gtk_box_append (GTK_BOX (pile), rep);
 
-    /* --- Le capot ---
+    /* --- Le capot : PLUS DE CARTE A LUI, une ligne dans chaque mode ---
      *
      * Ce reglage n'existait pas : le capot appartenait a logind, donc a
-     * /etc, donc au meme comportement pour les trois modes. Le shell prend
-     * la main par un inhibiteur pour que le choix vive ici -- voir capot.h.
-     * S'il n'y arrive pas, la ligne reste affichee mais sans effet, et le
-     * journal dit pourquoi : c'est le seul endroit ou on peut le lire. */
-    GtkWidget *cap = carte ("Quand on rabat le capot");
-    GtkWidget *d_cap = gtk_label_new (shell_capot_action_active (cfg)->resume);
-    gtk_widget_add_css_class (d_cap, "reglages-detail");
-    gtk_label_set_wrap (GTK_LABEL (d_cap), TRUE);
-    gtk_label_set_max_width_chars (GTK_LABEL (d_cap), 46);
-    gtk_widget_set_halign (d_cap, GTK_ALIGN_START);
-
-    ligne (cap, "Fermeture du capot",
-           "L'ouvrir ne déclenche rien de plus : le réveil de la machine s'en "
-           "charge déjà.",
-           liste_capot (cfg, d_cap));
-    gtk_box_append (GTK_BOX (cap), d_cap);
-    gtk_box_append (GTK_BOX (pile), cap);
+     * /etc, donc au meme comportement pour les trois modes. Le shell a pris
+     * la main par un inhibiteur pour que le choix vive ici -- voir capot.h
+     * -- mais l'a d'abord garde UNIQUE, et le reproche fait a /etc valait
+     * donc encore pour le panneau : « Travail » promet que la machine ne
+     * dort pas, et le capot la suspendait quand meme.
+     *
+     * Le reglage a donc rejoint les cartes de mode, plus bas, a cote des
+     * durees qu'il accompagne. S'il reste sans effet -- inhibiteur refuse --
+     * le journal dit pourquoi : c'est le seul endroit ou on peut le lire. */
 
     /* --- La batterie ---
      *
@@ -1623,6 +1636,19 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
            LISTE_DUREE (cfg->energie_travail_attenuer, &M_TRAV_ATT));
     ligne (trav, "Éteindre l'écran après", NULL,
            LISTE_DUREE (cfg->energie_travail_eteindre, &M_TRAV_ETE));
+    /* Le capot ici, et non dans une carte a part : c'est un reglage de mode,
+     * au meme titre que les durees ci-dessus. */
+    GtkWidget *cap_trav = gtk_label_new (
+        shell_capot_action_mode (cfg, &modes[0])->resume);
+    gtk_widget_add_css_class (cap_trav, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (cap_trav), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (cap_trav), 46);
+    gtk_widget_set_halign (cap_trav, GTK_ALIGN_START);
+    ligne (trav, "Quand on rabat le capot",
+           "L'ouvrir ne déclenche rien de plus : le réveil de la machine s'en "
+           "charge déjà.",
+           liste_capot (cfg, &modes[0], set_capot_trav, cap_trav));
+    gtk_box_append (GTK_BOX (trav), cap_trav);
     gtk_box_append (GTK_BOX (pile), trav);
 
     GtkWidget *au = carte (modes[1].nom);
@@ -1638,6 +1664,19 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
            LISTE_DUREE (cfg->energie_auto_eteindre, &M_AUTO_ETE));
     ligne (au, "Veille de l'ordinateur après", NULL,
            LISTE_DUREE (cfg->energie_auto_suspendre, &M_AUTO_SUS));
+    /* Le capot ici, et non dans une carte a part : c'est un reglage de mode,
+     * au meme titre que les durees ci-dessus. */
+    GtkWidget *cap_au = gtk_label_new (
+        shell_capot_action_mode (cfg, &modes[1])->resume);
+    gtk_widget_add_css_class (cap_au, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (cap_au), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (cap_au), 46);
+    gtk_widget_set_halign (cap_au, GTK_ALIGN_START);
+    ligne (au, "Quand on rabat le capot",
+           "L'ouvrir ne déclenche rien de plus : le réveil de la machine s'en "
+           "charge déjà.",
+           liste_capot (cfg, &modes[1], set_capot_auto, cap_au));
+    gtk_box_append (GTK_BOX (au), cap_au);
     gtk_box_append (GTK_BOX (pile), au);
 
     GtkWidget *nom = carte (modes[2].nom);
@@ -1653,6 +1692,19 @@ construire_energie (ShellConfig *cfg, GtkWidget *window)
            LISTE_DUREE (cfg->energie_nomade_eteindre, &M_NOM_ETE));
     ligne (nom, "Veille de l'ordinateur après", NULL,
            LISTE_DUREE (cfg->energie_nomade_suspendre, &M_NOM_SUS));
+    /* Le capot ici, et non dans une carte a part : c'est un reglage de mode,
+     * au meme titre que les durees ci-dessus. */
+    GtkWidget *cap_nom = gtk_label_new (
+        shell_capot_action_mode (cfg, &modes[2])->resume);
+    gtk_widget_add_css_class (cap_nom, "reglages-detail");
+    gtk_label_set_wrap (GTK_LABEL (cap_nom), TRUE);
+    gtk_label_set_max_width_chars (GTK_LABEL (cap_nom), 46);
+    gtk_widget_set_halign (cap_nom, GTK_ALIGN_START);
+    ligne (nom, "Quand on rabat le capot",
+           "L'ouvrir ne déclenche rien de plus : le réveil de la machine s'en "
+           "charge déjà.",
+           liste_capot (cfg, &modes[2], set_capot_nom, cap_nom));
+    gtk_box_append (GTK_BOX (nom), cap_nom);
     gtk_box_append (GTK_BOX (pile), nom);
 
     /* --- Ce qui n'est pas reglable, et pourquoi ---

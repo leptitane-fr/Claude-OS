@@ -140,8 +140,20 @@ typedef struct {
     /* Ce que la fermeture du capot declenche -- voir capot.h. Le shell
      * prend la main sur logind pour que ce choix vive ici, avec les autres,
      * plutot que dans /etc. La table des valeurs possibles est dans
-     * actions-capot.c, et fait foi. */
-    char     *energie_capot_action;
+     * actions-capot.c, et fait foi.
+     *
+     * UN PAR MODE, depuis le 16 septembre 2026. C'etait un reglage unique,
+     * et c'etait le dernier endroit ou le mode d'energie ne decidait pas :
+     * en « Travail », ou la table des modes dit veille_ordi = FALSE et ou
+     * l'inactivite ne peut rien endormir, rabattre le capot suspendait
+     * quand meme. Une compilation lancee capot ferme mourait donc dans le
+     * mode fait pour la laisser finir.
+     *
+     * L'ancienne cle unique « capot_action » reste lue pour les fichiers
+     * ecrits avant : voir config.c. */
+    char     *energie_travail_capot;
+    char     *energie_auto_capot;
+    char     *energie_nomade_capot;
 
     int       energie_bat_prevenir;
     int       energie_bat_insister;

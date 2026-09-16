@@ -11,8 +11,9 @@
  *   secteur  « Normal »   attenuer, puis eteindre l'ecran
  *   batterie « Econome »  attenuer, eteindre, puis suspendre
  *
- * L'ETAGE « SUSPENDRE » EST DESACTIVE PAR DEFAUT -- MAIS PAS POUR LA RAISON
- * QU'ON A CRUE PENDANT CINQ JOURS.
+ * L'ETAGE « SUSPENDRE » EST DESACTIVE PAR DEFAUT -- ET LA RAISON A CHANGE
+ * DEUX FOIS. Lire ce qui suit en entier avant d'y toucher : deux diagnostics
+ * successifs se sont contredits, et le troisieme est mesure.
  *
  * Ce commentaire a longtemps accuse la reprise : le 9 septembre 2026, onze
  * suspensions n'avaient « jamais repris », le journal s'arretant net sur
@@ -23,20 +24,35 @@
  *     07:23:42  PM: suspend entry (s2idle)
  *     07:24:00  Lid opened.  ->  PM: suspend exit
  *
- * LA REPRISE FONCTIONNE. Si le journal s'arretait sur « suspend entry », ce
- * n'est pas que la machine ne se reveillait pas : c'est qu'elle MOURAIT en
- * veille, faute de courant. Un journal tronque ne dit pas pourquoi il est
- * tronque, et l'identifiant de demarrage neuf -- seul indice retenu a
- * l'epoque -- est le meme qu'on meure de faim ou qu'on echoue a reprendre.
+ * 16 SEPTEMBRE 2026 : LE DEMENTI ETAIT FAUX A SON TOUR, ET LE 9 AVAIT RAISON.
  *
- * La preuve en grand, le matin du 14 : 101 demarrages enregistres, dont une
- * centaine entre 05:39 et 07:23, par cycles reguliers de 64 secondes --
- * demarrer, vivre 28 secondes, se rendormir capot ferme, mourir. Une machine
- * a plat qui n'arrive pas a se recharger parce qu'elle se rendort a chaque
- * fois qu'elle revient.
+ * Ce qui precede a tenu deux jours. La reprise NE FONCTIONNAIT PAS -- pas en
+ * s2idle. Mesure du 16 septembre : 98 tentatives de veille, 98 gels, le
+ * journal s'arretant chaque fois sur « PM: suspend entry (s2idle) », batterie
+ * entre 65 et 78 %. Pas une seule reprise. La machine n'etait pas a plat.
  *
- * CE QUI MANQUAIT N'ETAIT DONC PAS UNE REPRISE FIABLE, MAIS UN PREAVIS ET
- * UNE PORTE DE SORTIE. Les deux existent depuis : voir batterie.h.
+ * Les cycles de 64 secondes ne sont pas la batterie : c'est le CHIEN DE GARDE
+ * DE L'EC, qui l'ecrit lui-meme dans le journal du firmware --
+ * /sys/firmware/log, « ap hang detected », 117 fois. L'EC constate que le
+ * processeur ne repond plus, patiente, et le reinitialise. Le cycle regulier
+ * n'etait donc pas une machine qui meurt de faim, mais un chien de garde qui
+ * fait son travail, a intervalle fixe.
+ *
+ * La mesure du 14 -- capot ferme a 07:23:42, rouvert a 07:24:00 -- etait une
+ * veille de DIX-HUIT SECONDES. Elle est vraie, et elle ne generalise pas : un
+ * cas contre 98. C'est la meme faute qu'en septembre, dans l'autre sens.
+ *
+ * LA VEILLE EST REPAREE, ET C'ETAIT LE MODE, PAS LA MACHINE. Le firmware
+ * MrChromebox annonce « ACPI: PM: (supports S0 S3 S4 S5) » : il offre le S3,
+ * contrairement au firmware ChromeOS d'origine. En S3, cinq reveils sur cinq,
+ * dont un par la chaine logind complete. « mem_sleep_default=deep » est
+ * desormais dans le fragment GRUB. Le protocole qui a disculpe le logiciel :
+ * pm_test a « freezer », « devices », « platform » -- les seules etapes que
+ * s2idle accepte -- passe les trois.
+ *
+ * CE QUI MANQUAIT ETAIT DONC LES DEUX : une reprise qui marche, ET un preavis
+ * avec une porte de sortie. Le preavis existe -- voir batterie.h -- et la
+ * reprise depuis le 16 septembre.
  *
  * ET POURTANT L'ETAGE RESTE FERME -- MAINTENANT PAR CHOIX.
  *
