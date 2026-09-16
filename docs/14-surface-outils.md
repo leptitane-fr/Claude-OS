@@ -380,11 +380,10 @@ n'aurait pas tranché.** Mesurer, pas supposer.
 | 2 | Le retourneur — le flip du dock | **fait le 16 septembre 2026** — voir 14.7 |
 | 3 | L'établi — la face outils, et la règle de visibilité | **fait le 16 septembre 2026** — voir 14.8 |
 | 4 | L'auvent et le vocabulaire des contrôles | **fait le 16 septembre 2026** — voir 14.9 |
-| 5 | Fichiers : publication, dépouillement, clavier, repli | à faire |
+| 5 | Fichiers : publication, dépouillement, clavier, repli | **fait le 16 septembre 2026** — voir 14.10 |
 
-**Rien n'est visible à l'écran à ce stade**, et c'est normal : l'étape 1
-n'écrit que le contrat. Le dock d'aujourd'hui ne connaît pas encore l'action
-`outils-presenter`, et le refuse proprement.
+**Les cinq étapes sont écrites.** Ce qui reste ne s'écrit pas : voir la fin
+de 14.10.
 
 ### Le risque principal est labwc, pas GTK
 
@@ -744,7 +743,118 @@ le jour où l'on voudra ouvrir la recherche du dock sans quitter le clavier.
 
 ---
 
-## 14.10 Les décisions, et pourquoi
+## 14.10 Fichiers — étape 5
+
+*Fait le 16 septembre 2026.* Le premier vrai client de la surface d'outils —
+et le seul banc qui éprouve une application **écrite avant le contrat**.
+C'est la différence qui compte : le témoin avait été conçu pour lui, Fichiers
+a trois semaines de plus.
+
+### Ce que Fichiers publie
+
+- **Les lieux**, tels que son volet les tient déjà : dossiers personnels,
+  favoris, périphériques, lecteurs réseau, nuage. Le modèle est rempli dans
+  la **même passe** que les widgets du volet — deux parcours du même contenu
+  finiraient par diverger, et c'est exactement ce que le contrat cherche à
+  éviter.
+- **Le fil d'Ariane**, rempli par `maj_fil()` à chaque navigation, à côté des
+  boutons qu'elle construisait déjà.
+- **La recherche**, en auvent de saisie.
+
+Ce qui n'a pas d'adresse ne figure pas dans le modèle : un volume non monté,
+un lecteur réseau non connecté. On ne peut pas « y aller » d'un clic depuis
+le dock, qui ne saurait pas quoi monter — **le volet, lui, sait le faire**, et
+c'est une raison de plus de le garder en repli.
+
+### Le même groupe d'actions, inséré deux fois
+
+Sous `fichiers` pour la fenêtre — boutons, menu contextuel, raccourcis — et
+sous `outils` parce que c'est sous ce nom que le contrat veut voir les
+actions dans le modèle publié. **Un seul groupe, deux façons de l'appeler** :
+dupliquer les actions donnerait deux comportements à tenir d'accord.
+
+Le terme de recherche vit dans le champ interne, et lui seul : l'auvent écrit
+dedans plutôt que de tenir sa propre copie. Le filtre lit ce champ, le champ
+de repli **est** ce champ, et il n'y a jamais deux termes à accorder.
+
+### Le clavier, complété
+
+Une fenêtre nue doit être entièrement pilotable sans souris. Cinq raccourcis
+manquaient tant qu'il y avait des boutons pour les remplacer :
+
+| Touche | Effet |
+|---|---|
+| `Menu`, `Maj+F10` | le menu contextuel — **la porte d'entrée de tous les verbes** |
+| `Ctrl+F` | la recherche, dans la fenêtre ou dans l'auvent selon qui tient la barre |
+| `Ctrl+1…4` | les quatre vues |
+
+`Ctrl+F` a demandé un ajout au contrat : `shell_outils_auvent()`.
+L'application arme ses propres raccourcis — le dock n'intercepte aucune
+touche — mais elle ne sait pas dessiner l'auvent. Elle **demande** au dock de
+l'ouvrir sur une action donnée, et le contrat s'occupe du reste.
+
+### UNE SECTION PEUT EN CONTENIR D'AUTRES
+
+Le contrat a dû céder sur un point, et c'est Fichiers qui l'a montré.
+
+`GMenuModel` est récursif par nature, et une application a de bonnes raisons
+de s'en servir : Fichiers compose sa barre à partir du modèle que son volet
+tient à jour tout seul, et ce modèle a **ses propres sections** —
+Emplacements, Favoris, Périphériques. L'établi ne descendait pas dedans :
+chaque sous-section était traitée comme une entrée ordinaire, sans libellé ni
+action. Résultat mesuré : **zéro lieu et deux boutons vides**.
+
+La zone se transmet désormais de parent en enfant, sauf si l'enfant déclare
+la sienne. Une application peut grouper sans répéter la zone sur chaque
+morceau — et une bibliothèque qui produit un modèle de lieux n'a pas à savoir
+dans quelle zone on la posera.
+
+### Le `.desktop` prend le nom de l'app_id
+
+`claude-os-fichiers.desktop` est devenu `os.claude.shell.fichiers.desktop`.
+C'était une coquetterie tant que seule l'icône du dock en dépendait ; c'est
+un défaut depuis que **la barre** en dépend aussi. La visionneuse d'images
+avait déjà pris cette règle le 10 septembre.
+
+`provision.sh` purge désormais les **deux** noms : une installation
+antérieure garde l'ancien, et deux entrées « Fichiers » apparaîtraient au
+lanceur.
+
+### Ce que le banc établit
+
+`banc-fichiers.sh`, **9 vérifications, 0 en échec** :
+
+| Question | Réponse |
+|---|---|
+| Sans dock | la fenêtre garde son chrome, et reste utilisable |
+| Le dock arrive | il prend la barre, reste à l'écran, la fenêtre se dépouille |
+| Les lieux | ceux du volet, dans la barre |
+| Navigation depuis le dock | le dossier change, le fil suit |
+| `Ctrl+F` | ouvre l'auvent du dock |
+| La frappe | **`etat : 2 éléments`** sur six — tout le chemin, d'un bout à l'autre |
+| Échap | referme |
+| Le dock repart | le chrome revient |
+
+La ligne qui compte est celle du filtre : le dock a reçu la frappe, l'a
+passée à l'action de l'application, qui a refiltré sa liste. **Aucun des
+maillons ne peut être éprouvé isolément.**
+
+Les trois bancs ensemble : **42 vérifications, 0 en échec**.
+
+### Ce qui reste, et ce n'est plus du code
+
+Le chantier est écrit. Ce qui manque ne s'écrit pas, ça se regarde :
+
+- **la rotation avec le renderer de la vraie machine**, sur le vrai écran ;
+- **le style**, jugé jusqu'ici sur des captures d'un labwc sans écran ;
+- **le doigt**, qu'aucun banc ne sait produire ;
+- et la question d'usage : **86 px réservés en permanence** sur une dalle de
+  1080, est-ce que cela se supporte ? C'est le choix qui a été fait, et il ne
+  se juge qu'en s'en servant.
+
+---
+
+## 14.11 Les décisions, et pourquoi
 
 | Décision | Raison |
 |---|---|

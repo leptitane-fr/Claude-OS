@@ -36,6 +36,7 @@
 #include "fichiers-ops.h"
 #include "fichiers-lieux.h"
 #include "fichiers-apercu.h"
+#include "outils.h"
 #include "reseau.h"
 
 static struct {
@@ -73,11 +74,43 @@ static struct {
     GPtrArray          *presse;      /* GFile* copies ou coupes             */
     gboolean            couper;
     gboolean            montrer_caches;
+
+    /* --- LA BARRE PUBLIEE AU DOCK (outils.h) ---------------------------
+     *
+     * `barre` est le modele d'ensemble : une section de lieux -- celle que
+     * le volet tient a jour tout seul --, une pour le fil d'Ariane, une
+     * pour les outils. Seul `fil_modele` est rempli ici, a chaque
+     * navigation ; le reste est pose une fois pour toutes.
+     *
+     * `chrome` est ce que la fenetre montre QUAND LE DOCK NE PREND PAS :
+     * la barre du haut, la rangee d'actions et le volet des lieux. C'est le
+     * repli exige par le contrat -- une application dont les outils vivent
+     * dans un autre processus doit rester utilisable sans lui. */
+    ShellOutils        *outils;
+    GMenu              *barre;
+    GMenu              *fil_modele;
+    GPtrArray          *chrome;      /* GtkWidget*, non possedes             */
+    GSimpleAction      *act_aller;   /* son etat dit OU L'ON EST             */
 } F;
 
 static void naviguer (GFile *dossier, gboolean historiser);
 static void naviguer_vraiment (GFile *dossier, gboolean historiser);
 static void maj_etat (void);
+
+/* OU L'ON EST, DIT PAR L'ETAT D'UNE ACTION.
+ *
+ * C'est ainsi que le dock allume le bon lieu et la bonne etape du fil : il
+ * compare l'etat de « aller » a la cible de chaque entree -- la semantique
+ * radio de GMenu (outils.h). Pose a l'ARRIVEE et non au depart : une
+ * navigation peut echouer, ou aboutir ailleurs que la ou on l'a demandee. */
+static void
+maj_ou_on_est (void)
+{
+    if (F.act_aller == NULL || F.dossier == NULL)
+        return;
+    g_autofree char *uri = g_file_get_uri (F.dossier);
+    g_simple_action_set_state (F.act_aller, g_variant_new_string (uri));
+}
 
 /* -------------------------------------------------------------------------
  * Selection
@@ -199,6 +232,9 @@ maj_fil (void)
     while ((enfant = gtk_widget_get_first_child (F.fil)) != NULL)
         gtk_box_remove (GTK_BOX (F.fil), enfant);
 
+    if (F.fil_modele != NULL)
+        g_menu_remove_all (F.fil_modele);
+
     /* On remonte jusqu'a la racine, puis on redescend : un fil d'Ariane se
      * lit de gauche a droite, et g_file_get_parent ne sait aller que dans
      * l'autre sens. */
@@ -249,6 +285,20 @@ maj_fil (void)
         g_object_set_data_full (G_OBJECT (b), "fichier", g_object_ref (f), g_object_unref);
         g_signal_connect (b, "clicked", G_CALLBACK (on_fil_clic), NULL);
         gtk_box_append (GTK_BOX (F.fil), b);
+
+        /* LA MEME ETAPE, DANS LE MODELE. Ici et pas ailleurs : deux
+         * parcours du meme chemin finiraient par ne plus dire la meme
+         * chose, et le dock montrerait un fil d'hier. */
+        if (F.fil_modele != NULL) {
+            g_autofree char *uri = g_file_get_uri (f);
+            GMenuItem *it = g_menu_item_new (libelle, NULL);
+            g_menu_item_set_action_and_target_value (it, "outils.aller",
+                                                     g_variant_new_string (uri));
+            g_menu_item_set_attribute (it, SHELL_OUTILS_A_FORME, "s",
+                                       SHELL_OUTILS_ETAPE);
+            g_menu_append_item (F.fil_modele, it);
+            g_object_unref (it);
+        }
     }
 
     g_idle_add (caler_fil, NULL);
@@ -307,6 +357,7 @@ naviguer_vraiment (GFile *dossier, gboolean historiser)
     maj_fil ();
     maj_boutons ();
     fichiers_lieux_suivre (F.lieux, F.dossier);
+    maj_ou_on_est ();
     recharger ();
 }
 
@@ -425,6 +476,12 @@ maj_etat (void)
                                 F.presse->len, F.couper ? "couper" : "copier");
 
     gtk_label_set_text (GTK_LABEL (F.etat), s->str);
+
+    /* En débogage : c'est la seule façon, depuis un autre processus, de
+     * vérifier qu'une recherche tapée dans l'auvent du dock a bien filtré la
+     * liste. Le banc lit cette ligne. */
+    g_debug ("etat : %s", s->str);
+
     g_string_free (s, TRUE);
 }
 
@@ -1562,7 +1619,90 @@ act_vue (GSimpleAction *a, GVariant *p, gpointer d)
                                       g_variant_get_string (p, NULL));
 }
 
+/* -------------------------------------------------------------------------
+ * Les deux actions du contrat des outils
+ *
+ * Dans LE MEME groupe que le reste, et c'est tout l'interet : le dock, le
+ * menu contextuel et le clavier tirent sur les memes cordes. Voir outils.h.
+ * ------------------------------------------------------------------------- */
+static void
+act_aller (GSimpleAction *a, GVariant *but, gpointer d)
+{
+    (void) a; (void) d;
+
+    g_autoptr(GFile) f = g_file_new_for_uri (g_variant_get_string (but, NULL));
+    naviguer (f, TRUE);
+    /* L'etat n'est PAS pose ici : naviguer() peut echouer, ou aboutir
+     * ailleurs. C'est l'arrivee qui le dit -- voir maj_ou_on_est(). */
+}
+
+/* LE TERME DE RECHERCHE VIT DANS LE CHAMP INTERNE, ET LUI SEUL.
+ *
+ * L'auvent du dock ecrit dedans plutot que de tenir sa propre copie : le
+ * filtre lit ce champ, le champ de repli est ce meme champ, et il n'y a donc
+ * jamais deux termes a tenir d'accord. Qui tape ne change rien a ce qui est
+ * cherche. */
+static void
+act_chercher (GSimpleAction *a, GVariant *texte, gpointer d)
+{
+    (void) a; (void) d;
+    gtk_editable_set_text (GTK_EDITABLE (F.recherche),
+                           g_variant_get_string (texte, NULL));
+}
+
+static void menu_element (GtkGesture *g, GtkWidget *w, double x, double y);
+static void menu_fond (GtkWidget *w, double x, double y);
+
+/* LE MENU CONTEXTUEL AU CLAVIER — la porte d'entree de tous les verbes une
+ * fois la barre partie.
+ *
+ * Il s'ouvre sur la vue visible, au centre : on ne sait pas ou est le
+ * curseur du clavier dans une grille virtuelle, et viser le coin haut
+ * gauche donnerait un menu colle au bord. Le CONTENU, lui, depend de la
+ * selection comme au clic droit -- un element choisi ouvre son menu, aucun
+ * ouvre celui du fond. */
+static void
+act_menu_contextuel (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+
+    GtkWidget *vue = gtk_stack_get_visible_child (GTK_STACK (F.pile));
+    if (vue == NULL)
+        return;
+
+    double x = gtk_widget_get_width (vue) / 2.0;
+    double y = gtk_widget_get_height (vue) / 2.0;
+
+    g_autoptr(GList) choix = choisis ();
+    if (choix != NULL)
+        menu_element (NULL, vue, x, y);
+    else
+        menu_fond (vue, x, y);
+}
+
+/* CTRL+F OUVRE LA RECHERCHE, OU QU'ELLE SOIT.
+ *
+ * Dans la fenetre quand elle porte encore son chrome ; dans l'auvent du dock
+ * quand c'est lui qui tient la barre. L'application ne sait pas dessiner
+ * l'auvent -- elle demande au dock de l'ouvrir sur l'action concernee, et le
+ * contrat s'occupe du reste (outils.h). */
+static void
+act_recherche_ouvrir (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+
+    if (shell_outils_prise (F.outils)) {
+        shell_outils_auvent (F.outils, "chercher");
+        return;
+    }
+    gtk_widget_grab_focus (F.recherche);
+}
+
 static const GActionEntry actions[] = {
+    { "aller",      act_aller,      "s",  "''", NULL, { 0 } },
+    { "menu-contextuel",   act_menu_contextuel,  NULL, NULL, NULL, { 0 } },
+    { "recherche-ouvrir",  act_recherche_ouvrir, NULL, NULL, NULL, { 0 } },
+    { "chercher",   act_chercher,   "s",  NULL, NULL, { 0 } },
     { "ouvrir",     act_ouvrir,     NULL, NULL, NULL, { 0 } },
     { "copier",     act_copier,     NULL, NULL, NULL, { 0 } },
     { "couper",     act_couper,     NULL, NULL, NULL, { 0 } },
@@ -2014,6 +2154,84 @@ on_touche (GtkEventControllerKey *c, guint touche, guint code,
     return GDK_EVENT_PROPAGATE;
 }
 
+/* -------------------------------------------------------------------------
+ * LE CONTRAT DES OUTILS : publier, et savoir se passer du dock
+ *
+ * Fichiers est le premier client de la surface d'outils (docs/14). Trois
+ * gestes, et le troisieme est le moins spectaculaire mais le plus important.
+ * ------------------------------------------------------------------------- */
+
+/* Ce que la fenetre montre QUAND LE DOCK NE PREND PAS : la barre du haut, la
+ * rangee d'actions, le volet des lieux.
+ *
+ * LE REPLI N'EST PAS FACULTATIF, et c'est ecrit noir sur blanc dans le
+ * contrat. Une application dont les outils vivent dans un autre processus
+ * depend de ce processus : lancee seule depuis un terminal, au banc d'essai,
+ * ou le jour ou le dock tombe, elle doit rester utilisable. Et le volet sait
+ * des choses que la barre ne saura jamais faire -- monter un volume, se
+ * connecter a un lecteur reseau -- ce qui est une raison de plus de le
+ * garder sous la main. */
+static void
+sur_prise (gboolean prise, gpointer data)
+{
+    (void) data;
+
+    for (guint i = 0; F.chrome != NULL && i < F.chrome->len; i++)
+        gtk_widget_set_visible (g_ptr_array_index (F.chrome, i), !prise);
+
+    g_debug ("outils : le dock %s — le chrome de la fenetre est %s",
+             prise ? "a pris" : "ne prend pas",
+             prise ? "escamote" : "montre");
+}
+
+/* La barre : une section par zone, et une seule est remplie ici.
+ *
+ * Les lieux viennent du volet, qui tient son propre modele a jour (voir
+ * fichiers-lieux.h) ; le fil est rempli par maj_fil() a chaque navigation.
+ * Ce qui est pose ici ne bouge plus. */
+static void
+publier_la_barre (GtkApplication *app, GActionGroup *groupe)
+{
+    F.barre      = g_menu_new ();
+    F.fil_modele = g_menu_new ();
+
+    GMenuModel *lieux = fichiers_lieux_modele (F.lieux);
+    if (lieux != NULL) {
+        /* LE MODELE DES LIEUX EST UN SOUS-MENU VIVANT : le volet le
+         * reconstruit quand une cle est branchee ou un favori ajoute, et
+         * org.gtk.Menus porte le changement jusqu'au dock sans qu'on ait
+         * rien a signaler. */
+        GMenuItem *sec = g_menu_item_new_section (NULL, lieux);
+        g_menu_append_item (F.barre, sec);
+        g_object_unref (sec);
+    }
+
+    GMenuItem *fil = g_menu_item_new_section (NULL, G_MENU_MODEL (F.fil_modele));
+    g_menu_item_set_attribute (fil, SHELL_OUTILS_A_ZONE, "s",
+                               SHELL_OUTILS_ZONE_FIL);
+    g_menu_append_item (F.barre, fil);
+    g_object_unref (fil);
+
+    g_autoptr(GMenu) outils = g_menu_new ();
+    GMenuItem *loupe = g_menu_item_new ("Rechercher", "outils.chercher");
+    g_menu_item_set_attribute (loupe, SHELL_OUTILS_A_FORME, "s", SHELL_OUTILS_AUVENT);
+    g_menu_item_set_attribute (loupe, SHELL_OUTILS_A_CONTROLE, "s", SHELL_OUTILS_SAISIE);
+    g_menu_item_set_attribute (loupe, SHELL_OUTILS_A_INVITE, "s", "Rechercher ici");
+    g_menu_item_set_attribute (loupe, SHELL_OUTILS_A_CLE, "s", "Ctrl+F");
+    g_menu_item_set_attribute (loupe, "icon", "s", "system-search-symbolic");
+    g_menu_append_item (outils, loupe);
+    g_object_unref (loupe);
+
+    GMenuItem *sec = g_menu_item_new_section (NULL, G_MENU_MODEL (outils));
+    g_menu_item_set_attribute (sec, SHELL_OUTILS_A_ZONE, "s",
+                               SHELL_OUTILS_ZONE_OUTILS);
+    g_menu_append_item (F.barre, sec);
+    g_object_unref (sec);
+
+    F.outils = shell_outils_publier (G_APPLICATION (app), "Fichiers", groupe,
+                                     G_MENU_MODEL (F.barre), sur_prise, NULL);
+}
+
 static void
 on_config_reloaded (ShellConfig *cfg, gpointer data)
 {
@@ -2278,6 +2496,14 @@ on_activate (GtkApplication *app, gpointer user_data)
     gtk_box_append (GTK_BOX (pile), F.etat);
     gtk_window_set_child (GTK_WINDOW (F.fenetre), pile);
 
+    /* CE QUI S'EFFACE QUAND LE DOCK PREND LA BARRE. La barre d'etat du bas
+     * reste : elle dit ce qui est selectionne et combien cela pese, ce que
+     * le dock ne porte pas -- et ce n'est pas du chrome, c'est du contenu. */
+    F.chrome = g_ptr_array_new ();
+    g_ptr_array_add (F.chrome, barre);
+    g_ptr_array_add (F.chrome, actions_barre);
+    g_ptr_array_add (F.chrome, F.lieux);
+
     /* Le menu contextuel est parente a la boite racine, et NON a la pile des
      * vues : un GtkStack n'alloue que son enfant visible, et le popover qu'on
      * lui attachait se voyait donner une hauteur trop courte -- son dernier
@@ -2294,6 +2520,20 @@ on_activate (GtkApplication *app, gpointer user_data)
     g_action_map_add_action_entries (G_ACTION_MAP (groupe), actions,
                                      G_N_ELEMENTS (actions), NULL);
     gtk_widget_insert_action_group (F.fenetre, "fichiers", G_ACTION_GROUP (groupe));
+
+    /* LE MEME GROUPE EST INSERE DEUX FOIS, sous deux prefixes.
+     *
+     * « fichiers » pour la fenetre -- les boutons, le menu contextuel, les
+     * raccourcis --, et « outils » parce que c'est sous ce nom-la que le
+     * contrat veut voir les actions dans le modele publie. Un seul groupe,
+     * deux facons de l'appeler : dupliquer les actions donnerait deux
+     * comportements a tenir d'accord. */
+    gtk_widget_insert_action_group (F.fenetre, SHELL_OUTILS_PREFIXE,
+                                    G_ACTION_GROUP (groupe));
+
+    F.act_aller = G_SIMPLE_ACTION (g_action_map_lookup_action (G_ACTION_MAP (groupe),
+                                                               "aller"));
+    publier_la_barre (app, G_ACTION_GROUP (groupe));
     g_object_unref (groupe);
 
     GtkEventController *ctrl = gtk_shortcut_controller_new ();
@@ -2314,6 +2554,21 @@ on_activate (GtkApplication *app, gpointer user_data)
     raccourci (ctrl, "<Alt>Up",          "fichiers.parent");
     raccourci (ctrl, "BackSpace",        "fichiers.parent");
     raccourci (ctrl, "<Alt>Return",      "fichiers.proprietes");
+
+    /* LA FENETRE NUE SE PILOTE AU CLAVIER, ET IL FAUT DONC QU'ELLE LE
+     * PUISSE ENTIEREMENT. Ces cinq-la manquaient tant qu'il y avait des
+     * boutons pour les remplacer.
+     *
+     * Menu et Maj+F10 ouvrent le menu contextuel : c'est la porte d'entree
+     * de tous les verbes une fois la barre partie. Sans elles, une fenetre
+     * depouillee n'est plus pilotable sans souris. */
+    raccourci (ctrl, "<Control>f",       "fichiers.recherche-ouvrir");
+    raccourci (ctrl, "Menu",             "fichiers.menu-contextuel");
+    raccourci (ctrl, "<Shift>F10",       "fichiers.menu-contextuel");
+    raccourci (ctrl, "<Control>1",       "fichiers.vue::apercu");
+    raccourci (ctrl, "<Control>2",       "fichiers.vue::icones");
+    raccourci (ctrl, "<Control>3",       "fichiers.vue::liste");
+    raccourci (ctrl, "<Control>4",       "fichiers.vue::details");
     gtk_widget_add_controller (F.fenetre, ctrl);
 
     /* Ctrl+L bascule la barre d'adresse : ce n'est pas une action du groupe,

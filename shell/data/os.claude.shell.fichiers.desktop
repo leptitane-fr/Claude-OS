@@ -1,0 +1,22 @@
+# LE NOM DU FICHIER EST L'APP_ID, ET C'EST UNE OBLIGATION, PAS UN USAGE.
+#
+# Le dock retrouve l'icone d'une fenetre ouverte par son app_id, et depuis le
+# 16 septembre 2026 il y rattache aussi la BARRE D'OUTILS qu'une application
+# publie (docs/14). Cette application s'appelait « claude-os-fichiers.desktop »
+# pour un app_id « os.claude.shell.fichiers » : une coquetterie tant que seule
+# l'icone en dependait, un defaut des lors que la barre en depend aussi.
+#
+# La visionneuse d'images avait deja pris cette regle le 10 septembre.
+[Desktop Entry]
+Type=Application
+Name=Fichiers
+Comment=Parcourir les fichiers et les dossiers
+Exec=claude-os-fichiers %U
+Icon=system-file-manager
+Terminal=false
+Categories=System;FileTools;FileManager;
+Keywords=fichiers;dossiers;explorateur;gestionnaire;disque;
+# Déclaré gestionnaire des dossiers : « Ouvrir le dossier contenant », depuis
+# Chromium par exemple, arrive alors ici plutôt que nulle part.
+MimeType=inode/directory;
+StartupNotify=true

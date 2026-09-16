@@ -274,7 +274,11 @@ for b in dock status fond lanceur reglages fichiers shell-basculer; do
 done
 run "rm -rf /usr/local/share/claude-os-shell"
 run "rm -f /usr/local/share/applications/claude-os-reglages.desktop"
+# Les DEUX noms : le fichier a ete renomme le 16 septembre 2026 pour que
+# son nom soit l'app_id (voir le .desktop). Une installation anterieure
+# garde l'ancien, et deux entrees « Fichiers » apparaitraient au lanceur.
 run "rm -f /usr/local/share/applications/claude-os-fichiers.desktop"
+run "rm -f /usr/local/share/applications/os.claude.shell.fichiers.desktop"
 
 # Le themerc-override du thème global vit lui aussi ici, et il est emporté :
 # c'est sans conséquence, claude-os-theme le réécrit plus bas dans ce même

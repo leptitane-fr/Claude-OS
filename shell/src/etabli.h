@@ -86,6 +86,11 @@ void shell_etabli_sur_auvent (ShellEtabli *e, ShellEtabliAuvent f, gpointer data
  * dans le vide. */
 void shell_etabli_fermer_auvent (ShellEtabli *e);
 gboolean shell_etabli_auvent_ouvert (ShellEtabli *e);
+
+/* Ouvrir l'auvent d'une entrée, désignée par le nom nu de son action.
+ * C'est ce que demande une application qui arme son propre raccourci --
+ * voir shell_outils_auvent(). Rend FALSE si aucune entrée ne correspond. */
+gboolean shell_etabli_ouvrir_auvent (ShellEtabli *e, const char *action);
 void shell_etabli_sur_taille (ShellEtabli *e, ShellEtabliTaille f, gpointer data);
 
 /* Poser la barre d'une application, ou la retirer en passant NULL.

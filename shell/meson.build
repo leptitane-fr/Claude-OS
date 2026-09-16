@@ -201,9 +201,12 @@ executable('claude-os-coffre',
 # sans la déclarer casse le jour où GTK cesse de l'apporter.
 gdkpixbuf = dependency('gdk-pixbuf-2.0')
 
+# outils.c : Fichiers est le premier client de la surface d'outils (docs/14).
+# Toute application qui publie une barre le lie de la meme facon.
 executable('claude-os-fichiers',
   'src/fichiers.c', 'src/fichiers-item.c', 'src/fichiers-ops.c',
-  'src/fichiers-lieux.c', 'src/fichiers-apercu.c', 'src/reseau.c', 'src/nuage.c', commun,
+  'src/fichiers-lieux.c', 'src/fichiers-apercu.c', 'src/outils.c',
+  'src/reseau.c', 'src/nuage.c', commun,
   dependencies : [gtk, layershell, giounix, pangocairo, secret, gdkpixbuf],
   install : true)
 
@@ -297,7 +300,7 @@ executable('claude-os-video',
   install : true)
 
 install_data(['data/claude-os-reglages.desktop',
-              'data/claude-os-fichiers.desktop',
+              'data/os.claude.shell.fichiers.desktop',
               'data/os.claude.shell.images.desktop',
               'data/os.claude.shell.video.desktop'],
   install_dir : get_option('prefix') / get_option('datadir') / 'applications')

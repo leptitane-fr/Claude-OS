@@ -272,3 +272,22 @@ shell_outils_prise (ShellOutils *o)
 {
     return o != NULL && o->prise;
 }
+
+void
+shell_outils_auvent (ShellOutils *o, const char *action)
+{
+    if (o == NULL || o->dock == NULL || action == NULL)
+        return;
+
+    GVariantBuilder args;
+    g_variant_builder_init (&args, G_VARIANT_TYPE ("av"));
+    g_variant_builder_add (&args, "v", g_variant_new_string (action));
+
+    /* Par l'action du dock, comme la présentation : un seul canal entre les
+     * deux, et il est déjà éprouvé. */
+    g_dbus_connection_call (o->bus, SHELL_OUTILS_DOCK, "/os/claude/shell/dock",
+                            "org.gtk.Actions", "Activate",
+                            g_variant_new ("(sava{sv})", "auvent", &args, NULL),
+                            NULL, G_DBUS_CALL_FLAGS_NO_AUTO_START, 2000, NULL,
+                            sur_reponse, g_strdup ("auvent"));
+}

@@ -1480,9 +1480,9 @@ act_dossier (GSimpleAction *a, GVariant *p, gpointer d)
     if (I.dossier == NULL)
         return;
 
-    g_autoptr(GDesktopAppInfo) info = g_desktop_app_info_new ("claude-os-fichiers.desktop");
+    g_autoptr(GDesktopAppInfo) info = g_desktop_app_info_new ("os.claude.shell.fichiers.desktop");
     if (info == NULL) {
-        g_message ("claude-os-fichiers.desktop introuvable : Fichiers n'est pas installé");
+        g_message ("os.claude.shell.fichiers.desktop introuvable : Fichiers n'est pas installé");
         return;
     }
     GList un = { .data = I.dossier, .next = NULL, .prev = NULL };

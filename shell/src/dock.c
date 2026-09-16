@@ -1605,6 +1605,22 @@ on_action_outil (GSimpleAction *a, GVariant *p, gpointer d)
         g_message ("etabli : pas d'outil n°%d a actionner", n);
 }
 
+/* Une application demande l'ouverture de son auvent (outils.h). Elle arme
+ * ses propres raccourcis -- le dock n'intercepte aucune touche -- et c'est
+ * par la que Ctrl+F ouvre la recherche quand c'est le dock qui la porte. */
+static void
+on_action_auvent (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) d;
+
+    if (p == NULL || !g_variant_is_of_type (p, G_VARIANT_TYPE_STRING))
+        return;
+
+    const char *action = g_variant_get_string (p, NULL);
+    if (D.etabli == NULL || !shell_etabli_ouvrir_auvent (D.etabli, action))
+        g_message ("etabli : aucun auvent pour l'action « %s »", action);
+}
+
 /* Ce que fait le bouton de retour, sur le bus : pour les scripts, pour le
  * banc, et pour le jour ou une touche voudra s'y brancher. */
 static void
@@ -1713,6 +1729,7 @@ static const GActionEntry actions[] = {
     { SHELL_OUTILS_PRESENTER, on_presentation, "s", NULL, NULL, { 0 } },
     { "bureau",   on_action_bureau,   NULL, NULL, NULL, { 0 } },
     { "outil",    on_action_outil,    "i",  NULL, NULL, { 0 } },
+    { "auvent",   on_action_auvent,   "s",  NULL, NULL, { 0 } },
     { "clavier",  on_action_clavier,  NULL, NULL, NULL, { 0 } },
     { "basculer", on_action_basculer, NULL, NULL, NULL, { 0 } },
     { "afficher", on_action_afficher, NULL, NULL, NULL, { 0 } },

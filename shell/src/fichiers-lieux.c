@@ -1,4 +1,5 @@
 #include "fichiers-lieux.h"
+#include "outils.h"
 #include "nuage.h"
 #include "reseau.h"
 
@@ -24,6 +25,18 @@ typedef struct {
      * eteint : sans cette marque, la ligne resterait muette et l'on
      * cliquerait trois fois de suite. */
     GHashTable      *en_cours;     /* char* -> GINT_TO_POINTER (1)          */
+
+    /* LE MEME CONTENU, EN MODELE, pour la barre du dock (outils.h).
+     *
+     * Rempli dans la MEME passe que les widgets, et jamais ailleurs : deux
+     * parcours separes du meme contenu finiraient par diverger, et c'est
+     * exactement ce que le contrat cherche a eviter -- une seule source de
+     * verite pour le volet, la barre et le clic droit.
+     *
+     * Ce qui n'a pas d'adresse n'y figure pas : un volume non monte, un
+     * lecteur reseau non connecte. On ne peut pas « y aller » d'un clic
+     * depuis le dock, qui ne saurait pas quoi monter. */
+    GMenu           *modele;
 } Lieux;
 
 /* ------------------------------------------------------------------------- */
@@ -840,6 +853,58 @@ entree (Lieux *L, const char *nom, GIcon *icone, GFile *cible,
     return row;
 }
 
+/* -------------------------------------------------------------------------
+ * Le modele, pour la barre du dock
+ * ------------------------------------------------------------------------- */
+static GMenu *section_courante;    /* celle qu'on remplit, pendant reconstruire */
+
+static void
+modele_section (Lieux *L, const char *titre)
+{
+    if (section_courante != NULL) {
+        GMenuItem *sec = g_menu_item_new_section (NULL,
+                                                  G_MENU_MODEL (section_courante));
+        /* TOUTES EN ZONE « lieux » : le dock les met bout a bout dans la
+         * meme boite. Les titres de section du volet -- « Favoris »,
+         * « Peripheriques » -- n'ont pas d'equivalent sur une ligne, et un
+         * intitule vertical au milieu d'une barre serait illisible. */
+        g_menu_item_set_attribute (sec, SHELL_OUTILS_A_ZONE, "s",
+                                   SHELL_OUTILS_ZONE_LIEUX);
+        g_menu_append_item (L->modele, sec);
+        g_object_unref (sec);
+        g_object_unref (section_courante);
+    }
+    section_courante = (titre != NULL) ? g_menu_new () : NULL;
+}
+
+static void
+modele_entree (const char *nom, GIcon *icone, GFile *fichier)
+{
+    if (section_courante == NULL || fichier == NULL || nom == NULL)
+        return;
+
+    g_autofree char *uri = g_file_get_uri (fichier);
+    GMenuItem *it = g_menu_item_new (nom, NULL);
+    g_menu_item_set_action_and_target_value (it, "outils.aller",
+                                             g_variant_new_string (uri));
+    g_menu_item_set_attribute (it, SHELL_OUTILS_A_FORME, "s", SHELL_OUTILS_LIEU);
+
+    if (icone != NULL) {
+        g_autofree char *nom_icone = g_icon_to_string (icone);
+        if (nom_icone != NULL)
+            g_menu_item_set_attribute (it, "icon", "s", nom_icone);
+    }
+    g_menu_append_item (section_courante, it);
+    g_object_unref (it);
+}
+
+GMenuModel *
+fichiers_lieux_modele (GtkWidget *widget)
+{
+    Lieux *L = g_object_get_data (G_OBJECT (widget), "lieux");
+    return L ? G_MENU_MODEL (L->modele) : NULL;
+}
+
 static void
 ajouter_chemin (Lieux *L, const char *chemin, const char *nom,
                 const char *icone, const char *favori)
@@ -855,6 +920,7 @@ ajouter_chemin (Lieux *L, const char *chemin, const char *nom,
 
     gtk_list_box_append (GTK_LIST_BOX (L->liste),
                          entree (L, nom ? nom : base, ic, f, NULL, NULL, favori));
+    modele_entree (nom ? nom : base, ic, f);
 }
 
 static void
@@ -864,8 +930,12 @@ reconstruire (Lieux *L)
     while ((enfant = gtk_widget_get_first_child (L->liste)) != NULL)
         gtk_list_box_remove (GTK_LIST_BOX (L->liste), enfant);
 
+    g_menu_remove_all (L->modele);
+    g_clear_object (&section_courante);
+
     /* --- dossiers personnels --- */
     gtk_list_box_append (GTK_LIST_BOX (L->liste), entete ("Emplacements"));
+    modele_section (L, "Emplacements");
 
     ajouter_chemin (L, g_get_home_dir (), "Dossier personnel", "user-home", NULL);
     const struct { GUserDirectory d; const char *nom; const char *ic; } perso[] = {
@@ -892,6 +962,7 @@ reconstruire (Lieux *L)
     /* --- favoris --- */
     if (L->favoris->len > 0) {
         gtk_list_box_append (GTK_LIST_BOX (L->liste), entete ("Favoris"));
+        modele_section (L, "Favoris");
         for (guint i = 0; i < L->favoris->len; i++) {
             const char *chemin = g_ptr_array_index (L->favoris, i);
             g_autofree char *nom = g_path_get_basename (chemin);
@@ -911,6 +982,7 @@ reconstruire (Lieux *L)
 
         if (!titre) {
             gtk_list_box_append (GTK_LIST_BOX (L->liste), entete ("Périphériques"));
+            modele_section (L, "Périphériques");
             titre = TRUE;
         }
         g_autofree char *nom = g_mount_get_name (mnt);
@@ -918,6 +990,7 @@ reconstruire (Lieux *L)
         g_autoptr(GFile) racine = g_mount_get_root (mnt);
         gtk_list_box_append (GTK_LIST_BOX (L->liste),
                              entree (L, nom, ic, racine, NULL, mnt, NULL));
+        modele_entree (nom, ic, racine);
     }
 
     /* Volumes connus mais pas montes : une cle branchee que personne n'a
@@ -967,6 +1040,11 @@ reconstruire (Lieux *L)
             gtk_list_box_append (GTK_LIST_BOX (L->liste),
                                  entree_nuage (L, g_ptr_array_index (L->nuages, i)));
     }
+
+    /* Fermer la derniere section ouverte : sans cet appel, tout ce qui
+     * suivait le dernier titre resterait dans un GMenu que personne
+     * n'ajoute au modele. */
+    modele_section (L, NULL);
 
     fichiers_lieux_suivre (L->boite, L->courant);
 }
@@ -1061,6 +1139,7 @@ lieux_free (gpointer data)
     g_clear_pointer (&L->lecteurs, g_ptr_array_unref);
     g_clear_pointer (&L->nuages, g_ptr_array_unref);
     g_clear_pointer (&L->en_cours, g_hash_table_unref);
+    g_clear_object (&L->modele);
 
     /* Le moniteur des montages est un singleton qui survit au volet. Sans
      * ce debranchement, un partage demonte apres la fermeture de la fenetre
@@ -1084,6 +1163,7 @@ fichiers_lieux_new (LieuxNavFunc nav, gpointer data)
     L->en_cours = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
     L->lecteurs = reseau_charger ();
     L->nuages   = nuage_charger ();
+    L->modele   = g_menu_new ();
     favoris_lire (L);
 
     L->liste = gtk_list_box_new ();

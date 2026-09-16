@@ -21,6 +21,32 @@ destiné aux applications à venir.
 [`shell/src/outils.h`](shell/src/outils.h)**, et nulle part ailleurs. Ne pas
 redécouvrir le protocole en lisant le dock.
 
+**L'ÉTAPE 5 EST FAITE, ET LE CHANTIER EST ÉCRIT : Fichiers est le premier
+client.** Sa fenêtre est **nue** quand le dock tient la barre — plus de barre
+haute, plus de rangée d'actions, plus de volet — et elle **retrouve tout** si
+le dock n'est pas là. Le volet des lieux produit son modèle dans la même
+passe que ses widgets ; le fil d'Ariane de même ; la recherche passe par
+l'auvent. Le même groupe d'actions est inséré deux fois, sous `fichiers` et
+sous `outils` : une seule source de vérité pour la barre, le clic droit et le
+clavier.
+
+**LE CONTRAT A DÛ CÉDER SUR UN POINT, et c'est Fichiers qui l'a montré :** une
+section peut en contenir d'autres. Fichiers compose sa barre depuis le modèle
+de son volet, qui a ses propres sections — l'établi ne descendait pas dedans,
+et donnait **zéro lieu et deux boutons vides**. La zone se transmet désormais
+de parent en enfant.
+
+Le clavier a été complété — `Menu` et `Maj+F10` pour le menu contextuel,
+`Ctrl+F`, `Ctrl+1…4` — parce qu'une fenêtre nue doit être **entièrement**
+pilotable sans souris. `Ctrl+F` a demandé un ajout au contrat,
+`shell_outils_auvent()` : l'application arme ses raccourcis mais ne sait pas
+dessiner l'auvent, elle demande au dock de l'ouvrir.
+
+**`claude-os-fichiers.desktop` est devenu `os.claude.shell.fichiers.desktop`** :
+le dock rattache la barre par l'app_id, et le nom du `.desktop` doit être cet
+app_id. `provision.sh` purge les deux noms — sans quoi deux entrées
+« Fichiers » apparaîtraient au lanceur.
+
 **L'ÉTAPE 4 EST FAITE : l'auvent** (`auvent.c`) — le volet qui monte
 au-dessus de la pilule, avec un contrôle écrit : la **saisie**. Chaque frappe
 part vers l'application ; la fermeture en envoie une dernière, **vide**, sans
@@ -935,7 +961,7 @@ sur lui — sur un conteneur.
 | **Zone morte tactile** | Apparue le 13 septembre, **disparue le 14 sans intervention** : intermittente, cause inconnue. Rien n'a été inscrit en dur dans le clavier. Si elle revient : `claude-os-root python3 tools/diag-tactile.py coins`, puis `carte`. |
 | **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
 | **Le nuage** | **Google Drive EN SERVICE depuis le 15 septembre 2026** — monté, parcouru, écrit. OneDrive écrit mais **jamais monté** : la création d'une application Azure est fermée aux comptes Microsoft personnels, et le report est un choix de l'utilisateur. Ni panneau de réglages, ni icônes, ni clic éprouvé à l'écran. Voir [`docs/13`](docs/13-nuage.md). |
-| **Surface d'outils** | **Étapes 1 à 4 sur 5 faites le 16 septembre 2026** : le contrat (`outils.h`), le retourneur (`retourneur.c`), l'établi (`etabli.c`) et sa règle de visibilité, l'auvent (`auvent.c`) et son contrôle de saisie. Trois bancs, 45 vérifications, 0 en échec. Reste Fichiers en premier client (étape 5). **Rien n'a encore été vu sur la vraie machine** : ni la rotation avec le renderer réel, ni le style autrement que sur des captures, ni le doigt — ni si 86 px réservés en permanence se supportent à l'usage. Voir [`docs/14`](docs/14-surface-outils.md). |
+| **Surface d'outils** | **LES CINQ ÉTAPES SONT ÉCRITES** (16 septembre 2026) : le contrat (`outils.h`), le retourneur, l'établi et sa règle de visibilité, l'auvent, et Fichiers en premier client. Trois bancs, **42 vérifications, 0 en échec**. **RIEN N'A ÉTÉ VU SUR MADOO** : ni la rotation avec le renderer réel, ni le style autrement que sur des captures d'un labwc sans écran, ni le doigt — ni si 86 px réservés en permanence se supportent à l'usage. C'est le seul point qui reste, et il ne s'écrit pas. Voir [`docs/14`](docs/14-surface-outils.md). |
 | Reports | icônes sur le bureau. |
 
 ---

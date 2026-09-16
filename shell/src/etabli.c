@@ -424,16 +424,44 @@ poser_entree (ShellEtabli *e, GMenuModel *m, int i, const char *zone,
         g_variant_unref (but);
 }
 
+static void on_items (GMenuModel *m, int pos, int retires, int ajoutes,
+                      gpointer data);
+static void suivre (ShellEtabli *e, GMenuModel *m);
+
+/* UNE SECTION PEUT EN CONTENIR D'AUTRES, et il faut y descendre.
+ *
+ * GMenuModel est récursif par nature, et une application a de bonnes raisons
+ * de s'en servir : Fichiers compose sa barre à partir du modèle que son
+ * volet des lieux tient à jour tout seul, et ce modèle a ses propres
+ * sections -- Emplacements, Favoris, Périphériques. Les poser telles quelles
+ * dans la barre donnait, au 16 septembre 2026, ZÉRO lieu et deux boutons
+ * vides : chaque sous-section était traitée comme une entrée ordinaire,
+ * sans libellé ni action.
+ *
+ * La zone se transmet de parent en enfant, sauf si l'enfant déclare la
+ * sienne. Une application peut donc grouper sans avoir à répéter la zone sur
+ * chaque morceau -- et une bibliothèque qui produit un modèle de lieux n'a
+ * pas à savoir dans quelle zone on la posera. */
 static void
 poser_section (ShellEtabli *e, GMenuModel *section, const char *zone)
 {
     int n = g_menu_model_get_n_items (section);
-    for (int i = 0; i < n; i++)
-        poser_entree (e, section, i, zone, i == 0);
+    int rang = 0;
+
+    for (int i = 0; i < n; i++) {
+        g_autoptr(GMenuModel) sous = g_menu_model_get_item_link (
+            section, i, G_MENU_LINK_SECTION);
+
+        if (sous != NULL) {
+            suivre (e, sous);
+            g_autofree char *sienne = attribut (section, i, SHELL_OUTILS_A_ZONE);
+            poser_section (e, sous, sienne ? sienne : zone);
+            continue;
+        }
+        poser_entree (e, section, i, zone, rang++ == 0);
+    }
 }
 
-static void on_items (GMenuModel *m, int pos, int retires, int ajoutes,
-                      gpointer data);
 
 /* Écouter un sous-modèle : il se remplira après coup, et c'est lui qui le
  * dira. Voir le champ `suivis` pour la raison. */
@@ -564,6 +592,26 @@ shell_etabli_garni (ShellEtabli *e)
         && (gtk_widget_get_first_child (e->lieux)  != NULL
          || gtk_widget_get_first_child (e->fil)    != NULL
          || gtk_widget_get_first_child (e->outils) != NULL);
+}
+
+gboolean
+shell_etabli_ouvrir_auvent (ShellEtabli *e, const char *action)
+{
+    if (e == NULL || action == NULL)
+        return FALSE;
+
+    /* On retrouve le bouton par son ouvreur : c'est lui qui porte le nom de
+     * l'action, le contrôle et l'invite. Chercher dans le modèle donnerait
+     * la même réponse au prix d'un second parcours qui pourrait diverger. */
+    for (GtkWidget *c = gtk_widget_get_first_child (e->outils);
+         c != NULL; c = gtk_widget_get_next_sibling (c)) {
+        Ouvreur *o = g_object_get_data (G_OBJECT (c), "ouvreur");
+        if (o == NULL || g_strcmp0 (o->action, action) != 0)
+            continue;
+        on_ouvrir (GTK_BUTTON (c), o);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 gboolean

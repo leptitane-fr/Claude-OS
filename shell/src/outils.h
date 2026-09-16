@@ -293,4 +293,17 @@ void shell_outils_retirer (ShellOutils *o);
 /* L'état courant, pour qui préfère le demander que le retenir. */
 gboolean shell_outils_prise (ShellOutils *o);
 
+/* Demander au dock d'ouvrir l'auvent d'une de nos entrées, désignée par le
+ * nom NU de son action (« chercher », et non « outils.chercher »).
+ *
+ * POURQUOI UNE APPLICATION EN A BESOIN. Elle arme ses propres raccourcis --
+ * le dock n'intercepte aucune touche -- et Ctrl+F doit ouvrir la recherche
+ * où qu'elle soit : dans la fenêtre tant qu'elle porte son chrome, dans
+ * l'auvent dès que le dock tient la barre. L'application ne sait pas
+ * dessiner l'auvent ; elle demande, et le contrat s'occupe du reste.
+ *
+ * Sans effet si le dock n'a pas pris la barre, ou s'il ne trouve pas
+ * d'entrée pour cette action — il le dit sur sa sortie d'erreur. */
+void shell_outils_auvent (ShellOutils *o, const char *action);
+
 G_END_DECLS

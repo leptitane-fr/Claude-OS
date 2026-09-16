@@ -28,6 +28,19 @@ GtkWidget *fichiers_lieux_new (LieuxNavFunc nav, gpointer data);
  * dossier courant n'en est pas un. */
 void fichiers_lieux_suivre (GtkWidget *lieux, GFile *dossier);
 
+/* LE MEME CONTENU, EN MODELE, pour la barre du dock (voir outils.h).
+ *
+ * Rempli dans la MEME passe que les widgets du volet, et jamais ailleurs :
+ * deux parcours separes du meme contenu finiraient par diverger. Le modele
+ * appartient au volet et se reconstruit avec lui -- il suffit de le publier
+ * une fois, org.gtk.Menus signale ses propres changements.
+ *
+ * Ce qui n'a pas d'adresse n'y figure pas : un volume non monte, un lecteur
+ * reseau non connecte. On ne peut pas « y aller » d'un clic depuis le dock,
+ * qui ne saurait pas quoi monter -- le volet, lui, sait le faire, et c'est
+ * une raison de plus de le garder en repli. */
+GMenuModel *fichiers_lieux_modele (GtkWidget *lieux);
+
 /* Favoris de l'utilisateur, conserves dans ~/.config/claude-os/favoris. */
 void     fichiers_lieux_ajouter (GtkWidget *lieux, GFile *dossier);
 void     fichiers_lieux_retirer (GtkWidget *lieux, GFile *dossier);
