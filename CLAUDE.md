@@ -21,6 +21,29 @@ destiné aux applications à venir.
 [`shell/src/outils.h`](shell/src/outils.h)**, et nulle part ailleurs. Ne pas
 redécouvrir le protocole en lisant le dock.
 
+**LE CONTRAT EST PASSÉ EN VERSION 2** (16 septembre 2026, après usage) :
+**l'établi ne porte que des boutons.** La zone `fil` et la forme `etape` ont
+été retirées — une suite de mots séparés de chevrons au milieu d'une rangée
+de boutons cassait le rythme, et l'œil ne savait plus ce qui se clique et ce
+qui se lit.
+
+À la place : un **bouton « Chemin »** qui déploie un auvent de type **`liste`**
+— les étapes une par ligne —, et **le dossier courant dans le titre de la
+fenêtre**. La règle générale qui s'en dégage, et qui vaut pour les
+applications à venir : **ce qui se lit va ailleurs ; ce qui s'atteint devient
+un bouton.**
+
+**ET LE DOCK LIT ENFIN LA VERSION QU'IL PROMETTAIT DE VÉRIFIER.** `outils.h`
+disait depuis le premier jour que le dock « demande, et refuse ce qu'il ne
+sait pas lire » : la propriété existait, personne ne la lisait, la promesse
+était vide. Le passage en v2 l'a rendue nécessaire — une application écrite
+pour le 1 déclarerait une zone que le dock ne connaît plus.
+
+Deux autres constats d'usage, corrigés le même jour : **les applications
+ouvertes restent à droite** sur les deux faces (elles traversaient la pilule
+au retournement), et **Réseau et Nuage manquaient aux lieux** — ces deux
+sections du volet ne passent pas par `ajouter_chemin()`.
+
 **VU À L'ÉCRAN SUR MADOO, ET DEUX DÉFAUTS D'USAGE CORRIGÉS** — qu'aucun banc
 ne pouvait voir, parce qu'un banc lit des états et ne regarde pas :
 
@@ -979,7 +1002,7 @@ sur lui — sur un conteneur.
 | **Zone morte tactile** | Apparue le 13 septembre, **disparue le 14 sans intervention** : intermittente, cause inconnue. Rien n'a été inscrit en dur dans le clavier. Si elle revient : `claude-os-root python3 tools/diag-tactile.py coins`, puis `carte`. |
 | **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
 | **Le nuage** | **Google Drive EN SERVICE depuis le 15 septembre 2026** — monté, parcouru, écrit. OneDrive écrit mais **jamais monté** : la création d'une application Azure est fermée aux comptes Microsoft personnels, et le report est un choix de l'utilisateur. Ni panneau de réglages, ni icônes, ni clic éprouvé à l'écran. Voir [`docs/13`](docs/13-nuage.md). |
-| **Surface d'outils** | **EN SERVICE ET VUE À L'ÉCRAN** (16 septembre 2026). Les cinq étapes écrites, installées, et deux défauts d'usage corrigés après essai sur MADOO — voir [`docs/14`](docs/14-surface-outils.md) §14.11. Trois bancs, **44 vérifications, 0 en échec**. Restent à éprouver : **le doigt**, et la question d'usage des 86 px réservés en permanence. |
+| **Surface d'outils** | **EN SERVICE ET VUE À L'ÉCRAN** (16 septembre 2026). Les cinq étapes écrites, installées, et deux défauts d'usage corrigés après essai sur MADOO — voir [`docs/14`](docs/14-surface-outils.md) §14.11. Trois bancs, **45 vérifications, 0 en échec**. Contrat en **version 2**. Restent à éprouver : **le doigt**, et la question d'usage des 86 px réservés en permanence. |
 | Fichiers : deux fenêtres, une instance | Repéré à l'usage le 16 septembre 2026, **hors du chantier de la surface d'outils** : deux fenêtres ouvertes sont la même instance, et les boutons de navigation, le volet et l'affichage s'appliquent tous à la dernière ouverte. Défaut antérieur. Il éclaire une limite écrite du contrat : la barre est par APPLICATION, pas par fenêtre. |
 | Reports | icônes sur le bureau. |
 

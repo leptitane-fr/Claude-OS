@@ -915,8 +915,73 @@ poser_barre (const char *app_id)
     shell_visibility_etabli (TRUE);
 }
 
-/* L'application se presente (outils.h). On la retient, on lui repond, et si
- * c'est elle qui est au premier plan, on prend sa barre sur-le-champ. */
+/* Repondre a une application qui s'est presentee : on prend, ou on ne prend
+ * pas, et dans les deux cas on le lui dit. Le silence la laisserait sans
+ * outils sans qu'elle sache pourquoi -- voir outils.h. */
+static void
+repondre (const char *nom, gboolean prise)
+{
+    GDBusConnection *cnx = g_application_get_dbus_connection (G_APPLICATION (D.app));
+    if (cnx == NULL)
+        return;
+
+    g_dbus_connection_call (cnx, nom, SHELL_OUTILS_CHEMIN,
+                            SHELL_OUTILS_IFACE, "Prise",
+                            g_variant_new ("(b)", prise), NULL,
+                            G_DBUS_CALL_FLAGS_NO_AUTO_START, 2000, NULL,
+                            NULL, NULL);
+}
+
+/* LA VERSION DU CONTRAT EST DEMANDEE, PAS SUPPOSEE.
+ *
+ * outils.h le promet depuis le premier jour : « le dock DEMANDE, et refuse ce
+ * qu'il ne sait pas lire ». Il ne le faisait pas -- la propriete existait,
+ * personne ne la lisait, et la promesse etait vide. Le passage du contrat 1
+ * au 2, le 16 septembre 2026, l'a rendue necessaire : une application ecrite
+ * pour le 1 declare une zone « fil » que le dock ne connait plus, et son
+ * contenu tomberait dans les outils en boutons de texte -- exactement le
+ * defaut qu'on venait de corriger.
+ *
+ * Demandee UNE FOIS, a la presentation, et non a chaque changement de
+ * fenetre : une application ne change pas de contrat en cours de route. */
+static void
+sur_contrat (GObject *src, GAsyncResult *res, gpointer data)
+{
+    g_autofree char *nom = data;
+    g_autoptr(GError) err = NULL;
+    g_autoptr(GVariant) r =
+        g_dbus_connection_call_finish (G_DBUS_CONNECTION (src), res, &err);
+
+    if (r == NULL) {
+        g_message ("outils : « %s » ne dit pas sa version de contrat : %s",
+                   nom, err->message);
+        repondre (nom, FALSE);
+        return;
+    }
+
+    g_autoptr(GVariant) v = g_variant_get_child_value (r, 0);
+    g_autoptr(GVariant) version = g_variant_get_variant (v);
+    guint32 contrat = g_variant_get_uint32 (version);
+
+    if (contrat != SHELL_OUTILS_CONTRAT) {
+        g_message ("outils : « %s » parle le contrat %u, ce dock lit le %u — "
+                   "sa barre n'est pas prise", nom, contrat,
+                   SHELL_OUTILS_CONTRAT);
+        repondre (nom, FALSE);
+        return;
+    }
+
+    g_hash_table_replace (D.barres, g_strdup (nom), g_strdup (nom));
+    g_debug ("outils : « %s » s'est presente, contrat %u", nom, contrat);
+    repondre (nom, TRUE);
+
+    const char *actif = app_active ();
+    if (actif != NULL && shell_app_id_matches (nom, actif))
+        poser_barre (actif);
+}
+
+/* L'application se presente (outils.h). On lui demande sa version, et la
+ * suite se joue dans sur_contrat(). */
 static void
 on_presentation (GSimpleAction *a, GVariant *params, gpointer data)
 {
@@ -927,20 +992,17 @@ on_presentation (GSimpleAction *a, GVariant *params, gpointer data)
         return;
     }
     const char *nom = g_variant_get_string (params, NULL);
-    g_hash_table_replace (D.barres, g_strdup (nom), g_strdup (nom));
-    g_debug ("outils : « %s » s'est presente", nom);
 
     GDBusConnection *cnx = g_application_get_dbus_connection (G_APPLICATION (D.app));
-    if (cnx != NULL)
-        g_dbus_connection_call (cnx, nom, SHELL_OUTILS_CHEMIN,
-                                SHELL_OUTILS_IFACE, "Prise",
-                                g_variant_new ("(b)", TRUE), NULL,
-                                G_DBUS_CALL_FLAGS_NO_AUTO_START, 2000, NULL,
-                                NULL, NULL);
+    if (cnx == NULL)
+        return;
 
-    const char *actif = app_active ();
-    if (actif != NULL && shell_app_id_matches (nom, actif))
-        poser_barre (actif);
+    g_dbus_connection_call (cnx, nom, SHELL_OUTILS_CHEMIN,
+                            "org.freedesktop.DBus.Properties", "Get",
+                            g_variant_new ("(ss)", SHELL_OUTILS_IFACE, "Contrat"),
+                            G_VARIANT_TYPE ("(v)"),
+                            G_DBUS_CALL_FLAGS_NO_AUTO_START, 2000, NULL,
+                            sur_contrat, g_strdup (nom));
 }
 
 /* -------------------------------------------------------------------------

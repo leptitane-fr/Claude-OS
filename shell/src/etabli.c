@@ -16,8 +16,6 @@ struct _ShellEtabli {
     ShellAuvent *auvent;
     GtkWidget *apps;        /* au bureau, fourni par le dock                */
     GtkWidget *lieux;
-    GtkWidget *fil;
-    GtkWidget *fil_defil;   /* un chemin profond déborde : il défile        */
     GtkWidget *outils;
     GtkWidget *retour;
 
@@ -64,12 +62,19 @@ typedef struct {
     char        *action;     /* le nom NU, sans le préfixe */
     char        *controle;
     char        *invite;
+
+    /* Les lignes, pour un contrôle « liste » : le SOUS-MENU de l'entrée
+     * d'auvent. Retenu ici plutôt que relu à l'ouverture -- le modèle vient
+     * du bus, et le chercher deux fois donnerait deux réponses le jour où il
+     * change entre les deux. */
+    GMenuModel  *lignes;
 } Ouvreur;
 
 static void
 ouvreur_libre (gpointer data)
 {
     Ouvreur *o = data;
+    g_clear_object (&o->lignes);
     g_free (o->action);
     g_free (o->controle);
     g_free (o->invite);
@@ -192,7 +197,7 @@ on_ouvrir (GtkButton *b, gpointer data)
     (void) b;
 
     shell_auvent_ouvrir (o->etabli->auvent, o->controle, o->invite,
-                         sur_valeur, o);
+                         o->lignes, sur_valeur, o);
 }
 
 static void
@@ -267,16 +272,6 @@ forme_lieu (const char *label, const char *icone, const char *astuce)
     return b;
 }
 
-/* Une étape du fil d'Ariane : du texte, et rien d'autre. Le chevron est posé
- * par la zone, pas par l'entrée -- il sépare, il n'appartient à personne. */
-static GtkWidget *
-forme_etape (const char *label)
-{
-    GtkWidget *b = gtk_button_new_with_label (label ? label : "…");
-    gtk_widget_add_css_class (b, "etabli-etape");
-    return b;
-}
-
 static GtkWidget *
 forme_bouton (const char *icone, const char *astuce, const char *cle)
 {
@@ -300,8 +295,7 @@ forme_bouton (const char *icone, const char *astuce, const char *cle)
 /* -------------------------------------------------------------------------
  * Construction depuis le modèle
  * ------------------------------------------------------------------------- */
-/* Les enfants d'une boîte. Le fil en compte deux par étape sauf la première
- * -- le chevron qui la précède -- d'où la division chez l'appelant. */
+/* Les enfants d'une boîte, pour le compte rendu de débogage. */
 static int
 compter (GtkWidget *boite)
 {
@@ -323,19 +317,18 @@ vider (GtkWidget *boite)
     }
 }
 
+static void suivre (ShellEtabli *e, GMenuModel *m);
+
 /* LA ZONE VIENT DE LA SECTION, LA FORME VIENT DE L'ENTRÉE, et les deux ne se
  * commandent pas l'une l'autre. C'est le contrat (outils.h) : la section dit
- * OÙ, l'entrée dit COMMENT. Les confondre paraîtrait plus simple -- une
- * étape irait forcément au fil -- jusqu'au jour où une application voudra un
- * lieu dans la zone des outils, et devra mentir sur l'un pour obtenir
- * l'autre. */
+ * OÙ, l'entrée dit COMMENT. Les confondre paraîtrait plus simple, jusqu'au
+ * jour où une application voudra un lieu dans la zone des outils, et devra
+ * mentir sur l'un pour obtenir l'autre. */
 static GtkWidget *
 boite_de_zone (ShellEtabli *e, const char *zone)
 {
     if (g_str_equal (zone, SHELL_OUTILS_ZONE_LIEUX))
         return e->lieux;
-    if (g_str_equal (zone, SHELL_OUTILS_ZONE_FIL))
-        return e->fil;
     if (g_str_equal (zone, SHELL_OUTILS_ZONE_OUTILS))
         return e->outils;
 
@@ -352,8 +345,7 @@ boite_de_zone (ShellEtabli *e, const char *zone)
 }
 
 static void
-poser_entree (ShellEtabli *e, GMenuModel *m, int i, const char *zone,
-              gboolean premier)
+poser_entree (ShellEtabli *e, GMenuModel *m, int i, const char *zone)
 {
     g_autofree char *label  = attribut (m, i, G_MENU_ATTRIBUTE_LABEL);
     g_autofree char *action = attribut (m, i, G_MENU_ATTRIBUTE_ACTION);
@@ -371,16 +363,6 @@ poser_entree (ShellEtabli *e, GMenuModel *m, int i, const char *zone,
 
     if (g_str_equal (f, SHELL_OUTILS_LIEU)) {
         bouton = forme_lieu (label, icone, astuce ? astuce : label);
-
-    } else if (g_str_equal (f, SHELL_OUTILS_ETAPE)) {
-        /* Le chevron avant chaque étape sauf la première : il SÉPARE, il
-         * n'appartient à aucune des deux. */
-        if (!premier) {
-            GtkWidget *chevron = gtk_label_new ("›");
-            gtk_widget_add_css_class (chevron, "etabli-chevron");
-            gtk_box_append (GTK_BOX (ou), chevron);
-        }
-        bouton = forme_etape (label);
 
     } else if (g_str_equal (f, SHELL_OUTILS_AUVENT)) {
         /* L'AUVENT EST L'ÉTAPE 4. En attendant, l'entrée existe et
@@ -402,6 +384,17 @@ poser_entree (ShellEtabli *e, GMenuModel *m, int i, const char *zone,
         ouvreur->action   = g_strdup (nom_nu (action));
         ouvreur->controle = g_strdup (attribut (m, i, SHELL_OUTILS_A_CONTROLE));
         ouvreur->invite   = g_strdup (attribut (m, i, SHELL_OUTILS_A_INVITE));
+
+        /* Le sous-menu porte les lignes d'une « liste ». On le SUIT aussi :
+         * il vient du bus, il arrive après, et il change -- un chemin bouge
+         * à chaque navigation. Sans cela, le volet montrerait celui d'hier. */
+        ouvreur->lignes = g_menu_model_get_item_link (m, i, G_MENU_LINK_SUBMENU);
+        if (ouvreur->lignes != NULL)
+            suivre (e, ouvreur->lignes);
+
+        g_debug ("établi : auvent « %s » contrôle=%s lignes=%d",
+                 label ? label : "?", ouvreur->controle ? ouvreur->controle : "?",
+                 ouvreur->lignes ? g_menu_model_get_n_items (ouvreur->lignes) : -1);
 
         g_object_set_data_full (G_OBJECT (bouton), "ouvreur", ouvreur,
                                 ouvreur_libre);
@@ -446,7 +439,6 @@ static void
 poser_section (ShellEtabli *e, GMenuModel *section, const char *zone)
 {
     int n = g_menu_model_get_n_items (section);
-    int rang = 0;
 
     for (int i = 0; i < n; i++) {
         g_autoptr(GMenuModel) sous = g_menu_model_get_item_link (
@@ -458,7 +450,7 @@ poser_section (ShellEtabli *e, GMenuModel *section, const char *zone)
             poser_section (e, sous, sienne ? sienne : zone);
             continue;
         }
-        poser_entree (e, section, i, zone, rang++ == 0);
+        poser_entree (e, section, i, zone);
     }
 }
 
@@ -479,7 +471,6 @@ reconstruire (ShellEtabli *e)
 {
     g_ptr_array_set_size (e->suivis, 0);
     vider (e->lieux);
-    vider (e->fil);
     vider (e->outils);
     g_ptr_array_set_size (e->allumables, 0);
     g_ptr_array_set_size (e->cibles, 0);
@@ -508,7 +499,6 @@ reconstruire (ShellEtabli *e)
     /* Les séparateurs ne se montrent que si ce qu'ils séparent existe : une
      * pilule vide bordée de trois traits verticaux se lit comme une panne. */
     gtk_widget_set_visible (e->lieux, gtk_widget_get_first_child (e->lieux) != NULL);
-    gtk_widget_set_visible (e->fil_defil, gtk_widget_get_first_child (e->fil) != NULL);
     gtk_widget_set_visible (e->outils, gtk_widget_get_first_child (e->outils) != NULL);
 
     allumer (e);
@@ -520,13 +510,8 @@ reconstruire (ShellEtabli *e)
      * C'est la seule façon de vérifier de l'extérieur qu'une barre est
      * arrivée ENTIÈRE : le banc lit cette ligne, et personne ne peut
      * compter des widgets depuis un autre processus. */
-    /* Le fil compte deux enfants par étape sauf la première -- le chevron
-     * qui la précède. Vide, il en compte zéro, et non une : la formule
-     * annonçait « 1 étapes » sur un fil qu'on n'avait pas encore reçu. */
-    int etapes = compter (e->fil);
-    g_debug ("établi : %d lieux, %d étapes, %d outils",
-             compter (e->lieux), etapes == 0 ? 0 : etapes / 2 + 1,
-             compter (e->outils));
+    g_debug ("établi : %d lieux, %d outils",
+             compter (e->lieux), compter (e->outils));
 
     if (e->taille_cb != NULL)
         e->taille_cb (e->taille_data);
@@ -590,8 +575,7 @@ shell_etabli_garni (ShellEtabli *e)
 {
     return e != NULL
         && (gtk_widget_get_first_child (e->lieux)  != NULL
-         || gtk_widget_get_first_child (e->fil)    != NULL
-         || gtk_widget_get_first_child (e->outils) != NULL);
+          || gtk_widget_get_first_child (e->outils) != NULL);
 }
 
 gboolean
@@ -757,52 +741,21 @@ shell_etabli_new (GtkWidget *apps)
 
     e->apps   = apps;
     e->lieux  = zone ("etabli-lieux");
-    e->fil    = zone ("etabli-fil");
     e->outils = zone ("etabli-outils");
-
-    /* LE FIL DÉFILE, ET IL EST LE SEUL À LE FAIRE. Un chemin profond
-     * déborderait la pilule et pousserait le bouton de retour hors de
-     * l'écran -- or c'est précisément le bouton dont on doit toujours
-     * disposer. Les lieux, eux, sont en nombre borné par l'application. */
-    e->fil_defil = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (e->fil_defil),
-                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_NEVER);
-    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (e->fil_defil), e->fil);
-    gtk_widget_set_hexpand (e->fil_defil, FALSE);
-
-    /* SANS CECI, LE FIL EST ÉCRASÉ À ZÉRO. Un GtkScrolledWindow demande par
-     * défaut la place minimale -- c'est-à-dire presque rien : il sait
-     * défiler, donc il accepte n'importe quelle largeur. Dans une boîte, il
-     * la prend. Vu au banc le 16 septembre 2026 : quatre étapes posées,
-     * aucune visible, et pas un avertissement.
-     *
-     * Il demande donc la largeur de son contenu, plafonnée : au-delà, c'est
-     * lui qui défile plutôt que la pilule qui pousse le bouton de retour
-     * hors de l'écran. La hauteur, elle, se propage sans plafond -- une
-     * rangée d'étapes n'a qu'une ligne. */
-    gtk_scrolled_window_set_propagate_natural_width (
-        GTK_SCROLLED_WINDOW (e->fil_defil), TRUE);
-    gtk_scrolled_window_set_propagate_natural_height (
-        GTK_SCROLLED_WINDOW (e->fil_defil), TRUE);
-    gtk_scrolled_window_set_max_content_width (
-        GTK_SCROLLED_WINDOW (e->fil_defil), 420);
 
     /* L'ORDRE DES ZONES SUIT CELUI DU DOCK, ET CE N'EST PAS UN DÉTAIL.
      *
-     * Sur la face bureau, les applications ouvertes sont À DROITE. Le
-     * premier jet les mettait à gauche sur l'établi : au retournement, elles
+     * Sur la face bureau, les applications ouvertes sont À DROITE. Le premier
+     * jet les mettait à gauche sur l'établi : au retournement, elles
      * traversaient la pilule, et l'œil devait les rattraper. Constaté à
-     * l'usage sur MADOO le 16 septembre 2026 — « c'est pas super intuitif »,
-     * et c'est exactement cela : rien ne doit bouger de ce qui est commun
-     * aux deux faces.
+     * l'usage sur MADOO le 16 septembre 2026.
      *
-     * Ce qui appartient à l'application vient donc d'abord, ce qui
-     * appartient au bureau ensuite, dans le même ordre des deux côtés :
+     * Ce qui appartient à l'application vient donc d'abord, ce qui appartient
+     * au bureau ensuite, dans le même ordre des deux côtés :
      *
-     *     lieux · fil · outils │ applications ouvertes │ retour
+     *     lieux · outils │ applications ouvertes │ retour
      */
     gtk_box_append (GTK_BOX (e->rangee), e->lieux);
-    gtk_box_append (GTK_BOX (e->rangee), e->fil_defil);
     gtk_box_append (GTK_BOX (e->rangee), e->outils);
 
     if (apps != NULL) {

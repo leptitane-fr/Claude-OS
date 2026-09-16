@@ -117,7 +117,7 @@ verifier "le dock prend la barre" 1 "$PRISE"
 verifier "et il reste à l'écran" etabli "$(etat)"
 grim "$SORTIE/02-avec-dock.png"
 
-PORTE=$(grep -o 'établi : [0-9]* lieux, [0-9]* étapes, [0-9]* outils' "$SORTIE/dock.log" | tail -1)
+PORTE=$(grep -o 'établi : [0-9]* lieux, [0-9]* outils' "$SORTIE/dock.log" | tail -1)
 printf '  ----- %-52s %s\n' "ce que le dock porte" "$PORTE"
 LIEUX=$(echo "$PORTE" | grep -o '[0-9]* lieux' | cut -d' ' -f1)
 if [ "${LIEUX:-0}" -ge 5 ]; then
@@ -133,17 +133,42 @@ appeler aller "[<'file://$ESSAI'>]"
 sleep 1.2
 appeler aller "[<'file://$HOME'>]"
 sleep 1.5
-PORTE2=$(grep -o 'établi : [0-9]* lieux, [0-9]* étapes, [0-9]* outils' "$SORTIE/dock.log" | tail -1)
-printf '  ----- %-52s %s\n' "après navigation" "$PORTE2"
-ETAPES=$(echo "$PORTE2" | grep -o '[0-9]* étapes' | cut -d' ' -f1)
-if [ "${ETAPES:-0}" -ge 2 ]; then
-	printf '  ok    %-52s %s\n' "le fil d'Ariane suit la navigation" "$ETAPES étapes"
+grim "$SORTIE/03-navigue.png"
+
+# LE CHEMIN A QUITTÉ LA RANGÉE (contrat 2) : il est dans l'auvent, et le
+# dossier courant se lit dans le TITRE de la fenêtre. C'est donc le titre
+# qu'on vérifie -- et c'est aussi ce que l'utilisateur regarde.
+TITRE=$(grep -o 'titre : .*' "$SORTIE/fichiers.log" | tail -1)
+printf '  ----- %-52s %s\n' "titre de la fenêtre" "${TITRE:-rien}"
+if printf '%s' "$TITRE" | grep -q 'Dossier personnel'; then
+	printf '  ok    %-52s %s\n' "le titre dit où l'on est" "Dossier personnel"
 else
-	printf '  ÉCHEC %-52s %s\n' "le fil n'a pas suivi" "${ETAPES:-0} étapes"
+	printf '  ÉCHEC %-52s %s\n' "le titre devait dire le dossier" "${TITRE:-rien}"
 	ECHECS=$((ECHECS + 1))
 fi
 N=$((N + 1))
-grim "$SORTIE/03-navigue.png"
+
+# --- 3bis. LE CHEMIN, EN AUVENT ------------------------------------------
+#
+# Il a quitté la rangée avec le contrat 2 : c'est maintenant un bouton qui
+# déploie une liste, une étape par ligne. Le premier outil de l'établi.
+gapplication action os.claude.shell.dock outil 0 >/dev/null 2>&1
+sleep 1.2
+grim "$SORTIE/03b-chemin.png"
+if grep -q 'auvent : ouvert' "$SORTIE/dock.log"; then
+	printf '  ok    %-52s %s\n' "le bouton de chemin déploie sa liste" "ouvert"
+else
+	printf '  ÉCHEC %-52s %s\n' "le chemin devait déployer une liste" "rien"
+	ECHECS=$((ECHECS + 1))
+fi
+N=$((N + 1))
+
+# Choisir une ligne navigue ET referme : on a obtenu ce pour quoi on avait
+# ouvert. La racine « Ordinateur » est la première.
+"$ICI/build/pointeur" clic 960 900 >/dev/null 2>&1
+sleep 0.6
+"$ICI/build/frappe" --touche Escape > /dev/null 2>&1
+sleep 1
 
 # --- 4. Ctrl+F ouvre l'auvent, et la frappe filtre -----------------------
 appeler aller "[<'file://$ESSAI'>]"
@@ -175,8 +200,10 @@ verifier "la frappe dans l'auvent a filtré la liste" "etat : 2 éléments" "${E
 
 "$ICI/build/frappe" --touche Escape >> "$SORTIE/frappe.log" 2>&1
 sleep 1
+# DEUX fermetures à ce stade : celle du chemin, puis celle-ci. Le compteur
+# cumule -- c'est le journal d'une séance, pas d'un geste.
 FERME=$(grep -c 'auvent : ferme' "$SORTIE/dock.log")
-verifier "Échap referme l'auvent" 1 "$FERME"
+verifier "Échap referme l'auvent" 2 "$FERME"
 
 # --- 5. le dock s'en va : le chrome revient ------------------------------
 pkill -f "$BUILD/claude-os-dock"

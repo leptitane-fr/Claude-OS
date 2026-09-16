@@ -96,6 +96,7 @@ static struct {
 static void naviguer (GFile *dossier, gboolean historiser);
 static void naviguer_vraiment (GFile *dossier, gboolean historiser);
 static void maj_etat (void);
+static void maj_titre (void);
 
 /* OU L'ON EST, DIT PAR L'ETAT D'UNE ACTION.
  *
@@ -110,6 +111,42 @@ maj_ou_on_est (void)
         return;
     g_autofree char *uri = g_file_get_uri (F.dossier);
     g_simple_action_set_state (F.act_aller, g_variant_new_string (uri));
+}
+
+/* LE TITRE DE LA FENETRE DIT OU L'ON EST.
+ *
+ * Depuis que le chemin a quitte la rangee du dock (contrat 2), c'est ici
+ * qu'on lit le dossier courant d'un coup d'oeil -- decision de l'utilisateur,
+ * 16 septembre 2026. labwc dessine la barre de titre de nos fenetres, elle
+ * est donc toujours la, y compris quand la fenetre est nue.
+ *
+ * Le dossier EN PREMIER : une barre de titre se tronque par la droite, et
+ * c'est le nom du dossier qu'on cherche, pas celui de l'application. */
+static void
+maj_titre (void)
+{
+    if (F.fenetre == NULL || F.dossier == NULL)
+        return;
+
+    g_autofree char *nom = g_file_get_basename (F.dossier);
+    g_autofree char *chemin = g_file_get_path (F.dossier);
+    g_autofree char *lecteur = chemin ? reseau_nom_du_point (chemin) : NULL;
+
+    const char *libelle = nom;
+    if (lecteur != NULL)
+        libelle = lecteur;
+    else if (g_strcmp0 (chemin, "/") == 0)
+        libelle = "Ordinateur";
+    else if (g_strcmp0 (chemin, g_get_home_dir ()) == 0)
+        libelle = "Dossier personnel";
+
+    g_autofree char *titre = g_strdup_printf ("%s — Fichiers", libelle);
+    gtk_window_set_title (GTK_WINDOW (F.fenetre), titre);
+
+    /* En debogage : depuis que le chemin a quitte la rangee, c'est ici qu'on
+     * lit ou l'on est -- et c'est la seule facon, depuis un autre processus,
+     * de verifier que le titre suit la navigation. */
+    g_debug ("titre : %s", titre);
 }
 
 /* -------------------------------------------------------------------------
@@ -286,16 +323,15 @@ maj_fil (void)
         g_signal_connect (b, "clicked", G_CALLBACK (on_fil_clic), NULL);
         gtk_box_append (GTK_BOX (F.fil), b);
 
-        /* LA MEME ETAPE, DANS LE MODELE. Ici et pas ailleurs : deux
-         * parcours du meme chemin finiraient par ne plus dire la meme
-         * chose, et le dock montrerait un fil d'hier. */
+        /* LA MEME ETAPE, DANS LE MODELE -- qui n'est plus un fil dans la
+         * rangee du dock, mais les LIGNES d'un auvent (contrat 2). Ici et
+         * pas ailleurs : deux parcours du meme chemin finiraient par ne
+         * plus dire la meme chose, et le dock montrerait celui d'hier. */
         if (F.fil_modele != NULL) {
             g_autofree char *uri = g_file_get_uri (f);
             GMenuItem *it = g_menu_item_new (libelle, NULL);
             g_menu_item_set_action_and_target_value (it, "outils.aller",
                                                      g_variant_new_string (uri));
-            g_menu_item_set_attribute (it, SHELL_OUTILS_A_FORME, "s",
-                                       SHELL_OUTILS_ETAPE);
             g_menu_append_item (F.fil_modele, it);
             g_object_unref (it);
         }
@@ -358,6 +394,7 @@ naviguer_vraiment (GFile *dossier, gboolean historiser)
     maj_boutons ();
     fichiers_lieux_suivre (F.lieux, F.dossier);
     maj_ou_on_est ();
+    maj_titre ();
     recharger ();
 }
 
@@ -2206,13 +2243,28 @@ publier_la_barre (GtkApplication *app, GActionGroup *groupe)
         g_object_unref (sec);
     }
 
-    GMenuItem *fil = g_menu_item_new_section (NULL, G_MENU_MODEL (F.fil_modele));
-    g_menu_item_set_attribute (fil, SHELL_OUTILS_A_ZONE, "s",
-                               SHELL_OUTILS_ZONE_FIL);
-    g_menu_append_item (F.barre, fil);
-    g_object_unref (fil);
-
     g_autoptr(GMenu) outils = g_menu_new ();
+
+    /* LE CHEMIN EST UN BOUTON, ET SES ETAPES SONT DANS L'AUVENT.
+     *
+     * Il occupait une zone a lui, « fil », et s'etalait en mots separes de
+     * chevrons au milieu d'une rangee de boutons : a l'usage, l'oeil ne
+     * savait plus ce qui se clique et ce qui se lit. La zone a ete retiree du
+     * contrat le 16 septembre 2026 (version 2) ; le chemin passe par un
+     * auvent de type « liste », dont les lignes sont le SOUS-MENU de cette
+     * entree.
+     *
+     * OU LIRE LE DOSSIER COURANT, alors ? Dans le titre de la fenetre --
+     * decision de l'utilisateur, le meme jour. Voir maj_titre(). */
+    GMenuItem *chemin = g_menu_item_new ("Chemin", NULL);
+    g_menu_item_set_attribute (chemin, SHELL_OUTILS_A_FORME, "s", SHELL_OUTILS_AUVENT);
+    g_menu_item_set_attribute (chemin, SHELL_OUTILS_A_CONTROLE, "s", SHELL_OUTILS_LISTE);
+    g_menu_item_set_attribute (chemin, SHELL_OUTILS_A_ASTUCE, "s", "Chemin");
+    g_menu_item_set_attribute (chemin, "icon", "s", "view-list-symbolic");
+    g_menu_item_set_link (chemin, G_MENU_LINK_SUBMENU, G_MENU_MODEL (F.fil_modele));
+    g_menu_append_item (outils, chemin);
+    g_object_unref (chemin);
+
     GMenuItem *loupe = g_menu_item_new ("Rechercher", "outils.chercher");
     g_menu_item_set_attribute (loupe, SHELL_OUTILS_A_FORME, "s", SHELL_OUTILS_AUVENT);
     g_menu_item_set_attribute (loupe, SHELL_OUTILS_A_CONTROLE, "s", SHELL_OUTILS_SAISIE);

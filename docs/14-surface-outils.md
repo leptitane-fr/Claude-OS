@@ -912,7 +912,109 @@ n'a rien à changer.
 
 ---
 
-## 14.12 Les décisions, et pourquoi
+## 14.12 Le contrat 2 — l'établi ne porte que des boutons
+
+*16 septembre 2026, après usage.* Trois constats, dont le troisième a changé
+le contrat.
+
+### Les applications ouvertes restent à droite
+
+Sur la face bureau elles sont à droite ; l'établi les mettait à gauche. Au
+retournement, elles traversaient la pilule et l'œil devait les rattraper.
+
+L'ordre suit maintenant celui du dock des deux côtés :
+
+```
+lieux · outils │ applications ouvertes │ retour
+```
+
+Le bouton de retour passe **après** les applications ouvertes, tout à droite —
+comme le bouton « outils » est la dernière chose du dock. Rien de ce qui est
+commun aux deux faces ne bouge plus.
+
+### Réseau et Nuage manquaient aux lieux
+
+Le modèle couvrait les emplacements, les favoris et les périphériques. Les
+deux dernières sections du volet passent par `entree_lecteur()` et
+`entree_nuage()`, pas par `ajouter_chemin()` — personne ne les avait suivies.
+
+Elles n'y figurent que **connectées** : un lecteur déclaré mais éteint n'a pas
+de chemin où aller. Le volet, lui, sait le monter — c'est une des choses que
+la barre ne saura jamais faire, et une raison de plus de le garder en repli.
+
+### LE FIL D'ARIANE QUITTE LA RANGÉE — contrat 2
+
+Une suite de mots séparés de chevrons au milieu d'une rangée de boutons
+cassait le rythme : **l'œil ne savait plus ce qui se clique et ce qui se
+lit.**
+
+La zone `fil` et la forme `etape` ont été **retirées du contrat**, qui passe
+en **version 2**. L'établi ne porte que des boutons, et c'est une règle.
+
+À la place :
+
+- **un bouton « Chemin »** dans la zone `outils`, qui déploie un auvent de
+  type **`liste`** — les étapes, une par ligne, verticales, cliquables ;
+- **le dossier courant dans le titre de la fenêtre.** labwc dessine la barre
+  de titre de nos fenêtres : elle est toujours là, y compris quand la fenêtre
+  est nue. Le dossier vient **en premier** — une barre de titre se tronque par
+  la droite, et c'est le dossier qu'on cherche, pas le nom de l'application.
+
+**Ce qui se lit va ailleurs ; ce qui s'atteint devient un bouton.** C'est la
+règle générale que cette correction a dégagée, et elle vaut pour les
+applications à venir.
+
+### Le contrôle « liste »
+
+Le second contrôle de l'auvent, et il ne marche pas comme le premier :
+
+| | produit | qui agit |
+|---|---|---|
+| `saisie` | une valeur, frappe par frappe | l'action de l'entrée d'auvent |
+| `liste` | rien | **chaque ligne**, avec sa propre action et sa cible |
+
+Une liste est un menu, et le contrat la décrit comme tel : un **sous-menu**
+(`G_MENU_LINK_SUBMENU`) attaché à l'entrée d'auvent. Le groupe d'actions n'est
+pas cherché — l'auvent descend de l'établi, GTK remonte l'arbre pour résoudre
+`outils.aller`, et les lignes agissent comme les boutons de la rangée.
+
+Choisir une ligne referme le volet : on a obtenu ce pour quoi on l'avait
+ouvert, et il tient le clavier.
+
+**Une liste ne reçoit jamais la valeur vide de fermeture.** Elle n'a rien
+produit ; la lui envoyer déclencherait une action qu'on n'a pas demandée.
+
+### LE DOCK LIT ENFIN LA VERSION QU'IL PROMETTAIT DE VÉRIFIER
+
+`outils.h` le disait depuis le premier jour : « le dock DEMANDE, et refuse ce
+qu'il ne sait pas lire ». **Il ne le faisait pas.** La propriété `Contrat`
+existait, personne ne la lisait, et la promesse était vide.
+
+Le passage à la version 2 l'a rendue nécessaire : une application écrite pour
+le contrat 1 déclare une zone `fil` que le dock ne connaît plus, et son
+contenu tomberait dans les outils en boutons de texte — exactement le défaut
+qu'on venait de corriger.
+
+La version est demandée **une fois, à la présentation** : une application ne
+change pas de contrat en cours de route. Refusée, elle reçoit `Prise(false)`
+et garde son chrome — le repli fait son office, et le journal dit pourquoi.
+
+### Deux pièges du banc, tous deux des erreurs de mesure
+
+- **Une course, prise pour une panne.** Le premier essai du bouton de chemin
+  donnait « liste vide » : le sous-menu venait du bus et n'était pas encore
+  arrivé. Le modèle monte par étages, ici comme partout — quatre lignes
+  finissent par venir, une salve après l'autre. Ce n'était pas le chemin qui
+  manquait, c'était le banc qui n'attendait pas.
+- **Le témoin a deux outils depuis le contrat 2.** Le banc ouvrait `outil 0`
+  en croyant ouvrir la loupe, et s'étonnait qu'aucune frappe n'arrive. C'est
+  le chemin qu'il ouvrait.
+
+Les trois bancs : **45 vérifications, 0 en échec**.
+
+---
+
+## 14.13 Les décisions, et pourquoi
 
 | Décision | Raison |
 |---|---|

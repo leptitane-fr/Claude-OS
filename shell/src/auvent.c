@@ -78,22 +78,89 @@ controle_saisie (ShellAuvent *a, const char *invite)
     return champ;
 }
 
+/* Une liste : une ligne par entrée du sous-menu, chacune avec SON action et
+ * SA cible.
+ *
+ * Le groupe d'actions n'est pas cherché ici : l'auvent descend de l'établi,
+ * qui l'a inséré sous « outils » (etabli.c). GTK remonte l'arbre pour
+ * résoudre « outils.aller », et les lignes agissent comme les boutons de la
+ * rangée -- même chemin, même contrat.
+ *
+ * VERTICALE, ET DANS L'ORDRE DU MODÈLE. Pour un chemin, cela le fait lire de
+ * la racine vers le dossier courant, de haut en bas : c'est le sens d'un
+ * fil d'Ariane qu'on aurait redressé. */
+static GtkWidget *
+controle_liste (ShellAuvent *a, GMenuModel *lignes)
+{
+    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_add_css_class (boite, "auvent-liste");
+
+    int n = lignes ? g_menu_model_get_n_items (lignes) : 0;
+    for (int i = 0; i < n; i++) {
+        g_autoptr(GVariant) v_label = g_menu_model_get_item_attribute_value (
+            lignes, i, G_MENU_ATTRIBUTE_LABEL, G_VARIANT_TYPE_STRING);
+        g_autoptr(GVariant) v_action = g_menu_model_get_item_attribute_value (
+            lignes, i, G_MENU_ATTRIBUTE_ACTION, G_VARIANT_TYPE_STRING);
+        g_autoptr(GVariant) but = g_menu_model_get_item_attribute_value (
+            lignes, i, G_MENU_ATTRIBUTE_TARGET, NULL);
+
+        GtkWidget *b = gtk_button_new_with_label (
+            v_label ? g_variant_get_string (v_label, NULL) : "…");
+        gtk_widget_add_css_class (b, "auvent-ligne");
+        gtk_button_set_has_frame (GTK_BUTTON (b), FALSE);
+        gtk_widget_set_halign (b, GTK_ALIGN_FILL);
+
+        /* Le libellé cale à gauche : une liste de chemins centrée est
+         * illisible, les noms n'ont pas la même longueur. */
+        GtkWidget *l = gtk_button_get_child (GTK_BUTTON (b));
+        if (GTK_IS_LABEL (l)) {
+            gtk_label_set_xalign (GTK_LABEL (l), 0.0);
+            gtk_label_set_ellipsize (GTK_LABEL (l), PANGO_ELLIPSIZE_MIDDLE);
+        }
+
+        if (v_action != NULL) {
+            gtk_actionable_set_action_name (GTK_ACTIONABLE (b),
+                                            g_variant_get_string (v_action, NULL));
+            if (but != NULL)
+                gtk_actionable_set_action_target_value (GTK_ACTIONABLE (b), but);
+        }
+
+        /* Choisir une ligne referme le volet : on a obtenu ce pour quoi on
+         * l'avait ouvert. Sans cela il resterait en travers, et il tient le
+         * clavier. */
+        g_signal_connect_swapped (b, "clicked",
+                                  G_CALLBACK (shell_auvent_fermer), a);
+        gtk_box_append (GTK_BOX (boite), b);
+    }
+    return boite;
+}
+
 /* ------------------------------------------------------------------------- */
 gboolean
 shell_auvent_ouvrir (ShellAuvent *a, const char *controle, const char *invite,
-                     ShellAuventValeur f, gpointer data)
+                     GMenuModel *lignes, ShellAuventValeur f, gpointer data)
 {
     g_return_val_if_fail (SHELL_IS_AUVENT (a), FALSE);
 
     if (controle == NULL)
         controle = SHELL_OUTILS_SAISIE;
 
+    gboolean saisie = g_str_equal (controle, SHELL_OUTILS_SAISIE);
+    gboolean liste  = g_str_equal (controle, SHELL_OUTILS_LISTE);
+
     /* CE QU'ON NE SAIT PAS DESSINER SE REFUSE, ET SE DIT. Ouvrir un volet
      * vide laisserait croire à une panne du dock, là où c'est le contrat qui
      * n'est pas encore rempli. */
-    if (!g_str_equal (controle, SHELL_OUTILS_SAISIE)) {
+    if (!saisie && !liste) {
         g_message ("auvent : contrôle « %s » pas encore écrit — rien ouvert",
                    controle);
+        return FALSE;
+    }
+
+    /* Une liste sans lignes n'est pas une liste. Le dire plutôt que de faire
+     * monter un volet vide, que l'utilisateur prendrait pour une panne. */
+    if (liste && (lignes == NULL || g_menu_model_get_n_items (lignes) == 0)) {
+        g_message ("auvent : liste vide — rien ouvert");
         return FALSE;
     }
 
@@ -116,7 +183,8 @@ shell_auvent_ouvrir (ShellAuvent *a, const char *controle, const char *invite,
 
     g_free (a->controle);
     a->controle = g_strdup (controle);
-    a->contenu  = controle_saisie (a, invite);
+    a->contenu  = saisie ? controle_saisie (a, invite)
+                         : controle_liste (a, lignes);
     gtk_box_append (GTK_BOX (a->panneau), a->contenu);
 
     /* PRÉVENIR AVANT D'OUVRIR : le dock pose le mode clavier de sa surface
@@ -137,11 +205,15 @@ shell_auvent_fermer (ShellAuvent *a)
 
     gtk_revealer_set_reveal_child (GTK_REVEALER (a->revelateur), FALSE);
 
-    /* UNE DERNIÈRE VALEUR, VIDE. C'est ainsi qu'une application sait qu'il
-     * faut rendre la liste complète : sans elle, une recherche refermée
-     * laisserait le filtre en place, et l'utilisateur chercherait pourquoi
-     * la moitié de ses fichiers a disparu. */
-    dire (a, "");
+    /* UNE DERNIÈRE VALEUR, VIDE — mais pour une SAISIE seulement. C'est ainsi
+     * qu'une application sait qu'il faut rendre la liste complète : sans
+     * elle, une recherche refermée laisserait le filtre en place, et l'on
+     * chercherait pourquoi la moitié de ses fichiers a disparu.
+     *
+     * Une liste, elle, n'a jamais rien produit : lui faire envoyer une chaîne
+     * vide reviendrait à déclencher une action qu'on n'a pas demandée. */
+    if (g_strcmp0 (a->controle, SHELL_OUTILS_SAISIE) == 0)
+        dire (a, "");
 
     if (a->ouverture != NULL)
         a->ouverture (FALSE, a->ouverture_data);
@@ -208,7 +280,7 @@ shell_auvent_class_init (ShellAuventClass *klass)
 static void
 shell_auvent_init (ShellAuvent *a)
 {
-    a->panneau = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
+    a->panneau = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_add_css_class (a->panneau, "auvent");
     gtk_widget_set_halign (a->panneau, GTK_ALIGN_CENTER);
 

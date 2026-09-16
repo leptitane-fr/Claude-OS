@@ -45,9 +45,9 @@
  *                    ┌─────────────────────┐
  *                    │       AUVENT        │   ← se déploie vers le haut
  *      ╭─────────────┴─────────────────────┴───────────────────╮
- *      │ ▣ ▣ ▣ │ 🏠 ★ 💾 ☁ │ Accueil › Images › 2026 │ 🔍 │ ⤺ │
+ *      │ 🏠 ★ 💾 ☁ │ 🗺 🔍 │ ▣ ▣ ▣ │ ⤺ │
  *      ╰───────────────────────────────────────────────────────╯
- *        apps      LIEUX          FIL            OUTILS  retour
+ *          LIEUX      OUTILS    apps   retour
  *
  * QUATRE EMPLACEMENTS SONT OFFERTS AUX APPLICATIONS, et deux sont réservés
  * au bureau. Une application ne peut rien poser ailleurs, et c'est ce qui
@@ -56,9 +56,7 @@
  *   « lieux »   — Où l'on peut aller. Dossiers, favoris, lecteurs, sources,
  *                 onglets, projets : ce qui se choisit et où l'on revient.
  *                 Dessiné en icônes avec libellé, l'entrée courante allumée.
- *   « fil »     — Où l'on est. Une suite d'étapes séparées de chevrons,
- *                 cliquables, qui défile quand elle déborde.
- *   « outils »  — Ce qu'on déclenche. Boutons à icône, à droite du fil.
+ *   « outils »  — Ce qu'on déclenche. Boutons à icône.
  *   « auvent »  — Ce qui demande de la place : une saisie, une liste, un
  *                 réglage. Un volet qui monte au-dessus de la pilule, ouvert
  *                 par un bouton de la zone « outils », refermé au geste
@@ -66,8 +64,23 @@
  *                 ligne de 72 px.
  *
  *   Réservés au bureau, non déclarables : la bande des applications
- *   ouvertes à l'extrême gauche, et le bouton de retour au bureau à
- *   l'extrême droite.
+ *   ouvertes, puis le bouton de retour au bureau, tous deux À DROITE.
+ *   L'ordre suit celui de la face lanceur, où les applications ouvertes sont
+ *   déjà à droite : rien de ce qui est commun aux deux faces ne doit bouger
+ *   au retournement.
+ *
+ * L'ÉTABLI NE PORTE QUE DES BOUTONS, et c'est une règle, pas un goût.
+ *
+ * Il y avait une cinquième zone, « fil », pour un chemin d'Ariane : une
+ * suite de mots séparés de chevrons. À l'usage, elle cassait le rythme de la
+ * rangée — l'œil ne savait plus ce qui se clique et ce qui se lit. Elle a été
+ * retirée le 16 septembre 2026, et le contrat est passé en version 2.
+ *
+ * CE QUI SE LIT VA AILLEURS. Un chemin, une position, un état : dans le
+ * titre de la fenêtre, dans sa barre d'état, dans son contenu. Ce qui doit
+ * rester atteignable depuis le dock devient un BOUTON qui déploie un auvent
+ * — voir « liste » dans auvent.h. Fichiers en donne l'exemple : un bouton
+ * « chemin », et les étapes dans le volet.
  *
  * CE QUI NE VA PAS DANS LA BARRE. Les actions d'édition — copier, coller,
  * renommer, supprimer, trier, changer de vue — restent au menu contextuel
@@ -209,7 +222,12 @@ G_BEGIN_DECLS
 /* Version du contrat. Le dock refuse ce qu'il ne sait pas lire, et le dit ;
  * il ne fait jamais semblant. À incrémenter dès qu'une application écrite
  * pour l'ancien contrat cesserait d'être comprise. */
-#define SHELL_OUTILS_CONTRAT   1u
+/* 2 depuis le 16 septembre 2026 : la zone « fil » a disparu, et avec elle
+ * la forme « etape ». Une application écrite pour le contrat 1 déclarerait
+ * une zone que le dock ne connaît plus -- son contenu tomberait dans les
+ * outils, en boutons de texte, et l'on retrouverait précisément le défaut
+ * qui a motivé le changement. Le dock refuse donc, et le dit. */
+#define SHELL_OUTILS_CONTRAT   2u
 
 #define SHELL_OUTILS_CHEMIN    "/os/claude/shell/outils"
 #define SHELL_OUTILS_IFACE     "os.claude.shell.Outils"
@@ -225,7 +243,6 @@ G_BEGIN_DECLS
 /* Les emplacements, portés par l'attribut de section. */
 #define SHELL_OUTILS_A_ZONE      "x-claude-zone"
 #define SHELL_OUTILS_ZONE_LIEUX  "lieux"
-#define SHELL_OUTILS_ZONE_FIL    "fil"
 #define SHELL_OUTILS_ZONE_OUTILS "outils"
 #define SHELL_OUTILS_ZONE_AUVENT "auvent"
 
@@ -234,13 +251,20 @@ G_BEGIN_DECLS
 #define SHELL_OUTILS_A_FORME     "x-claude-forme"
 #define SHELL_OUTILS_LIEU        "lieu"
 #define SHELL_OUTILS_BOUTON      "bouton"
-#define SHELL_OUTILS_ETAPE       "etape"
 #define SHELL_OUTILS_AUVENT      "auvent"
 
 /* Le contrôle que l'auvent déploie. « saisie » seul est écrit à ce jour. */
+/* Le contrôle que l'auvent déploie.
+ *
+ *   « saisie »  un champ ; chaque frappe part vers l'action de l'entrée.
+ *   « liste »   un menu vertical ; CHAQUE LIGNE porte sa propre action et sa
+ *               cible, déclarées dans un SOUS-MENU attaché à l'entrée
+ *               d'auvent (G_MENU_LINK_SUBMENU). C'est par là que passe tout
+ *               ce qui se lisait autrefois dans la rangée.
+ */
 #define SHELL_OUTILS_A_CONTROLE  "x-claude-controle"
 #define SHELL_OUTILS_SAISIE      "saisie"  /* écrit le 16 septembre 2026 */
-#define SHELL_OUTILS_LISTE       "liste"   /* prévu, non écrit */
+#define SHELL_OUTILS_LISTE       "liste"   /* écrit le 16 septembre 2026 */
 #define SHELL_OUTILS_CHOIX       "choix"   /* prévu, non écrit */
 
 /* Le texte d'invite d'une saisie, l'infobulle d'un bouton, et le raccourci

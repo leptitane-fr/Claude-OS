@@ -77,7 +77,8 @@ entree (const char *label, const char *but, const char *icone, const char *forme
                                              g_variant_new_string (but));
     if (icone != NULL)
         g_menu_item_set_attribute (it, "icon", "s", icone);
-    g_menu_item_set_attribute (it, SHELL_OUTILS_A_FORME, "s", forme);
+    if (forme != NULL)
+        g_menu_item_set_attribute (it, SHELL_OUTILS_A_FORME, "s", forme);
     return it;
 }
 
@@ -111,16 +112,23 @@ batir_barre (void)
     section (E.barre, SHELL_OUTILS_ZONE_LIEUX, "Personnel", lieux);
     g_object_unref (lieux);
 
-    /* Le fil est gardé de côté : « creuser » l'allonge, et le dock suit sans
-     * qu'on ait à le prévenir — org.gtk.Menus signale ses changements. */
+    GMenu *outils = g_menu_new ();
+
+    /* LE CHEMIN EST UN BOUTON A AUVENT (contrat 2) : la zone « fil » n'existe
+     * plus, l'etabli ne porte que des boutons. « creuser » allonge le
+     * sous-menu, et le dock suit sans qu'on ait a le prevenir. */
     E.fil = g_menu_new ();
-    GMenuItem *racine = entree ("Accueil", "file:///home/stef", NULL,
-                                SHELL_OUTILS_ETAPE);
+    GMenuItem *racine = entree ("Accueil", "file:///home/stef", NULL, NULL);
     g_menu_append_item (E.fil, racine);
     g_object_unref (racine);
-    section (E.barre, SHELL_OUTILS_ZONE_FIL, NULL, E.fil);
 
-    GMenu *outils = g_menu_new ();
+    GMenuItem *chemin = g_menu_item_new ("Chemin", NULL);
+    g_menu_item_set_attribute (chemin, SHELL_OUTILS_A_FORME, "s", SHELL_OUTILS_AUVENT);
+    g_menu_item_set_attribute (chemin, SHELL_OUTILS_A_CONTROLE, "s", SHELL_OUTILS_LISTE);
+    g_menu_item_set_attribute (chemin, "icon", "s", "view-list-symbolic");
+    g_menu_item_set_link (chemin, G_MENU_LINK_SUBMENU, G_MENU_MODEL (E.fil));
+    g_menu_append_item (outils, chemin);
+    g_object_unref (chemin);
     GMenuItem *loupe = g_menu_item_new ("Rechercher", "outils.chercher");
     g_menu_item_set_attribute (loupe, SHELL_OUTILS_A_FORME, "s", SHELL_OUTILS_AUVENT);
     g_menu_item_set_attribute (loupe, SHELL_OUTILS_A_CONTROLE, "s", SHELL_OUTILS_SAISIE);
@@ -146,7 +154,7 @@ act_creuser (GSimpleAction *a, GVariant *p, gpointer d)
     }
 
     g_autofree char *uri = g_strdup_printf ("file:///creux/%d", E.profondeur);
-    GMenuItem *it = entree (noms[E.profondeur], uri, NULL, SHELL_OUTILS_ETAPE);
+    GMenuItem *it = entree (noms[E.profondeur], uri, NULL, NULL);
     g_menu_append_item (E.fil, it);
     g_object_unref (it);
     E.profondeur++;

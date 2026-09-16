@@ -19,8 +19,20 @@
  * construction que deux applications se ressemblent, là où un langage de
  * description d'interface garantirait le contraire.
  *
- * Un contrôle écrit à ce jour : « saisie ». « liste » et « choix » sont
- * prévus et se refusent en le disant, plutôt que d'ouvrir un volet vide.
+ * DEUX CONTRÔLES, ET ILS NE MARCHENT PAS PAREIL :
+ *
+ *   « saisie »  produit UNE VALEUR, envoyée à l'action de l'entrée qui a
+ *               ouvert le volet. Le champ ne sait rien de ce qu'on en fera.
+ *   « liste »   n'en produit aucune : CHAQUE LIGNE porte sa propre action et
+ *               sa propre cible. C'est un menu, et le contrat le décrit
+ *               comme tel -- un sous-menu attaché à l'entrée d'auvent, dont
+ *               les items sont les lignes.
+ *
+ * La différence n'est pas un détail d'écriture : elle dit ce qu'est chaque
+ * contrôle. Un champ est un instrument de mesure, une liste est un chemin.
+ *
+ * « choix » reste prévu et se refuse en le disant, plutôt que d'ouvrir un
+ * volet vide.
  *
  * -------------------------------------------------------------------------
  * LE CLAVIER, ET C'EST LE VRAI SUJET
@@ -64,7 +76,9 @@ G_DECLARE_FINAL_TYPE (ShellAuvent, shell_auvent, SHELL, AUVENT, GtkWidget)
 /* La valeur du contrôle, à chaque changement. Pour une saisie : le texte,
  * frappe par frappe -- une recherche doit filtrer pendant qu'on tape. La
  * fermeture en envoie une dernière, VIDE : c'est ainsi qu'une application
- * sait qu'il faut rendre la liste complète. */
+ * sait qu'il faut rendre la liste complète.
+ *
+ * Une LISTE n'appelle jamais ce rappel : ses lignes agissent d'elles-mêmes. */
 typedef void (*ShellAuventValeur) (const char *valeur, gpointer user_data);
 
 /* L'auvent s'ouvre ou se ferme. LE DOCK Y POSE LE MODE CLAVIER DE SA
@@ -84,8 +98,8 @@ void shell_auvent_sur_ouverture (ShellAuvent *a, ShellAuventOuverture f,
  * disparaître ce qu'on était en train d'écrire. Un contrôle différent
  * remplace le contenu sans refermer le volet. */
 gboolean shell_auvent_ouvrir (ShellAuvent *a, const char *controle,
-                              const char *invite, ShellAuventValeur f,
-                              gpointer data);
+                              const char *invite, GMenuModel *lignes,
+                              ShellAuventValeur f, gpointer data);
 
 /* Referme, et envoie la valeur vide. Sans effet s'il est déjà fermé. */
 void shell_auvent_fermer (ShellAuvent *a);

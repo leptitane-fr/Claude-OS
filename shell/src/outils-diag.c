@@ -446,16 +446,25 @@ temoin_demarre (GApplication *app, gpointer data)
                                        SHELL_OUTILS_LIEU));
     section (barre, SHELL_OUTILS_ZONE_LIEUX, "Personnel", perso);
 
+    GMenu *outils = g_menu_new ();
+
+    /* LE CHEMIN EST UN BOUTON A AUVENT depuis le contrat 2 : la zone « fil »
+     * n'existe plus, l'etabli ne porte que des boutons. Les etapes sont le
+     * SOUS-MENU de cette entree. */
     GMenu *fil = g_menu_new ();
     g_menu_append_item (fil, entree ("Accueil", "outils.aller",
-                                     "file:///home/stef", NULL,
-                                     SHELL_OUTILS_ETAPE));
+                                     "file:///home/stef", NULL, NULL));
     g_menu_append_item (fil, entree ("Images", "outils.aller",
-                                     "file:///home/stef/Images", NULL,
-                                     SHELL_OUTILS_ETAPE));
-    section (barre, SHELL_OUTILS_ZONE_FIL, NULL, fil);
+                                     "file:///home/stef/Images", NULL, NULL));
 
-    GMenu *outils = g_menu_new ();
+    GMenuItem *chemin = g_menu_item_new ("Chemin", NULL);
+    g_menu_item_set_attribute (chemin, SHELL_OUTILS_A_FORME, "s", SHELL_OUTILS_AUVENT);
+    g_menu_item_set_attribute (chemin, SHELL_OUTILS_A_CONTROLE, "s", SHELL_OUTILS_LISTE);
+    g_menu_item_set_attribute (chemin, "icon", "s", "view-list-symbolic");
+    g_menu_item_set_link (chemin, G_MENU_LINK_SUBMENU, G_MENU_MODEL (fil));
+    g_menu_append_item (outils, chemin);
+    g_object_unref (chemin);
+    g_object_unref (fil);
     GMenuItem *loupe = entree ("Rechercher", "outils.chercher", NULL,
                                "system-search-symbolic", SHELL_OUTILS_AUVENT);
     g_menu_item_set_attribute (loupe, SHELL_OUTILS_A_CONTROLE, "s",
@@ -479,7 +488,6 @@ temoin_demarre (GApplication *app, gpointer data)
                  g_application_get_application_id (app));
 
     g_object_unref (perso);
-    g_object_unref (fil);
     g_object_unref (outils);
 }
 

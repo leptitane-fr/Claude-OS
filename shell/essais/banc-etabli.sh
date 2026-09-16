@@ -167,12 +167,12 @@ for _ in 1 2 3; do gapplication action "$APP" creuser >/dev/null 2>&1; sleep 0.4
 sleep 2
 capture 04-fil-profond
 CREUSE=$(grep -c '\[banc\] fil creusé' "$SORTIE/temoin.log")
-verifier "le fil s'est allongé trois fois" 3 "$CREUSE"
+verifier "le chemin s'est allongé trois fois" 3 "$CREUSE"
 
 # CE QUE L'ÉTABLI PORTE VRAIMENT, lu dans son propre compte rendu : on ne
 # compte pas des widgets depuis un autre processus.
-PORTE=$(grep -o 'établi : [0-9]* lieux, [0-9]* étapes, [0-9]* outils' "$SORTIE/dock.log" | tail -1)
-verifier "la barre est arrivée entière" "établi : 4 lieux, 4 étapes, 1 outils" "$PORTE"
+PORTE=$(grep -o 'établi : [0-9]* lieux, [0-9]* outils' "$SORTIE/dock.log" | tail -1)
+verifier "la barre est arrivée entière" "établi : 4 lieux, 2 outils" "$PORTE"
 verifier "le dock est toujours en établi" etabli "$(etat)"
 
 # --- 6ter. L'AUVENT -------------------------------------------------------
@@ -185,7 +185,10 @@ verifier "le dock est toujours en établi" etabli "$(etat)"
 #     `frappe` a été écrit : aucun banc d'ici ne savait taper.
 #   - le clavier repart-il à la fermeture ? Un dock qui garde le clavier de
 #     la session pour un champ refermé serait pire que pas d'auvent du tout.
-gapplication action os.claude.shell.dock outil 0 >/dev/null 2>&1
+# L'OUTIL N°1, ET NON LE ZÉRO : depuis le contrat 2, le témoin porte deux
+# outils — le chemin d'abord, la loupe ensuite. Le banc ouvrait le chemin en
+# croyant ouvrir la recherche, et s'étonnait qu'aucune frappe n'arrive.
+gapplication action os.claude.shell.dock outil 1 >/dev/null 2>&1
 sleep 1
 capture 06-auvent
 
@@ -223,7 +226,7 @@ capture 08-auvent-ferme
 # LA TROISIÈME PORTE DE SORTIE, et la plus importante : le volet confisque le
 # clavier (EXCLUSIVE). S'il ne se refermait qu'à Échap, une application
 # resterait muette sans qu'on sache pourquoi.
-gapplication action os.claude.shell.dock outil 0 >/dev/null 2>&1
+gapplication action os.claude.shell.dock outil 1 >/dev/null 2>&1
 sleep 1
 "$POINTEUR" clic 300 300 >/dev/null 2>&1
 sleep 1
