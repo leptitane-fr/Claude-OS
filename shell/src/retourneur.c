@@ -315,6 +315,28 @@ shell_retourneur_montrer (ShellRetourneur *r, gboolean arriere)
     if (r->arrivee == but && r->tick != 0)
         return;                    /* déjà en route vers cette face */
 
+    /* HORS DE L'ÉCRAN, ON NE TOURNE PAS : ON EST DÉJÀ TOURNÉ.
+     *
+     * Le dock sort de l'écran par le bas, et revient. S'il revient sur une
+     * application qui porte sa barre, la face outils doit ARRIVER en place,
+     * pas se retourner une fois arrivée. Le premier jet différait
+     * l'animation jusqu'au « map » : on voyait la pilule monter sous sa
+     * forme de dock, puis basculer -- et les deux mouvements se chevauchant,
+     * la bascule paraissait précipitée. Constaté à l'écran sur MADOO le
+     * 16 septembre 2026, ce qu'aucun banc n'avait montré : le banc lit des
+     * états, il ne regarde pas.
+     *
+     * Le mouvement ne vaut que pour un retournement qu'on VOIT : d'une face
+     * à l'autre, dock à l'écran. */
+    if (!gtk_widget_get_mapped (GTK_WIDGET (r))) {
+        if (r->debut != NULL)
+            r->debut (r->debut_data);
+        r->position = r->arrivee = but;
+        gtk_widget_queue_allocate (GTK_WIDGET (r));
+        terminer (r);
+        return;
+    }
+
     /* AVANT TOUT MOUVEMENT, ET UNE SEULE FOIS. C'est ici que le dock ferme
      * ses popovers : une liste ouverte au survol, laissée en place pendant
      * que sa face tourne, resterait plantée au milieu de l'écran. */
@@ -383,9 +405,11 @@ retourneur_map (GtkWidget *w)
     ShellRetourneur *r = SHELL_RETOURNEUR (w);
     GTK_WIDGET_CLASS (shell_retourneur_parent_class)->map (w);
 
-    /* Un retournement demandé avant que la fenêtre ne soit affichée. */
-    if (r->position != r->arrivee)
-        armer (r);
+    /* RIEN À ARMER ICI, et c'est voulu : une face demandée pendant que le
+     * widget était hors de l'écran a déjà été posée, sans animation (voir
+     * shell_retourneur_montrer). Armer au « map » ferait rejouer le
+     * retournement par-dessus l'apparition. */
+    (void) r;
 }
 
 static void

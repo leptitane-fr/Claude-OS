@@ -854,7 +854,65 @@ Le chantier est écrit. Ce qui manque ne s'écrit pas, ça se regarde :
 
 ---
 
-## 14.11 Les décisions, et pourquoi
+## 14.11 Ce que l'écran a corrigé
+
+*16 septembre 2026, après la première mise en service sur MADOO.* Deux
+défauts d'usage, **qu'aucun banc ne pouvait voir** : le banc lit des états, il
+ne regarde pas.
+
+### Les deux animations se chevauchaient
+
+Dock caché, une application à barre passe devant : on voyait la pilule monter
+**sous sa forme de lanceur**, puis basculer — et les deux mouvements se
+recouvrant, la bascule paraissait précipitée.
+
+La cause est un ordre d'opérations. `on_etat()` montrait la glissière, *puis*
+demandait la face : la fenêtre devenue visible, le retourneur se trouvait
+mappé et son animation partait en même temps que la montée.
+
+**Hors de l'écran, on ne tourne pas : on est déjà tourné.** Le retourneur
+pose désormais sa face sans l'animer tant qu'il n'est pas mappé, et le dock
+la demande **avant** de monter. La face outils *arrive* en place au lieu de
+se retourner une fois arrivée. Le mouvement ne vaut plus que pour un
+retournement qu'on voit — d'une face à l'autre, dock à l'écran.
+
+### Un aller sans retour n'est pas une bascule
+
+Le bouton de retour au bureau n'avait pas de pendant : une fois revenu au
+lanceur, il fallait passer à une autre application et revenir pour retrouver
+les outils de la fenêtre devant.
+
+La face bureau porte maintenant, **à la même extrémité**, un bouton
+« Outils de la fenêtre ». Il n'existe que quand il y a quelque chose à y
+retrouver : une barre posée, et garnie. Les deux boutons sont au même endroit
+et font l'aller et le retour du même geste. Sur le bus :
+`gapplication action os.claude.shell.dock outils`.
+
+### Le journal dit la face, et pas seulement l'état
+
+L'état de visibilité ne suffit pas : on reste en `ETABLI` tout en montrant le
+lanceur, quand le bouton de retour a été pressé. Rien ne distinguait de
+l'extérieur les deux moitiés de la bascule — le banc ne pouvait donc pas
+éprouver le bouton qui la fait. `face : bureau` / `face : etabli` comble ce
+trou, et les deux sens sont désormais vérifiés.
+
+Les trois bancs : **44 vérifications, 0 en échec**.
+
+### Ce qui reste, et n'est pas de ce chantier
+
+Un défaut de Fichiers, repéré à l'usage et **hors sujet ici** : deux fenêtres
+ouvertes sont la même instance, et les boutons de navigation, le volet et
+l'affichage s'appliquent tous à la dernière ouverte. C'est un défaut
+antérieur à la surface d'outils — l'utilisateur le traite séparément.
+
+Il éclaire tout de même une limite déjà écrite en 14.4 : **la barre est par
+application, pas par fenêtre.** Le jour où Fichiers aura de vraies fenêtres
+indépendantes, il devra suivre son propre focus et réexporter — le dock, lui,
+n'a rien à changer.
+
+---
+
+## 14.12 Les décisions, et pourquoi
 
 | Décision | Raison |
 |---|---|

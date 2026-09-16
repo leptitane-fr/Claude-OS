@@ -70,6 +70,11 @@ static struct {
     int             barre_vue;    /* dernier ordre donne a la barre, -1 aucun */
 } D;
 
+/* Quelle face montrer. Definie plus bas, appelee de partout : la question se
+ * repose a chaque changement d'etat, a chaque barre posee, et au clic des
+ * deux boutons qui font l'aller et le retour. */
+static void face_a_jour (void);
+
 /* -------------------------------------------------------------------------
  * Lancement d'une application
  * ------------------------------------------------------------------------- */
@@ -626,6 +631,21 @@ on_lanceur_clicked (GtkButton *button, gpointer data)
         g_warning ("lanceur indisponible : %s", error->message);
 }
 
+/* RETOURNER À L'ÉTABLI. Le pendant du bouton de retour au bureau, et il
+ * manquait : une fois revenu au lanceur, aucun geste ne ramenait aux outils
+ * de l'application devant -- il fallait passer à une autre fenêtre et
+ * revenir. Un aller sans retour n'est pas une bascule.
+ *
+ * Il n'existe que quand il y a quelque chose à y retrouver : une barre
+ * posée, et garnie. */
+static void
+on_outils_clicked (GtkButton *button, gpointer data)
+{
+    (void) button; (void) data;
+    D.bureau_force = FALSE;
+    face_a_jour ();
+}
+
 /* Le bouton du clavier à l'écran, en mode tablette seulement : pour les
  * applications qui ne signalent pas leurs champs de texte, et pour le
  * rappeler après l'avoir renvoyé. Le dock se retire aussitôt — il couvrirait
@@ -867,6 +887,7 @@ poser_barre (const char *app_id)
     if (bus == NULL) {
         shell_etabli_poser (D.etabli, NULL, NULL);
         shell_visibility_etabli (FALSE);
+        dock_rebuild ();      /* et il disparait avec elle */
         return;
     }
 
@@ -884,6 +905,7 @@ poser_barre (const char *app_id)
 
     D.servie = g_strdup (app_id);
     shell_etabli_poser (D.etabli, G_MENU_MODEL (modele), G_ACTION_GROUP (actions));
+    dock_rebuild ();          /* le bouton « outils » depend de D.servie */
 
     /* LE MODELE ARRIVE APRES, et c'est normal : GDBusMenuModel se remplit
      * par le bus. L'etabli suit « items-changed » et se garnira tout seul ;
@@ -1064,6 +1086,20 @@ dock_rebuild (void)
             gtk_box_append (GTK_BOX (D.apps),
                             build_dock_item (w->app_id, running, active, FALSE));
         }
+    }
+
+    /* Le retour vers l'établi, a l'extremite droite -- la meme que celle ou
+     * l'etabli porte son retour au bureau. Les deux boutons sont au meme
+     * endroit, et font l'aller et le retour du meme geste. */
+    if (D.servie != NULL && shell_etabli_garni (D.etabli)) {
+        GtkWidget *sep = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+        gtk_widget_add_css_class (sep, "dock-separator");
+        gtk_box_append (GTK_BOX (D.box), sep);
+        gtk_box_append (GTK_BOX (D.box),
+                        build_outil_item ("applications-utilities-symbolic",
+                                          "preferences-other-symbolic",
+                                          "dock-outils", "Outils de la fenêtre",
+                                          G_CALLBACK (on_outils_clicked)));
     }
 
     /* Le clavier à l'écran en dernier, en mode tablette seulement : capot
@@ -1530,10 +1566,19 @@ face_a_jour (void)
 {
     if (D.retourneur == NULL)
         return;
-    shell_retourneur_montrer (D.retourneur,
-                              !D.bureau_force
-                              && shell_visibility_etat () == SHELL_VIS_ETABLI
-                              && shell_etabli_garni (D.etabli));
+    gboolean outils = !D.bureau_force
+                   && shell_visibility_etat () == SHELL_VIS_ETABLI
+                   && shell_etabli_garni (D.etabli);
+
+    /* LA FACE, EN DEBOGAGE. L'etat de visibilite ne la dit pas : on reste en
+     * ETABLI en montrant le lanceur, quand le bouton de retour a ete
+     * presse. Sans cette ligne, rien ne distingue de l'exterieur les deux
+     * moities de la bascule -- et le banc ne pouvait donc pas eprouver le
+     * bouton qui la fait. */
+    if (outils != shell_retourneur_face (D.retourneur))
+        g_debug ("face : %s", outils ? "etabli" : "bureau");
+
+    shell_retourneur_montrer (D.retourneur, outils);
 }
 
 static void
@@ -1576,6 +1621,12 @@ on_etat (ShellVisEtat etat, gpointer data)
         if (D.nappe)
             dock_fermer_surfaces ();
         nappe_tendre (FALSE);
+        /* LA FACE AVANT LA MONTEE. Le retourneur pose sa face sans l'animer
+         * tant qu'il n'est pas a l'ecran : demandee ici, elle sera DEJA en
+         * place quand la pilule remontera. Dans l'autre ordre, on voyait le
+         * dock monter sous sa forme de lanceur puis basculer, les deux
+         * mouvements se chevauchant. */
+        face_a_jour ();
         shell_glissiere_montrer (D.glissiere);
         break;
     }
@@ -1621,13 +1672,25 @@ on_action_auvent (GSimpleAction *a, GVariant *p, gpointer d)
         g_message ("etabli : aucun auvent pour l'action « %s »", action);
 }
 
-/* Ce que fait le bouton de retour, sur le bus : pour les scripts, pour le
- * banc, et pour le jour ou une touche voudra s'y brancher. */
+/* Ce que font les deux boutons d'extremite, sur le bus : pour les scripts,
+ * pour le banc, et pour le jour ou une touche voudra s'y brancher.
+ *
+ *   bureau   la face lanceur, sans quitter l'ecran
+ *   outils   la face de l'application devant, si elle en a une
+ */
 static void
 on_action_bureau (GSimpleAction *a, GVariant *p, gpointer d)
 {
     (void) a; (void) p; (void) d;
     on_etabli_retour (NULL);
+}
+
+static void
+on_action_outils (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    D.bureau_force = FALSE;
+    face_a_jour ();
 }
 
 static void
@@ -1728,6 +1791,7 @@ static const GActionEntry actions[] = {
      * entre dans le dock. */
     { SHELL_OUTILS_PRESENTER, on_presentation, "s", NULL, NULL, { 0 } },
     { "bureau",   on_action_bureau,   NULL, NULL, NULL, { 0 } },
+    { "outils",   on_action_outils,   NULL, NULL, NULL, { 0 } },
     { "outil",    on_action_outil,    "i",  NULL, NULL, { 0 } },
     { "auvent",   on_action_auvent,   "s",  NULL, NULL, { 0 } },
     { "clavier",  on_action_clavier,  NULL, NULL, NULL, { 0 } },
@@ -1829,8 +1893,11 @@ on_etabli_taille (gpointer data)
     dock_fermer_popovers ();
 
     /* Le modele arrive apres la decision de visibilite : c'est ici que la
-     * face se decide vraiment, la premiere fois. */
+     * face se decide vraiment, la premiere fois. Et c'est ici que le bouton
+     * « outils » de la face bureau apparait : il demande un etabli GARNI,
+     * ce qu'on ne sait qu'une fois le modele recu. */
     face_a_jour ();
+    dock_rebuild ();
 }
 
 /* -------------------------------------------------------------------------

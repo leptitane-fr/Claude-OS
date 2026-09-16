@@ -1141,6 +1141,11 @@ popover.lanceur-menu modelbutton {
 popover.dock-menu modelbutton:hover,
 popover.lanceur-menu modelbutton:hover { background-color: @surface-alt; }
 
+/* Le retour vers l'établi, à droite de la face bureau. Même discrétion que
+   le lanceur à l'autre bout : ce sont les deux extrémités du même objet. */
+.dock-outils        { color: @text-dim; }
+.dock-outils:hover  { color: @text; }
+
 /* -------------------------------------------------------------------------
    Bouton du lanceur, à gauche du dock
    ------------------------------------------------------------------------- */

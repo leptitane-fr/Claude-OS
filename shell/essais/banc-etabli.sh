@@ -242,10 +242,22 @@ verifier "et le dock est toujours en établi" etabli "$(etat)"
 # souhaité, revenait à l'établi. Le bouton ne faisait rien, et le journal
 # disait « etabli » dans les deux cas. D'où cette vérification : l'état reste
 # ETABLI, et c'est la FACE qui change.
+face() { grep -o 'face : [a-z]*' "$SORTIE/dock.log" | tail -1 | cut -d' ' -f3; }
+
 gapplication action os.claude.shell.dock bureau >/dev/null 2>&1
 sleep 1.2
 verifier "le retour au bureau ne change pas l'état" etabli "$(etat)"
+verifier "mais il change la face" bureau "$(face)"
 capture 05-retour-bureau
+
+# ET LE RETOUR DU RETOUR. Un aller sans retour n'est pas une bascule : une
+# fois revenu au lanceur, il faut pouvoir retrouver les outils de la fenêtre
+# devant sans passer par une autre application. Constaté manquant à l'écran
+# sur MADOO le 16 septembre 2026.
+gapplication action os.claude.shell.dock outils >/dev/null 2>&1
+sleep 1.2
+verifier "et l'on peut revenir aux outils" etabli "$(face)"
+capture 05b-retour-outils
 
 # --- 7. revenir à une application sans barre ------------------------------
 #

@@ -21,6 +21,24 @@ destiné aux applications à venir.
 [`shell/src/outils.h`](shell/src/outils.h)**, et nulle part ailleurs. Ne pas
 redécouvrir le protocole en lisant le dock.
 
+**VU À L'ÉCRAN SUR MADOO, ET DEUX DÉFAUTS D'USAGE CORRIGÉS** — qu'aucun banc
+ne pouvait voir, parce qu'un banc lit des états et ne regarde pas :
+
+- **Les deux animations se chevauchaient.** Dock caché, une application à
+  barre passe devant : la pilule montait sous sa forme de lanceur PUIS
+  basculait, les deux mouvements se recouvrant. C'était un ordre
+  d'opérations — la glissière était montrée avant qu'on demande la face.
+  **Hors de l'écran, on ne tourne pas : on est déjà tourné.** Le retourneur
+  pose sa face sans l'animer tant qu'il n'est pas mappé.
+- **Un aller sans retour n'est pas une bascule.** Le bouton de retour au
+  bureau n'avait pas de pendant. La face bureau porte maintenant, à la même
+  extrémité, un bouton « Outils de la fenêtre », qui n'existe que quand il y
+  a une barre à y retrouver.
+
+Et **le journal dit la FACE, pas seulement l'état** : on reste en `ETABLI` en
+montrant le lanceur, quand le bouton de retour a été pressé. Sans cette
+ligne, rien ne distinguait de l'extérieur les deux moitiés de la bascule.
+
 **L'ÉTAPE 5 EST FAITE, ET LE CHANTIER EST ÉCRIT : Fichiers est le premier
 client.** Sa fenêtre est **nue** quand le dock tient la barre — plus de barre
 haute, plus de rangée d'actions, plus de volet — et elle **retrouve tout** si
@@ -961,7 +979,8 @@ sur lui — sur un conteneur.
 | **Zone morte tactile** | Apparue le 13 septembre, **disparue le 14 sans intervention** : intermittente, cause inconnue. Rien n'a été inscrit en dur dans le clavier. Si elle revient : `claude-os-root python3 tools/diag-tactile.py coins`, puis `carte`. |
 | **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
 | **Le nuage** | **Google Drive EN SERVICE depuis le 15 septembre 2026** — monté, parcouru, écrit. OneDrive écrit mais **jamais monté** : la création d'une application Azure est fermée aux comptes Microsoft personnels, et le report est un choix de l'utilisateur. Ni panneau de réglages, ni icônes, ni clic éprouvé à l'écran. Voir [`docs/13`](docs/13-nuage.md). |
-| **Surface d'outils** | **LES CINQ ÉTAPES SONT ÉCRITES** (16 septembre 2026) : le contrat (`outils.h`), le retourneur, l'établi et sa règle de visibilité, l'auvent, et Fichiers en premier client. Trois bancs, **42 vérifications, 0 en échec**. **RIEN N'A ÉTÉ VU SUR MADOO** : ni la rotation avec le renderer réel, ni le style autrement que sur des captures d'un labwc sans écran, ni le doigt — ni si 86 px réservés en permanence se supportent à l'usage. C'est le seul point qui reste, et il ne s'écrit pas. Voir [`docs/14`](docs/14-surface-outils.md). |
+| **Surface d'outils** | **EN SERVICE ET VUE À L'ÉCRAN** (16 septembre 2026). Les cinq étapes écrites, installées, et deux défauts d'usage corrigés après essai sur MADOO — voir [`docs/14`](docs/14-surface-outils.md) §14.11. Trois bancs, **44 vérifications, 0 en échec**. Restent à éprouver : **le doigt**, et la question d'usage des 86 px réservés en permanence. |
+| Fichiers : deux fenêtres, une instance | Repéré à l'usage le 16 septembre 2026, **hors du chantier de la surface d'outils** : deux fenêtres ouvertes sont la même instance, et les boutons de navigation, le volet et l'affichage s'appliquent tous à la dernière ouverte. Défaut antérieur. Il éclaire une limite écrite du contrat : la barre est par APPLICATION, pas par fenêtre. |
 | Reports | icônes sur le bureau. |
 
 ---
