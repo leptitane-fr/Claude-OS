@@ -378,7 +378,7 @@ n'aurait pas tranché.** Mesurer, pas supposer.
 |---|---|---|
 | 1 | Le contrat, la bibliothèque, l'outil, la doc | **fait le 16 septembre 2026** |
 | 2 | Le retourneur — le flip du dock | **fait le 16 septembre 2026** — voir 14.7 |
-| 3 | L'établi — la face outils, et la règle de visibilité | à faire |
+| 3 | L'établi — la face outils, et la règle de visibilité | **fait le 16 septembre 2026** — voir 14.8 |
 | 4 | L'auvent et le vocabulaire des contrôles | à faire |
 | 5 | Fichiers : publication, dépouillement, clavier, repli | à faire |
 
@@ -512,7 +512,131 @@ faces.
 
 ---
 
-## 14.8 Les décisions, et pourquoi
+## 14.8 L'établi — étape 3
+
+*Fait le 16 septembre 2026.* `shell/src/etabli.{c,h}`, l'état `ETABLI` de
+`visibility.h`, les modifications de `dock.c`, banc
+`shell/essais/banc-etabli.sh` et son témoin `etabli-essai.c`.
+
+**C'est ici que le chantier devient visible.** Le dock porte deux faces, et
+l'une d'elles est remplie par une application.
+
+### La règle de visibilité, et ce qu'elle ajoute
+
+Le 11 septembre : une fenêtre s'active, le dock s'en va. Cette règle valait
+tant que le dock n'était qu'un lanceur — on ne lance pas une application
+pendant qu'on travaille dedans.
+
+Depuis le 16 : si l'application active a publié sa barre, **le dock reste, et
+réserve sa place**. C'est la même surface, et ce n'est plus le même objet :
+un lanceur s'efface, une barre d'outils reste.
+
+**La règle ancienne n'est pas remplacée, elle est complétée** — et le banc le
+vérifie dans les deux sens : une application sans barre fait toujours sortir
+le dock, une application avec barre le fait rester, et l'alternance entre les
+deux suit.
+
+En `ETABLI`, **congédier ne fait rien**. C'est la différence de fond avec
+`CONVOQUE` : convoqué, le dock est un invité par-dessus l'application, et le
+premier clic à côté le renvoie. En établi, il *est* la barre d'outils de
+cette application — le renvoyer au premier clic dans la fenêtre reviendrait à
+faire disparaître les outils dès qu'on se sert de ce qu'ils servent.
+
+### Ce que l'établi dessine
+
+```
+╭──────────────────────────────────────────────────────────────────────╮
+│ ▣ ▣ │ 🏠 Accueil  📄 Documents  🖼 Images  🗑 Corbeille │ Accueil › Images › 2026 │ 🔍 │ ⌂ │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+Les lieux portent leur libellé sous l'icône, et non l'icône seule : « Documents »
+et « Téléchargements » partagent le même pictogramme de dossier dans la
+plupart des thèmes, et une rangée d'icônes identiques ne sert à rien.
+
+**Ce qui se reconstruit, et ce qui ne fait que s'allumer.** Le modèle change
+souvent — un fil d'Ariane bouge à chaque navigation — mais l'entrée
+*courante* change encore plus souvent, et elle ne vaut pas une
+reconstruction : refaire la rangée changerait la largeur de la pilule, donc
+la taille de la surface, donc la position des popovers de labwc. Deux chemins
+distincts, donc : le modèle change ⇒ on reconstruit et le dock ferme ses
+surfaces ; un état d'action change ⇒ on ne fait que poser une classe CSS.
+
+### UN GDBusMenuModel ARRIVE PAR ÉTAGES
+
+**Le piège de toute cette étape, et il est muet.** Le modèle racine signale
+« trois sections » bien avant que ces sections aient le moindre contenu :
+chacune est un modèle à elle, qui se remplit par le bus et émet **son propre**
+`items-changed`.
+
+Écouter le seul modèle racine, c'est donc reconstruire un établi de trois
+sections vides — et ne plus jamais être prévenu. Au banc : trois sections
+annoncées, zéro entrée posée, **et pas une plainte** ; l'établi n'avait rien
+à redire de ce qu'il n'avait pas reçu.
+
+L'établi suit donc chaque sous-modèle rencontré, et coupe tout à la
+reconstruction suivante. Le compte rendu de débogage
+(`établi : 4 lieux, 4 étapes, 1 outils`) existe pour cette raison : c'est la
+seule façon de vérifier de l'extérieur qu'une barre est arrivée **entière**,
+puisqu'on ne compte pas des widgets depuis un autre processus.
+
+### Trois défauts que seul l'écran a montrés
+
+- **La face ne tournait pas.** `on_etat` décidait quelle face montrer au
+  moment du changement d'état — or le modèle arrive par le bus, donc *après*.
+  Le journal disait « etabli » et l'écran montrait les icônes du lanceur. La
+  question se repose donc aussi quand l'établi se garnit.
+- **Le fil d'Ariane était écrasé à zéro.** Un `GtkScrolledWindow` demande par
+  défaut la place minimale — presque rien : il sait défiler, donc il accepte
+  n'importe quelle largeur, et dans une boîte il la prend. Quatre étapes
+  posées, aucune visible, aucun avertissement. Il faut
+  `propagate_natural_width` **et** une politique `AUTOMATIC` : sous
+  `EXTERNAL`, GTK considère que le défilement est géré ailleurs et ne
+  propage rien.
+- **Le bouton de retour ne faisait rien.** Il appelait `cacher()` puis
+  `convoquer()` ; `convoquer` relit l'état souhaité, et comme une barre était
+  toujours en place, il revenait à l'établi. Le journal disait « etabli »
+  dans les deux cas. Le retour **ne touche pas à la visibilité** : il force la
+  face bureau, jusqu'au prochain changement de fenêtre active — on revient au
+  bureau pour aller chercher autre chose, et ce qu'on y trouve est justement
+  ce qui rend sa barre au dock.
+
+### La zone d'entrée suit la face, plus la fenêtre
+
+Depuis que le dock a deux faces, sa fenêtre est taillée au plus large des
+deux : elle déborde de ce qu'on voit. Une région d'entrée calquée sur elle
+avalerait les clics tombés à côté de la pilule — sur le fond d'écran, ou sur
+une fenêtre en dessous — sans que rien ne l'indique. Elle se découpe donc sur
+les limites réelles de la face affichée.
+
+### Ce que le banc établit
+
+`banc-etabli.sh`, **14 vérifications, 0 en échec**, aucun avertissement GTK :
+
+| Question | Réponse |
+|---|---|
+| Application sans barre | le dock s'efface — l'ancienne règle tient |
+| Application avec barre | le dock reste, en `etabli` |
+| Volet de repli de l'application | escamoté, et l'application sait pourquoi |
+| Zones déclarées | toutes connues, aucune plainte |
+| Auvent | se signale comme non écrit, bouton inerte |
+| Navigation reçue par l'application | oui, par le chemin du contrat |
+| Barre arrivée entière | `4 lieux, 4 étapes, 1 outils` |
+| Retour au bureau | change la face, **pas** l'état |
+| Alternance entre les deux applications | suit dans les deux sens |
+| Application fermée | le dock quitte l'établi |
+
+### Ce qui reste à voir sur MADOO
+
+Le banc n'a pas d'écran : **la rotation entre les deux faces n'a toujours pas
+été vue avec le renderer de la vraie machine**, et le style de l'établi n'a
+été jugé que sur des captures. Restent aussi le doigt, et la question de
+savoir si 86 px réservés en permanence se supportent à l'usage sur une dalle
+de 1080.
+
+---
+
+## 14.9 Les décisions, et pourquoi
 
 | Décision | Raison |
 |---|---|

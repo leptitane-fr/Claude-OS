@@ -21,6 +21,33 @@ destiné aux applications à venir.
 [`shell/src/outils.h`](shell/src/outils.h)**, et nulle part ailleurs. Ne pas
 redécouvrir le protocole en lisant le dock.
 
+**L'ÉTAPE 3 EST FAITE : l'établi** (`etabli.c`), et **le chantier devient
+visible** : le dock porte deux faces, et l'une d'elles est remplie par une
+application. La règle du 11 septembre n'est pas remplacée, elle est
+complétée — une application **sans** barre fait toujours sortir le dock ; une
+application **avec** barre le fait rester, et **réserver sa place**. Nouvel
+état `ETABLI` dans `visibility.h`. Banc : `shell/essais/banc-etabli.sh`,
+14 vérifications, 0 en échec, aucun avertissement GTK.
+
+**UN GDBusMenuModel ARRIVE PAR ÉTAGES, et c'est le piège muet de cette
+étape.** Le modèle racine annonce ses sections bien avant qu'elles aient le
+moindre contenu : chacune se remplit par le bus et émet **son propre**
+`items-changed`. N'écouter que le modèle racine donnait trois sections vides,
+sans un avertissement. L'établi suit donc chaque sous-modèle.
+
+Trois défauts que seul l'écran a montrés, et qu'aucun journal ne disait — le
+journal annonçait `etabli` dans les trois cas :
+
+- **la face ne tournait pas** : la décision était prise au changement d'état,
+  or le modèle arrive après ; elle se repose quand l'établi se garnit ;
+- **le fil d'Ariane était écrasé à zéro** : un `GtkScrolledWindow` demande la
+  place minimale, et dans une boîte il la prend. Il faut
+  `propagate_natural_width` ET la politique `AUTOMATIC` — sous `EXTERNAL`,
+  GTK ne propage rien ;
+- **le bouton de retour ne faisait rien** : il passait par `convoquer()`, qui
+  relit l'état souhaité et revenait à l'établi. Il force désormais la face,
+  sans toucher à la visibilité.
+
 **L'ÉTAPE 2 EST FAITE : le retourneur** (`retourneur.c`), le widget à deux
 faces qui fait basculer le dock. C'est la pièce dont dépendait toute la
 thèse, et elle tient : **la surface ne change pas de taille pendant le
@@ -881,7 +908,7 @@ sur lui — sur un conteneur.
 | **Zone morte tactile** | Apparue le 13 septembre, **disparue le 14 sans intervention** : intermittente, cause inconnue. Rien n'a été inscrit en dur dans le clavier. Si elle revient : `claude-os-root python3 tools/diag-tactile.py coins`, puis `carte`. |
 | **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
 | **Le nuage** | **Google Drive EN SERVICE depuis le 15 septembre 2026** — monté, parcouru, écrit. OneDrive écrit mais **jamais monté** : la création d'une application Azure est fermée aux comptes Microsoft personnels, et le report est un choix de l'utilisateur. Ni panneau de réglages, ni icônes, ni clic éprouvé à l'écran. Voir [`docs/13`](docs/13-nuage.md). |
-| **Surface d'outils** | **Étapes 1 et 2 sur 5 faites le 16 septembre 2026** : le contrat (`outils.h`, `outils.c`, `claude-os-outils`), éprouvé de bout en bout sur un bus isolé ; et le retourneur (`retourneur.c`), éprouvé au banc — la surface ne change pas de taille, 13 vérifications sur 13. Restent l'établi et sa règle de visibilité, l'auvent, puis Fichiers en premier client. **Rien n'est encore visible à l'écran**, et la rotation n'a jamais été vue sur la vraie machine. Voir [`docs/14`](docs/14-surface-outils.md). |
+| **Surface d'outils** | **Étapes 1 à 3 sur 5 faites le 16 septembre 2026** : le contrat (`outils.h`, `outils.c`, `claude-os-outils`), le retourneur (`retourneur.c`), et l'établi (`etabli.c`) avec sa règle de visibilité. Trois bancs, 39 vérifications, 0 en échec. Restent l'auvent (étape 4), puis Fichiers en premier client (étape 5). **Rien n'a encore été vu sur la vraie machine** : ni la rotation avec le renderer réel, ni le style de l'établi autrement que sur des captures, ni le doigt — ni si 86 px réservés en permanence se supportent à l'usage. Voir [`docs/14`](docs/14-surface-outils.md). |
 | Reports | icônes sur le bureau. |
 
 ---

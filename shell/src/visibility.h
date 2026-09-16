@@ -25,6 +25,27 @@
  *             laquelle revenir.
  *   CONVOQUE  rappele par-dessus une application : le dock tend sa nappe,
  *             et le premier clic a cote le congedie.
+ *   ETABLI    l'application active a publie sa barre d'outils (voir
+ *             outils.h), et le dock la porte. IL NE S'EFFACE PLUS.
+ *
+ * -------------------------------------------------------------------------
+ * POURQUOI ETABLI CONTREDIT LA REGLE DE DEPART, ET POURQUOI C'EST JUSTE
+ * -------------------------------------------------------------------------
+ *
+ * Le 11 septembre 2026, la regle etait : une fenetre s'active, le dock s'en
+ * va. Elle valait tant que le dock n'etait qu'un lanceur -- on ne lance pas
+ * une application pendant qu'on travaille dedans.
+ *
+ * Depuis le 16 septembre, le dock porte aussi les OUTILS de l'application au
+ * premier plan. Un lanceur s'efface ; une barre d'outils reste. C'est la
+ * meme surface, et ce n'est plus le meme objet.
+ *
+ * ETABLI RESERVE SA PLACE, et c'est une rupture avec les trois autres etats.
+ * Le dock a passe une semaine a ne rien reserver -- reserver faisait
+ * retrecir les fenetres maximisees a chaque apparition. Mais une barre
+ * d'outils qui recouvre le bas de la fenetre qu'elle sert est une nuisance,
+ * et la fenetre ne se redimensionne plus a chaque va-et-vient : en ETABLI,
+ * le dock ne va nulle part. Decision de l'utilisateur, 16 septembre 2026.
  *
  * LE DOCK MENE. Ce module ne vit que dans claude-os-dock, le seul des deux
  * processus qui suive les fenetres. La barre d'etat ne decide rien : elle
@@ -44,6 +65,7 @@ typedef enum {
     SHELL_VIS_CACHE,
     SHELL_VIS_BUREAU,
     SHELL_VIS_CONVOQUE,
+    SHELL_VIS_ETABLI,
 } ShellVisEtat;
 
 /* Appelee a chaque changement d'etat, jamais pour rien. */
@@ -57,6 +79,14 @@ void shell_visibility_init (ShellVisibilityFunc cb, gpointer user_data);
  * A appeler apres chaque lot d'evenements du compositeur ; rappeler avec la
  * meme valeur ne fait rien. */
 void shell_visibility_fenetre_active (guint64 serie);
+
+/* L'application active porte-t-elle une barre d'outils en place ?
+ *
+ * C'est le dock qui le sait -- il tient le registre de qui s'est presente
+ * (outils.h) -- et l'automate qui en tire la consequence. A appeler apres
+ * chaque changement de fenetre active, et quand une barre est posee ou
+ * retiree. Rappeler avec la meme valeur ne fait rien. */
+void shell_visibility_etabli (gboolean tenu);
 
 /* La touche Loupe : ce qui est a l'ecran s'en va, ce qui n'y est pas vient. */
 void shell_visibility_basculer (void);

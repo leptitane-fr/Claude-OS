@@ -23,7 +23,10 @@
 
 #include "config.h"
 #include "clavier-ecran.h"
+#include "etabli.h"
 #include "glissiere.h"
+#include "outils.h"
+#include "retourneur.h"
 #include "rotation.h"
 #include "tablette.h"
 #include "toplevels.h"
@@ -39,8 +42,27 @@ static struct {
     GtkApplication *app;
     GtkWidget      *fenetre;      /* la surface du dock                     */
     ShellGlissiere *glissiere;    /* ce qui la fait sortir par le bas       */
-    GtkWidget      *box;          /* conteneur des icones                   */
+    GtkWidget      *box;          /* conteneur des icones : la face BUREAU  */
     GtkWidget      *menu;         /* menu du clic droit, parente a box      */
+
+    /* La face ETABLI, et ce qui la fait venir. Voir etabli.h et outils.h. */
+    ShellRetourneur *retourneur;
+    ShellEtabli     *etabli;
+    GtkWidget       *apps;        /* les fenetres ouvertes, dans l'etabli   */
+
+    /* Qui s'est presente : app_id -> nom de bus. Les deux sont la meme
+     * chaine aujourd'hui -- une application GTK possede le nom de son
+     * identifiant -- mais les separer coute une table et evite de le
+     * supposer pour toujours. */
+    GHashTable      *barres;
+    char            *servie;      /* l'app_id dont la barre est posee       */
+
+    /* Le bouton de retour a demande la face bureau, alors qu'une barre est
+     * en place. Tenu jusqu'au prochain changement de fenetre active : on
+     * revient au bureau pour aller chercher AUTRE CHOSE, et ce qu'on y
+     * trouve est justement ce qui leve le forcage. */
+    gboolean         bureau_force;
+    guint64          serie_vue;
     char           *signature;    /* etat des fenetres deja affiche         */
     gboolean        nappe;        /* fenetre tendue a tout l'ecran          */
     gboolean        declenche;    /* le glisser en cours a deja rappele     */
@@ -766,6 +788,139 @@ build_dock_item (const char *app_id, gboolean running, gboolean active,
 }
 
 /* -------------------------------------------------------------------------
+ * LA FACE ETABLI : quelle barre porter, et quand
+ *
+ * Le dock tient un registre de qui s'est presente (voir outils.h, « la
+ * presentation »). A chaque changement de fenetre active, il regarde si
+ * l'application au premier plan y figure :
+ *
+ *   elle y figure      -> il pose sa barre et se retourne ;
+ *   elle n'y figure pas -> il revient a la face bureau, et la regle du
+ *                          11 septembre reprend ses droits.
+ *
+ * LA BARRE EST PAR APPLICATION, PAS PAR FENETRE, et c'est assume : l'app_id
+ * est le seul identifiant que wlr-foreign-toplevel donne. Une application a
+ * plusieurs fenetres suit son propre focus et reexporte ; le dock, lui, lit
+ * toujours le meme chemin. Voir docs/14.
+ * ------------------------------------------------------------------------- */
+static void dock_fermer_surfaces (void);
+static gboolean reserver (void);
+static void on_etabli_retour (gpointer data);
+
+/* L'app_id de la fenetre active, ou NULL. */
+static const char *
+app_active (void)
+{
+    const GPtrArray *wins = shell_toplevels_get ();
+    guint64 serie = shell_toplevels_serie_active ();
+
+    if (serie == 0)
+        return NULL;
+
+    for (guint i = 0; wins != NULL && i < wins->len; i++) {
+        ShellWindow *w = g_ptr_array_index (wins, i);
+        if (w->serie == serie)
+            return w->app_id;
+    }
+    return NULL;
+}
+
+/* Le nom de bus d'une application qui s'est presentee, ou NULL.
+ *
+ * La comparaison passe par shell_app_id_matches, comme pour les icones : la
+ * casse varie, et « org.gnome.Nautilus » cote fenetre repond a
+ * « nautilus.desktop ». Une egalite stricte marcherait pour nos propres
+ * applications et pour elles seules. */
+static const char *
+bus_de (const char *app_id)
+{
+    GHashTableIter it;
+    gpointer cle, valeur;
+
+    if (app_id == NULL || D.barres == NULL)
+        return NULL;
+
+    g_hash_table_iter_init (&it, D.barres);
+    while (g_hash_table_iter_next (&it, &cle, &valeur))
+        if (shell_app_id_matches (cle, app_id))
+            return valeur;
+    return NULL;
+}
+
+/* Poser la barre de `app_id`, ou la retirer en passant NULL.
+ *
+ * LES SURFACES SONT FERMEES AVANT, systematiquement : poser une barre change
+ * l'encombrement de l'etabli, donc la largeur de la plus large des deux
+ * faces, donc la taille de la fenetre -- et labwc 0.8.3 replace un popover
+ * ouvert depuis l'ancienne origine de sa surface. */
+static void
+poser_barre (const char *app_id)
+{
+    if (g_strcmp0 (app_id, D.servie) == 0)
+        return;
+
+    dock_fermer_surfaces ();
+    g_clear_pointer (&D.servie, g_free);
+
+    const char *bus = bus_de (app_id);
+    if (bus == NULL) {
+        shell_etabli_poser (D.etabli, NULL, NULL);
+        shell_visibility_etabli (FALSE);
+        return;
+    }
+
+    GDBusConnection *cnx = g_application_get_dbus_connection (G_APPLICATION (D.app));
+    if (cnx == NULL) {
+        g_message ("outils : pas de bus de session, « %s » gardera sa barre",
+                   app_id);
+        return;
+    }
+
+    g_autoptr(GDBusMenuModel)   modele  = g_dbus_menu_model_get (
+        cnx, bus, SHELL_OUTILS_CHEMIN);
+    g_autoptr(GDBusActionGroup) actions = g_dbus_action_group_get (
+        cnx, bus, SHELL_OUTILS_CHEMIN);
+
+    D.servie = g_strdup (app_id);
+    shell_etabli_poser (D.etabli, G_MENU_MODEL (modele), G_ACTION_GROUP (actions));
+
+    /* LE MODELE ARRIVE APRES, et c'est normal : GDBusMenuModel se remplit
+     * par le bus. L'etabli suit « items-changed » et se garnira tout seul ;
+     * la visibilite, elle, est decidee tout de suite -- on sait deja que
+     * cette application a une barre, meme si on n'en connait pas encore le
+     * contenu. */
+    shell_visibility_etabli (TRUE);
+}
+
+/* L'application se presente (outils.h). On la retient, on lui repond, et si
+ * c'est elle qui est au premier plan, on prend sa barre sur-le-champ. */
+static void
+on_presentation (GSimpleAction *a, GVariant *params, gpointer data)
+{
+    (void) a; (void) data;
+
+    if (params == NULL || !g_variant_is_of_type (params, G_VARIANT_TYPE_STRING)) {
+        g_message ("outils : presentation sans nom de bus, ignoree");
+        return;
+    }
+    const char *nom = g_variant_get_string (params, NULL);
+    g_hash_table_replace (D.barres, g_strdup (nom), g_strdup (nom));
+    g_debug ("outils : « %s » s'est presente", nom);
+
+    GDBusConnection *cnx = g_application_get_dbus_connection (G_APPLICATION (D.app));
+    if (cnx != NULL)
+        g_dbus_connection_call (cnx, nom, SHELL_OUTILS_CHEMIN,
+                                SHELL_OUTILS_IFACE, "Prise",
+                                g_variant_new ("(b)", TRUE), NULL,
+                                G_DBUS_CALL_FLAGS_NO_AUTO_START, 2000, NULL,
+                                NULL, NULL);
+
+    const char *actif = app_active ();
+    if (actif != NULL && shell_app_id_matches (nom, actif))
+        poser_barre (actif);
+}
+
+/* -------------------------------------------------------------------------
  * Reconstruction du dock
  *
  * Le compositeur signale le moindre changement d'etat, y compris un simple
@@ -875,6 +1030,41 @@ dock_rebuild (void)
                         build_dock_item (w->app_id, running, active, FALSE));
     }
 
+    /* LA MEME LISTE, A L'AUTRE BOUT DE L'AUTRE FACE.
+     *
+     * L'etabli porte lui aussi les applications ouvertes -- c'est par la
+     * qu'on passe d'une application a l'autre sans revenir au bureau, et
+     * c'est une zone que les applications ne peuvent pas reclamer (voir
+     * etabli.h). Seules les fenetres OUVERTES y figurent : sur la face
+     * outils, une icone qui ne fait que lancer n'a rien a faire.
+     *
+     * Reconstruite ici et pas dans l'etabli : c'est le dock qui sait
+     * fabriquer une icone d'application, et la dupliquer ferait deux verites
+     * a tenir d'accord. */
+    if (D.apps != NULL) {
+        GtkWidget *vieux = gtk_widget_get_first_child (D.apps);
+        while (vieux != NULL) {
+            GtkWidget *suivant = gtk_widget_get_next_sibling (vieux);
+            gtk_box_remove (GTK_BOX (D.apps), vieux);
+            vieux = suivant;
+        }
+
+        g_autoptr(GHashTable) deja = g_hash_table_new (g_str_hash, g_str_equal);
+        for (guint i = 0; wins != NULL && i < wins->len; i++) {
+            ShellWindow *w = g_ptr_array_index (wins, i);
+            if (w->app_id == NULL || *w->app_id == '\0')
+                continue;
+            if (g_hash_table_contains (deja, w->app_id))
+                continue;
+            g_hash_table_add (deja, w->app_id);
+
+            gboolean running, active;
+            app_state (w->app_id, &running, &active);
+            gtk_box_append (GTK_BOX (D.apps),
+                            build_dock_item (w->app_id, running, active, FALSE));
+        }
+    }
+
     /* Le clavier à l'écran en dernier, en mode tablette seulement : capot
      * ouvert, il y a un vrai clavier sous les doigts. */
     if (shell_tablette_active ()) {
@@ -901,7 +1091,7 @@ on_config_reloaded (ShellConfig *cfg, gpointer window)
     shell_config_apply (cfg);
 
     gtk_layer_set_exclusive_zone (GTK_WINDOW (window),
-                                  (cfg->reserve_space && !D.nappe) ? 86 : 0);
+                                  (reserver () && !D.nappe) ? 86 : 0);
     dock_rebuild ();
 }
 
@@ -910,9 +1100,27 @@ on_windows_changed (gpointer user_data)
 {
     (void) user_data;
 
-    /* Avant la signature, et a chaque lot : c'est ici que le dock apprend
-     * qu'une application vient de passer au premier plan. */
-    shell_visibility_fenetre_active (shell_toplevels_serie_active ());
+    /* LA BARRE AVANT LA VISIBILITE, et l'ordre n'est pas indifferent.
+     *
+     * poser_barre() appelle shell_visibility_etabli(), qui dit a l'automate
+     * si l'application qui arrive porte ses outils. Appelee apres
+     * shell_visibility_fenetre_active(), la reponse arriverait une fois la
+     * decision prise : le dock plongerait hors de l'ecran, puis remonterait
+     * -- un battement visible a chaque Alt-Tab vers Fichiers. */
+    /* CHANGER DE FENETRE LEVE LE FORCAGE. On revient au bureau pour aller
+     * chercher autre chose ; ce qu'on y trouve est justement ce qui rend sa
+     * barre au dock. */
+    guint64 serie = shell_toplevels_serie_active ();
+    if (serie != D.serie_vue) {
+        D.serie_vue    = serie;
+        D.bureau_force = FALSE;
+    }
+
+    poser_barre (app_active ());
+
+    /* A chaque lot : c'est ici que le dock apprend qu'une application vient
+     * de passer au premier plan. */
+    shell_visibility_fenetre_active (serie);
 
     g_autofree char *sig = windows_signature ();
     if (g_strcmp0 (sig, D.signature) == 0)
@@ -1081,6 +1289,15 @@ bord_creer (GtkApplication *app)
  *
  * Tendue a la demande seulement : une surface plein ecran, meme vide, est
  * composee a chaque image de ce qui bouge dessous. */
+/* La place est-elle reservee ? En etabli toujours, ailleurs selon
+ * shell.conf. Appelee de trois endroits, d'ou la fonction : une regle en
+ * trois exemplaires finit par diverger. */
+static gboolean
+reserver (void)
+{
+    return shell_visibility_etat () == SHELL_VIS_ETABLI || D.cfg->reserve_space;
+}
+
 static void
 nappe_tendre (gboolean tendre)
 {
@@ -1092,9 +1309,11 @@ nappe_tendre (gboolean tendre)
     gtk_layer_set_anchor (GTK_WINDOW (D.fenetre), GTK_LAYER_SHELL_EDGE_RIGHT, tendre);
     gtk_layer_set_anchor (GTK_WINDOW (D.fenetre), GTK_LAYER_SHELL_EDGE_TOP,   tendre);
     /* Tendue, elle ne reserve rien : elle couvre tout. Rendue a sa pilule,
-     * elle reprend le reglage de shell.conf. */
-    gtk_layer_set_exclusive_zone (GTK_WINDOW (D.fenetre),
-                                  (!tendre && D.cfg->reserve_space) ? 86 : 0);
+     * elle reserve si elle est un ETABLI -- une barre d'outils qui recouvre
+     * le bas de la fenetre qu'elle sert est une nuisance -- ou si
+     * shell.conf le demande pour les autres etats. */
+    gtk_layer_set_exclusive_zone (GTK_WINDOW (D.fenetre), !tendre && reserver ()
+                                  ? 86 : 0);
 }
 
 /* LA NAPPE NE RECLAME PAS LA BANDE DU BAS -- sauf la pilule du dock.
@@ -1112,6 +1331,21 @@ nappe_tendre (gboolean tendre)
  *
  * Recalculee a chaque allocation : la pilule bouge pendant qu'elle monte,
  * et change de largeur quand une application s'ouvre. */
+static GtkWidget *
+face_visible (void)
+{
+    if (D.retourneur != NULL && shell_retourneur_face (D.retourneur))
+        return GTK_WIDGET (D.etabli);
+    return D.box;
+}
+
+/* LA ZONE D'ENTREE SUIT LA FACE VISIBLE, ET PLUS LA FENETRE.
+ *
+ * Depuis que le dock a deux faces, sa fenetre est taillee au plus large des
+ * deux (retourneur.h) : elle deborde donc de ce qu'on voit. Une zone
+ * calquee sur elle avalerait les clics tombes a cote de la pilule -- sur le
+ * fond d'ecran, ou sur une fenetre en dessous -- sans que rien ne l'indique.
+ * On decoupe donc sur les limites reelles de la face affichee. */
 static void
 nappe_zone (int largeur, int hauteur, gpointer data)
 {
@@ -1121,26 +1355,28 @@ nappe_zone (int largeur, int hauteur, gpointer data)
     if (surface == NULL)
         return;
 
-    cairo_rectangle_int_t tout = { 0, 0, largeur, hauteur };
     cairo_region_t *zone;
+    graphene_rect_t r;
+    gboolean su = gtk_widget_compute_bounds (face_visible (), D.fenetre, &r);
+
+    cairo_rectangle_int_t pilule = {
+        su ? (int) floorf (r.origin.x) : 0,
+        su ? (int) floorf (r.origin.y) : 0,
+        su ? (int) ceilf (r.size.width) : largeur,
+        su ? (int) ceilf (r.size.height) : hauteur,
+    };
 
     if (!D.nappe) {
-        zone = cairo_region_create_rectangle (&tout);
+        zone = cairo_region_create_rectangle (&pilule);
     } else {
-        int bande = 0;
-        gtk_widget_measure (D.box, GTK_ORIENTATION_VERTICAL, largeur,
-                            NULL, &bande, NULL, NULL);
+        /* Tendue, la fenetre recoit le clic « a cote » partout SAUF dans la
+         * bande du bas, laissee a la barre d'etat et a ce qui vit dessous --
+         * voir « la nappe ». La pilule, elle, est rendue a la zone : elle
+         * est dans cette bande. */
+        int bande = MAX (0, hauteur - pilule.y);
         cairo_rectangle_int_t haut = { 0, 0, largeur, MAX (0, hauteur - bande) };
         zone = cairo_region_create_rectangle (&haut);
-
-        graphene_rect_t r;
-        if (gtk_widget_compute_bounds (D.box, D.fenetre, &r)) {
-            cairo_rectangle_int_t pilule = {
-                (int) floorf (r.origin.x), (int) floorf (r.origin.y),
-                (int) ceilf (r.size.width), (int) ceilf (r.size.height),
-            };
-            cairo_region_union_rectangle (zone, &pilule);
-        }
+        cairo_region_union_rectangle (zone, &pilule);
     }
     gdk_surface_set_input_region (surface, zone);
     cairo_region_destroy (zone);
@@ -1159,7 +1395,7 @@ on_nappe_appui (GtkGestureClick *g, int n, double x, double y, gpointer data)
         return;
 
     graphene_rect_t r;
-    if (gtk_widget_compute_bounds (D.box, D.fenetre, &r)
+    if (gtk_widget_compute_bounds (face_visible (), D.fenetre, &r)
         && graphene_rect_contains_point (&r, &GRAPHENE_POINT_INIT ((float) x, (float) y)))
         return;
 
@@ -1239,8 +1475,31 @@ nom_etat (ShellVisEtat etat)
     case SHELL_VIS_CACHE:    return "cache";
     case SHELL_VIS_BUREAU:   return "bureau";
     case SHELL_VIS_CONVOQUE: return "convoque";
+    case SHELL_VIS_ETABLI:   return "etabli";
     }
     return "?";
+}
+
+/* QUELLE FACE MONTRER — ET LA QUESTION SE REPOSE DEUX FOIS.
+ *
+ * Une fois quand l'etat change, une fois quand l'etabli se garnit : le
+ * modele arrive par le bus, donc APRES la decision de visibilite. Ne
+ * l'evaluer qu'au changement d'etat laissait le dock sur sa face bureau
+ * pendant que l'application avait deja pris possession de lui -- vu au banc
+ * le 16 septembre 2026, et invisible autrement : le journal disait
+ * « etabli » et l'ecran montrait les icones.
+ *
+ * Un etabli VIDE n'est pas une face : ce serait un dock ampute de ses
+ * icones, et l'utilisateur n'aurait plus nulle part ou aller. */
+static void
+face_a_jour (void)
+{
+    if (D.retourneur == NULL)
+        return;
+    shell_retourneur_montrer (D.retourneur,
+                              !D.bureau_force
+                              && shell_visibility_etat () == SHELL_VIS_ETABLI
+                              && shell_etabli_garni (D.etabli));
 }
 
 static void
@@ -1275,7 +1534,19 @@ on_etat (ShellVisEtat etat, gpointer data)
         nappe_tendre (TRUE);
         shell_glissiere_montrer (D.glissiere);
         break;
+    case SHELL_VIS_ETABLI:
+        /* Pas de nappe : le dock n'est pas un invite qu'un clic renvoie, il
+         * est la barre d'outils de la fenetre devant. Et il RESERVE sa
+         * place -- voir visibility.h, c'est la seule rupture assumee avec
+         * les trois autres etats. */
+        if (D.nappe)
+            dock_fermer_surfaces ();
+        nappe_tendre (FALSE);
+        shell_glissiere_montrer (D.glissiere);
+        break;
     }
+
+    face_a_jour ();
     barre_suivre (etat != SHELL_VIS_CACHE, FALSE);
 }
 
@@ -1286,6 +1557,15 @@ on_etat (ShellVisEtat etat, gpointer data)
  *   masquer    renvoie, quel que soit l'etat
  *   annoncer   redit son etat a la barre -- elle le demande en demarrant,
  *              pour le cas ou elle aurait ete relancee seule */
+/* Ce que fait le bouton de retour, sur le bus : pour les scripts, pour le
+ * banc, et pour le jour ou une touche voudra s'y brancher. */
+static void
+on_action_bureau (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) p; (void) d;
+    on_etabli_retour (NULL);
+}
+
 static void
 on_action_basculer (GSimpleAction *a, GVariant *p, gpointer d)
 {
@@ -1379,6 +1659,11 @@ on_action_clavier (GSimpleAction *a, GVariant *p, gpointer d)
 }
 
 static const GActionEntry actions[] = {
+    /* La presentation d'une application qui publie ses outils (outils.h).
+     * Sur le bus de session, comme les autres : c'est par la que le contrat
+     * entre dans le dock. */
+    { SHELL_OUTILS_PRESENTER, on_presentation, "s", NULL, NULL, { 0 } },
+    { "bureau",   on_action_bureau,   NULL, NULL, NULL, { 0 } },
     { "clavier",  on_action_clavier,  NULL, NULL, NULL, { 0 } },
     { "basculer", on_action_basculer, NULL, NULL, NULL, { 0 } },
     { "afficher", on_action_afficher, NULL, NULL, NULL, { 0 } },
@@ -1401,6 +1686,39 @@ on_tablette (gboolean tablette, gpointer data)
     dock_rebuild ();   /* l'icône du clavier n'existe qu'en mode tablette */
 }
 
+/* Le bouton de retour au bureau.
+ *
+ * IL NE TOUCHE PAS A LA VISIBILITE, et c'est tout le sujet. Le premier jet
+ * appelait cacher() puis convoquer() : convoquer relit l'etat souhaite, et
+ * comme une barre etait toujours en place, il revenait a l'etabli. Le bouton
+ * ne faisait rien, et rien dans le journal ne le disait -- l'etat demande
+ * etait bien celui qu'on obtenait.
+ *
+ * Il ne retire pas la barre non plus : l'application la garde, et on la
+ * retrouvera en revenant a elle. Il FORCE la face bureau, le temps d'aller
+ * chercher autre chose. */
+static void
+on_etabli_retour (gpointer data)
+{
+    (void) data;
+    D.bureau_force = TRUE;
+    face_a_jour ();
+}
+
+/* L'etabli vient de changer d'encombrement : la plus large des deux faces a
+ * peut-etre change, donc la taille de la fenetre. On ferme, pour la meme
+ * raison qu'avant un retournement. */
+static void
+on_etabli_taille (gpointer data)
+{
+    (void) data;
+    dock_fermer_surfaces ();
+
+    /* Le modele arrive apres la decision de visibilite : c'est ici que la
+     * face se decide vraiment, la premiere fois. */
+    face_a_jour ();
+}
+
 /* -------------------------------------------------------------------------
  * Fenetre du dock
  * ------------------------------------------------------------------------- */
@@ -1414,6 +1732,7 @@ on_activate (GtkApplication *app, gpointer user_data)
     D.app       = app;
     D.cfg       = cfg;
     D.barre_vue = -1;
+    D.barres    = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
 
     /* La bande du bord AVANT le dock : meme couche, et labwc empile dans
      * l'ordre de creation. Creee apres, elle passerait devant la pilule. */
@@ -1487,9 +1806,43 @@ on_activate (GtkApplication *app, gpointer user_data)
 
     dock_rebuild ();
 
-    /* La glissiere entre la fenetre et la pilule : c'est elle qui la fait
-     * descendre hors de l'ecran, et qui retire la fenetre une fois en bas. */
-    GtkWidget *glissiere = shell_glissiere_new (dock);
+    /* --- LA SECONDE FACE --------------------------------------------------
+     *
+     * L'etabli, et le retourneur qui l'echange avec le dock. L'ordre des
+     * couches, de la fenetre vers le contenu :
+     *
+     *   fenetre layer-shell
+     *     glissiere      fait sortir le tout par le bas
+     *       retourneur   echange les deux faces
+     *         dock       face BUREAU
+     *         etabli     face OUTILS
+     *
+     * La glissiere DEHORS et le retourneur DEDANS : sortir de l'ecran
+     * emporte les deux faces, alors qu'un retournement ne concerne que le
+     * contenu. L'inverse ferait descendre une face pendant que l'autre
+     * resterait. */
+    D.apps = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+
+    GtkWidget *etabli = shell_etabli_new (D.apps);
+    D.etabli = SHELL_ETABLI (etabli);
+    shell_etabli_sur_retour (D.etabli, on_etabli_retour, NULL);
+    shell_etabli_sur_taille (D.etabli, on_etabli_taille, NULL);
+
+    GtkWidget *retourneur = shell_retourneur_new (dock, etabli);
+    D.retourneur = SHELL_RETOURNEUR (retourneur);
+
+    /* LE DOCK FERME SES SURFACES AVANT TOUT RETOURNEMENT, et ce rappel est
+     * la seule chose qui l'en assure. Une liste de fenetres ouverte au
+     * survol, laissee en place pendant que sa face tourne, resterait
+     * plantee au milieu de l'ecran. */
+    shell_retourneur_sur_depart (D.retourneur,
+                                 (ShellRetourneurDepart) dock_fermer_surfaces,
+                                 NULL);
+
+    /* La glissiere entre la fenetre et les deux faces : c'est elle qui les
+     * fait descendre hors de l'ecran, et qui retire la fenetre une fois en
+     * bas. */
+    GtkWidget *glissiere = shell_glissiere_new (retourneur);
     D.glissiere = SHELL_GLISSIERE (glissiere);
     shell_glissiere_sur_allocation (D.glissiere, nappe_zone, NULL);
     gtk_window_set_child (GTK_WINDOW (window), glissiere);

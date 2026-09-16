@@ -79,6 +79,88 @@ window.shell {
   background-color: @surface-sunk;
 }
 
+
+/* -------------------------------------------------------------------------
+   L'établi — la face outils du dock
+
+   Le dock retourné porte les outils de l'application au premier plan (voir
+   docs/14 et src/etabli.h). MÊME MATIÈRE QUE LE DOCK, et ce n'est pas une
+   économie : c'est le même objet vu de l'autre côté. Il reprend donc .dock
+   tel quel — fond, rayon, ombre, marge — et n'ajoute ici que ce qui lui est
+   propre.
+   ------------------------------------------------------------------------- */
+
+/* Un peu moins de bourrage latéral que le dock : l'établi porte plus de
+   choses, et la pilule deviendrait vite plus large que ce qu'elle sert. */
+.etabli { padding: 6px 10px; }
+
+/* Un lieu : icône au-dessus, libellé dessous. Plus étroit qu'une icône
+   d'application — un lieu se lit, il ne se vise pas de loin. */
+.etabli-lieu {
+  min-width: 56px;
+  min-height: 52px;
+  padding: 2px 4px;
+  border-radius: 12px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  transition: background-color 120ms ease-out;
+}
+
+.etabli-lieu:hover { background-color: @surface-alt; }
+
+/* LÀ OÙ L'ON EST. L'état de l'action le dit, pas un attribut (voir
+   outils.h) ; ici on ne fait que le peindre. Le fond plutôt qu'un point
+   sous l'icône : le dock utilise déjà le point pour « cette application
+   tourne », et deux marques identiques pour deux sens différents se
+   confondent. */
+.etabli-lieu.ici {
+  background-color: @accent;
+  color: @on-accent;
+}
+
+.etabli-libelle {
+  font-size: 0.72rem;
+  color: @text-dim;
+}
+
+.etabli-lieu.ici .etabli-libelle { color: @on-accent; }
+
+/* Le fil d'Ariane. Les étapes sont du texte, et le chevron les sépare. */
+.etabli-etape {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: @text-dim;
+}
+
+.etabli-etape:hover     { background-color: @surface-alt; color: @text; }
+/* La dernière étape est le dossier où l'on est : elle se lit d'abord. */
+.etabli-etape.ici       { color: @text; font-weight: 600; }
+.etabli-chevron         { color: @text-dim; padding: 0 1px; }
+
+/* Un outil : une icône seule, plus petite qu'une application. */
+.etabli-outil,
+.etabli-retour {
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0;
+  border-radius: 10px;
+  background: none;
+  border: none;
+  box-shadow: none;
+  transition: background-color 120ms ease-out;
+}
+
+.etabli-outil:hover  { background-color: @surface-alt; }
+
+/* LE RETOUR AU BUREAU se distingue, et il le doit : c'est le seul bouton
+   dont on soit sûr qu'il sera là, quelle que soit l'application. */
+.etabli-retour        { color: @text-dim; }
+.etabli-retour:hover  { background-color: @surface-alt; color: @text; }
+
 /* -------------------------------------------------------------------------
    Barre d'état — bas à droite
 

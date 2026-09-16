@@ -61,7 +61,7 @@ construire() {
 flags() { pkg-config --cflags --libs "$@" || { echo "pkg-config a échoué pour : $*" >&2; exit 1; }; }
 
 CIBLES=("$@")
-[ ${#CIBLES[@]} -gt 0 ] || CIBLES=(fabrique-mire sonde-offload video pointeur retourneur)
+[ ${#CIBLES[@]} -gt 0 ] || CIBLES=(fabrique-mire sonde-offload video pointeur retourneur etabli)
 
 ECHECS=0
 echo "Construction des programmes d'essai :"
@@ -124,6 +124,19 @@ for c in "${CIBLES[@]}"; do
 			    $(flags gtk4 gtk4-layer-shell-0) -lm \
 			    || { echo "  retourneur : ÉCHEC de la compilation" >&2; ECHECS=$((ECHECS+1)); }
 			echo "  retourneur…"
+			;;
+		etabli)
+			# L'application témoin de l'établi : une vraie fenêtre, que le
+			# compositeur signale, et une barre publiée par le contrat. Le
+			# témoin de claude-os-outils, lui, n'a pas de fenêtre — le dock
+			# ne le découvrirait jamais.
+			# shellcheck disable=SC2046
+			gcc "${COMMUN[@]}" -I"$ICI/../src" \
+			    "$ICI/etabli-essai.c" "$ICI/../src/outils.c" \
+			    -o "$BUILD/etabli-essai" \
+			    $(flags gtk4 gio-unix-2.0) \
+			    || { echo "  etabli : ÉCHEC de la compilation" >&2; ECHECS=$((ECHECS+1)); }
+			echo "  etabli…"
 			;;
 		sonde-pouces)
 			# La portée des pouces, tablette en main : elle fixe la largeur
