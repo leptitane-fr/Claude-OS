@@ -1023,9 +1023,24 @@ reconstruire (Lieux *L)
 
     if (L->lecteurs->len > 0) {
         gtk_list_box_append (GTK_LIST_BOX (L->liste), entete ("Lecteurs réseau"));
-        for (guint i = 0; i < L->lecteurs->len; i++)
-            gtk_list_box_append (GTK_LIST_BOX (L->liste),
-                                 entree_lecteur (L, g_ptr_array_index (L->lecteurs, i)));
+        modele_section (L, "Lecteurs réseau");
+
+        for (guint i = 0; i < L->lecteurs->len; i++) {
+            const Lecteur *l = g_ptr_array_index (L->lecteurs, i);
+            gtk_list_box_append (GTK_LIST_BOX (L->liste), entree_lecteur (L, l));
+
+            /* SEULEMENT S'IL EST CONNECTÉ. Un lecteur déclaré mais éteint
+             * n'a pas de chemin où aller ; le volet, lui, sait le monter --
+             * et c'est une des choses que la barre ne saura jamais faire.
+             * Voir fichiers-lieux.h. */
+            if (!reseau_est_connecte (l))
+                continue;
+            g_autofree char *point = reseau_point_montage (l);
+            g_autoptr(GFile) f = g_file_new_for_path (point);
+            g_autoptr(GIcon) ic = g_themed_icon_new ("folder-network");
+            g_themed_icon_append_name (G_THEMED_ICON (ic), "folder-remote");
+            modele_entree (l->nom, ic, f);
+        }
     }
 
     /* --- le nuage --- */
@@ -1036,9 +1051,25 @@ reconstruire (Lieux *L)
 
     if (L->nuages->len > 0) {
         gtk_list_box_append (GTK_LIST_BOX (L->liste), entete ("Nuage"));
-        for (guint i = 0; i < L->nuages->len; i++)
-            gtk_list_box_append (GTK_LIST_BOX (L->liste),
-                                 entree_nuage (L, g_ptr_array_index (L->nuages, i)));
+        modele_section (L, "Nuage");
+
+        for (guint i = 0; i < L->nuages->len; i++) {
+            const LecteurNuage *l = g_ptr_array_index (L->nuages, i);
+            gtk_list_box_append (GTK_LIST_BOX (L->liste), entree_nuage (L, l));
+
+            /* Même règle que pour les lecteurs réseau : un compte déclaré
+             * mais non monté n'a pas de chemin. */
+            if (!nuage_est_connecte (l))
+                continue;
+            g_autofree char *point = nuage_point_montage (l);
+            g_autoptr(GFile) f = g_file_new_for_path (point);
+            /* L'icône du fournisseur, celle que le volet montre déjà : on
+             * reconnaît Google Drive à son logo, pas à un nuage générique. */
+            g_autoptr(GIcon) ic =
+                g_themed_icon_new (nuage_fournisseur_icone (l->fournisseur));
+            g_themed_icon_append_name (G_THEMED_ICON (ic), "folder-remote");
+            modele_entree (l->nom, ic, f);
+        }
     }
 
     /* Fermer la derniere section ouverte : sans cet appel, tout ce qui

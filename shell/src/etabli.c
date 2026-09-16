@@ -787,17 +787,34 @@ shell_etabli_new (GtkWidget *apps)
     gtk_scrolled_window_set_max_content_width (
         GTK_SCROLLED_WINDOW (e->fil_defil), 420);
 
-    if (apps != NULL) {
-        gtk_box_append (GTK_BOX (e->rangee), apps);
-        gtk_box_append (GTK_BOX (e->rangee), separateur ());
-    }
+    /* L'ORDRE DES ZONES SUIT CELUI DU DOCK, ET CE N'EST PAS UN DÉTAIL.
+     *
+     * Sur la face bureau, les applications ouvertes sont À DROITE. Le
+     * premier jet les mettait à gauche sur l'établi : au retournement, elles
+     * traversaient la pilule, et l'œil devait les rattraper. Constaté à
+     * l'usage sur MADOO le 16 septembre 2026 — « c'est pas super intuitif »,
+     * et c'est exactement cela : rien ne doit bouger de ce qui est commun
+     * aux deux faces.
+     *
+     * Ce qui appartient à l'application vient donc d'abord, ce qui
+     * appartient au bureau ensuite, dans le même ordre des deux côtés :
+     *
+     *     lieux · fil · outils │ applications ouvertes │ retour
+     */
     gtk_box_append (GTK_BOX (e->rangee), e->lieux);
     gtk_box_append (GTK_BOX (e->rangee), e->fil_defil);
     gtk_box_append (GTK_BOX (e->rangee), e->outils);
 
-    /* LE RETOUR EST TOUJOURS LÀ, et il est au bureau -- une application ne
-     * peut ni le retirer ni le déplacer. C'est la seule garantie qu'on a de
-     * pouvoir revenir, quelle que soit la barre qu'on nous a servie. */
+    if (apps != NULL) {
+        gtk_box_append (GTK_BOX (e->rangee), separateur ());
+        gtk_box_append (GTK_BOX (e->rangee), apps);
+    }
+
+    /* LE RETOUR EST TOUJOURS LÀ, TOUT À DROITE, et il est au bureau -- une
+     * application ne peut ni le retirer ni le déplacer. Après les
+     * applications ouvertes : c'est la dernière chose de la barre, comme le
+     * bouton « outils » est la dernière chose du dock. Les deux boutons de
+     * la bascule sont ainsi au même endroit sur les deux faces. */
     gtk_box_append (GTK_BOX (e->rangee), separateur ());
     e->retour = gtk_button_new ();
     gtk_button_set_child (GTK_BUTTON (e->retour),
