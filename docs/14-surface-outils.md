@@ -1,0 +1,428 @@
+# 14 — La surface d'outils partagée
+
+*Commencé le 16 septembre 2026.*
+
+**Si vous écrivez une application pour Claude OS, ce document et
+[`shell/src/outils.h`](../shell/src/outils.h) sont tout ce qu'il vous faut.**
+Le reste du dépôt explique comment le bureau est fait ; ces deux fichiers-là
+disent comment s'y brancher.
+
+---
+
+## 14.1 La thèse
+
+Une application de cette distribution **ne dessine pas son chrome**. Pas de
+barre d'outils, pas de volet latéral, pas de rangée de boutons en haut de la
+fenêtre. Elle **déclare** ce qu'elle sait faire et où l'on peut aller ; le
+dock le dessine pour elle, dans la matière du bureau.
+
+Trois gains, qu'aucune convention de style n'obtient :
+
+- **Un seul endroit où regarder.** Les outils de l'application active sont
+  toujours au même endroit de l'écran, quelle que soit l'application.
+- **Une seule source de vérité.** Le menu contextuel, la barre du dock et le
+  clavier lisent le même modèle. Un état à tenir d'accord de moins — la même
+  discipline que le trieur unique des quatre vues de Fichiers.
+- **De la place.** Une fenêtre sans barre ni volet rend environ 150 px de
+  haut et 200 de large à son contenu. La dalle de MADOO fait 1920 × 1080.
+
+**Le prix est nommé, et il est réel :** une fenêtre nue pilotée au clic
+droit est admirable pour qui sait, opaque pour qui ne sait pas. C'est un
+choix assumé pour cette distribution, décidé par l'utilisateur le
+16 septembre 2026. Ce n'est pas une bonne pratique générale, et il ne faut
+pas la présenter comme telle.
+
+---
+
+## 14.2 Les emplacements
+
+Le dock a **deux faces**, et un flip les échange.
+
+Face **bureau**, celle d'aujourd'hui :
+
+```
+      ╭───────────────────────────────────────╮
+      │  ⊞ │ ▣ ▣ ▣ ▣ ▣ │ ▣ ▣                  │
+      ╰───────────────────────────────────────╯
+        lanceur, épinglées, ouvertes
+```
+
+Face **établi**, celle que le contrat remplit :
+
+```
+                    ┌─────────────────────┐
+                    │       AUVENT        │   ← se déploie vers le haut
+      ╭─────────────┴─────────────────────┴───────────────────╮
+      │ ▣ ▣ ▣ │ 🏠 ★ 💾 ☁ │ Accueil › Images › 2026 │ 🔍 │ ⤺ │
+      ╰───────────────────────────────────────────────────────╯
+        apps      LIEUX          FIL            OUTILS  retour
+```
+
+**Quatre emplacements sont offerts aux applications**, et deux sont réservés
+au bureau. Une application ne peut rien poser ailleurs, et c'est ce qui
+garantit que deux applications se ressemblent.
+
+| Emplacement | Ce qu'on y met | Comment c'est dessiné |
+|---|---|---|
+| `lieux` | Où l'on peut aller : dossiers, favoris, lecteurs, sources, onglets, projets. Ce qui se choisit, et où l'on revient. | Icônes avec libellé, l'entrée courante allumée |
+| `fil` | Où l'on est. | Étapes séparées de chevrons, cliquables, défilantes |
+| `outils` | Ce qu'on déclenche. | Boutons à icône |
+| `auvent` | Ce qui demande de la place : une saisie, une liste, un réglage. | Un volet qui monte au-dessus de la pilule |
+
+Réservés au bureau, non déclarables : **la bande des applications ouvertes**
+à l'extrême gauche, et **le bouton de retour au bureau** à l'extrême droite.
+
+### Ce qui ne va PAS dans la barre
+
+Les actions d'édition — copier, coller, renommer, supprimer, trier, changer
+de vue — **restent au menu contextuel et au clavier**.
+
+> La barre porte la **navigation** et les **portes** ;
+> le clic droit porte les **verbes**.
+
+C'est une décision de l'utilisateur, pas une limite technique : rien
+n'empêcherait d'y mettre des verbes, et c'est précisément pour cela qu'il
+faut l'écrire. Une application qui remplirait sa zone `outils` de boutons
+« Copier » et « Coller » ne serait pas en panne — elle serait hors sujet.
+
+---
+
+## 14.3 Écrire une application qui s'intègre
+
+Six gestes. L'exemple complet et **qui compile** est l'application témoin,
+dans [`shell/src/outils-diag.c`](../shell/src/outils-diag.c), section
+« L'application témoin ».
+
+### 1. Un groupe d'actions, celui que vous avez déjà
+
+C'est le même que celui de votre menu contextuel. C'est tout l'intérêt : une
+seule source de vérité.
+
+```c
+GSimpleActionGroup *actions = g_simple_action_group_new ();
+g_action_map_add_action_entries (G_ACTION_MAP (actions), mes_actions,
+                                 G_N_ELEMENTS (mes_actions), NULL);
+```
+
+### 2. Une action à état pour dire où l'on est
+
+```c
+{ "aller", sur_aller, "s", "'file:///home/stef'", NULL, { 0 } },
+```
+
+Dans le gestionnaire, **posez l'état après avoir navigué** :
+
+```c
+g_simple_action_set_state (a, g_variant_ref (but));
+```
+
+Le dock allume l'entrée dont la cible vaut cet état — la sémantique radio de
+GMenu. **N'inventez pas d'attribut « courant »** : vous auriez deux vérités
+à tenir d'accord, et elles divergeraient.
+
+### 3. Le modèle de la barre
+
+```c
+GMenu *lieux = g_menu_new ();
+GMenuItem *it = g_menu_item_new ("Images", NULL);
+g_menu_item_set_action_and_target_value (it, "outils.aller",
+        g_variant_new_string ("file:///home/stef/Images"));
+g_menu_item_set_attribute (it, "icon", "s", "folder-pictures-symbolic");
+g_menu_item_set_attribute (it, SHELL_OUTILS_A_FORME, "s", SHELL_OUTILS_LIEU);
+g_menu_append_item (lieux, it);
+g_object_unref (it);
+
+GMenu *barre = g_menu_new ();
+GMenuItem *sec = g_menu_item_new_section ("Personnel", G_MENU_MODEL (lieux));
+g_menu_item_set_attribute (sec, SHELL_OUTILS_A_ZONE, "s", SHELL_OUTILS_ZONE_LIEUX);
+g_menu_append_item (barre, sec);
+g_object_unref (sec);
+```
+
+Notez le préfixe : les actions du modèle s'écrivent **`outils.quelquechose`**
+alors que le groupe exporté les porte **sans préfixe** (`aller`). C'est sous
+`outils` que le dock insère le groupe importé.
+
+### 4. Publier
+
+```c
+o = shell_outils_publier (G_APPLICATION (app), "Fichiers",
+                          G_ACTION_GROUP (actions), G_MENU_MODEL (barre),
+                          sur_prise, NULL);
+```
+
+**Le modèle peut changer à tout moment ensuite** : modifiez le `GMenu`, le
+dock suit. `org.gtk.Menus` signale ses propres changements. C'est ainsi que
+le fil d'Ariane se met à jour à chaque navigation, sans un appel de plus.
+
+### 5. Le repli — il n'est PAS facultatif
+
+```c
+static void
+sur_prise (gboolean prise, gpointer data)
+{
+    gtk_widget_set_visible (mon_volet_interne, !prise);
+}
+```
+
+Une application dont les outils vivent dans un autre processus **dépend de
+ce processus**. Elle doit rester utilisable sans lui : lancée seule depuis
+un terminal, au banc d'essai, ou le jour où le dock tombe. Gardez donc votre
+volet interne, escamoté tant que le dock tient la barre.
+
+**L'état de départ est « pas pris »**, et il ne se rappelle pas : une
+application s'ouvre avec ses replis en place. Le rappel ne signale que les
+changements — dock absent, aucun appel, ce qui est déjà la bonne réponse.
+
+### 6. Retirer à la fermeture
+
+```c
+shell_outils_retirer (o);
+```
+
+---
+
+## 14.4 Le protocole
+
+### Le transport — rien d'inventé
+
+`org.gtk.Menus` et `org.gtk.Actions`, les deux interfaces que GTK exporte et
+importe nativement. Le dock parle déjà `org.gtk.Actions` à la barre d'état
+depuis le 11 septembre 2026 : le canal est éprouvé, et une application qui
+n'est pas en GTK peut les implémenter — elles sont spécifiées.
+
+**Tout vit au même chemin**, sur le nom de bus de l'application :
+
+```
+/os/claude/shell/outils
+   ├── os.claude.shell.Outils   la découverte
+   ├── org.gtk.Menus            le modèle de la barre
+   └── org.gtk.Actions          ce que la barre déclenche
+```
+
+Un chemin **fixe**, et non dérivé de l'identifiant de l'application : une
+application non-GTK n'a pas à reproduire la règle de dérivation de
+`GApplication` pour se faire entendre.
+
+L'interface de découverte est minuscule, et c'est voulu :
+
+```xml
+<interface name='os.claude.shell.Outils'>
+  <property name='Contrat' type='u' access='read'/>
+  <property name='Titre'   type='s' access='read'/>
+  <method name='Prise'><arg name='prise' type='b' direction='in'/></method>
+</interface>
+```
+
+`Contrat` est **demandé**, jamais supposé. Les deux processus sont déployés
+ensemble aujourd'hui, mais rien ne le garantit demain : une application
+tierce, un clone, une version en cours d'essai. Le dock refuse ce qu'il ne
+sait pas lire, et le dit.
+
+### La présentation — qui parle le premier
+
+**L'application se présente au dock.** Elle ne l'attend pas, et le dock ne la
+cherche pas.
+
+```
+1.  L'application exporte ses trois interfaces.
+2.  Elle surveille le nom « os.claude.shell.dock ».
+      absent  → rien : l'état de départ est déjà « pas pris ».
+      présent → elle active l'action « outils-presenter » du dock,
+                avec son propre nom de bus en paramètre.
+3.  Le dock lit « Contrat », importe le menu et les actions,
+    puis appelle Prise(true) — ou Prise(false) s'il ne sait pas lire.
+4.  Le dock disparaît → Prise retombe à false, les replis reviennent.
+```
+
+**L'autre voie a été écartée.** Le dock ne découvre une fenêtre que par
+`wlr-foreign-toplevel-management-v1`, donc au moment où elle s'**active**.
+Une application ne saurait alors qu'au premier clic si ses outils sont pris
+en charge, et son volet de repli apparaîtrait puis disparaîtrait sous les
+yeux de l'utilisateur. Se présenter à la publication ferme ce trou.
+
+**Aucune minuterie, aucune scrutation.** Tout part d'un événement : un nom
+qui apparaît sur le bus, un appel de méthode. Ici la discipline du projet
+tombe particulièrement juste — l'absence du dock se **lit** sur le bus, elle
+ne se déduit pas d'un délai écoulé.
+
+**`Prise` n'est accepté que du dock.** L'application retient le propriétaire
+du nom `os.claude.shell.dock` et refuse l'appel qui vient d'ailleurs. Sans
+cette vérification, n'importe quel programme du bus de session pourrait
+faire disparaître le volet de repli d'une application et la laisser sans
+outils du tout.
+
+### L'appariement fenêtre → barre
+
+Par l'**`app_id`**, seul identifiant que
+`wlr-foreign-toplevel-management-v1` fournisse. L'application se présente
+avec son nom **bien connu** (son `application_id`), et c'est lui que le dock
+rapproche de l'`app_id` de ses fenêtres.
+
+**Conséquence assumée, et il faut la connaître :** la barre est **par
+application**, pas par fenêtre. Une application à plusieurs fenêtres suit
+son propre focus et réexporte le contenu de la fenêtre active ; le dock lit
+toujours le même chemin et n'a pas à connaître les fenêtres une à une.
+
+### L'auvent
+
+En v1, **un seul contrôle : la saisie.**
+
+```c
+GMenuItem *it = g_menu_item_new ("Rechercher", "outils.chercher");
+g_menu_item_set_attribute (it, SHELL_OUTILS_A_FORME,    "s", SHELL_OUTILS_AUVENT);
+g_menu_item_set_attribute (it, SHELL_OUTILS_A_CONTROLE, "s", SHELL_OUTILS_SAISIE);
+g_menu_item_set_attribute (it, SHELL_OUTILS_A_INVITE,   "s", "Nom du fichier…");
+g_menu_item_set_attribute (it, "icon", "s", "system-search-symbolic");
+```
+
+Le bouton paraît dans la zone `outils` ; au clic, l'auvent monte avec un
+champ, et chaque frappe active `outils.chercher` avec le texte. Fermer
+l'auvent l'active une dernière fois avec la chaîne vide.
+
+**C'est le dock qui dessine le contrôle, et l'application n'en voit que la
+valeur.** Un vocabulaire fermé, et non un langage de description
+d'interface : la cohérence visuelle est alors garantie par construction, et
+une application ne **peut pas** dessiner dans une surface qui appartient à
+un autre processus.
+
+### La table des attributs
+
+| Attribut | Porté par | Valeurs |
+|---|---|---|
+| `x-claude-zone` | une section | `lieux`, `fil`, `outils`, `auvent` |
+| `x-claude-forme` | une entrée | `lieu`, `bouton` (défaut), `etape`, `auvent` |
+| `x-claude-controle` | une entrée `auvent` | `saisie` — `liste` et `choix` sont prévus, non écrits |
+| `x-claude-invite` | une saisie | le texte d'invite |
+| `x-claude-astuce` | une entrée | l'infobulle |
+| `x-claude-cle` | une entrée | le raccourci à **montrer** |
+
+`x-claude-cle` ne fait que **montrer** : c'est l'application qui arme le
+raccourci, le dock n'intercepte aucune touche. Un dock qui volerait des
+touches au clavier d'une application serait une source de pannes
+indéchiffrables.
+
+Les constantes sont dans `outils.h`. `grep SHELL_OUTILS_` donne la liste
+complète de ce qui circule entre les deux processus.
+
+---
+
+## 14.5 Éprouver
+
+```sh
+claude-os-outils --temoin                    # dans un terminal
+claude-os-outils --dock                      # dans un second
+claude-os-outils os.claude.shell.fichiers    # lire une vraie application
+```
+
+`claude-os-outils` est l'autre bout du contrat : il lit ce qu'une
+application publie, sait **jouer le dock** — présentation et `Prise`
+comprises —, et porte l'**application témoin** qui sert d'exemple de
+référence.
+
+Il a été écrit avant l'interface, et c'est délibéré : un contrat qui tient
+entre deux processus n'est prouvé que si les deux bouts existent. Le
+protocole a donc été joué en entier avant qu'un seul pixel ne soit dessiné.
+
+Il reste utile ensuite, et c'est sa vraie raison d'être : **le jour où une
+barre ne s'affiche pas, il dit lequel des deux côtés se tait.**
+
+**Sans GTK, à dessein.** Un outil de diagnostic qui tire un runtime
+graphique complet ne peut pas servir le jour où c'est le graphique qui est
+en panne. Le témoin tourne sur un `GApplication` tout court — ce qui prouve
+au passage qu'une application non-GTK peut porter ce contrat.
+
+**Il dit ce qu'il sait, et seulement cela.** Les modèles D-Bus se
+remplissent de façon asynchrone : une barre lue trop tôt paraît vide. Le
+programme attend donc, et quand il n'a rien reçu il écrit « rien n'est
+arrivé en 1500 ms » plutôt que « la barre est vide ». Deux faux négatifs ont
+déjà coûté une séance à ce projet.
+
+### Ce qui a été joué le 16 septembre 2026
+
+Sur un bus isolé (`dbus-run-session`), le vrai dock occupant le nom sur la
+session :
+
+| Étape | Résultat |
+|---|---|
+| Le témoin publie, le dock est absent | aucun appel, repli en place — correct |
+| Le dock paraît | le témoin se présente |
+| Le dock lit la barre | zones, formes, cibles, icônes, contrôle, invite, touche : tout arrive |
+| Le dock appelle `Prise(true)` | le témoin escamote son repli |
+| L'état de `aller` est posé | l'entrée correspondante s'allume, **dans les deux zones** |
+| Le dock est tué | le témoin revient au repli |
+| Deux applications successives | le dock sert les deux sans rendre la main |
+
+Et sur la session réelle, le vrai dock a répondu
+`Unknown action "outils-presenter"` : la présentation part bien, et le dock
+d'aujourd'hui ne sait simplement pas encore la recevoir. C'est l'étape 3.
+
+### Un défaut payé le jour même
+
+**Sans `setlocale (LC_ALL, "")`, tout accent sort en `?`.** Un programme C
+reste en locale « C » tant qu'il ne demande pas celle de l'environnement ;
+`g_print` convertit alors vers l'ASCII et remplace ce qu'il ne sait pas
+écrire. GTK appelle `setlocale` pour ses applications, et c'est ce qui masque
+le problème partout ailleurs dans ce dépôt — ici, il n'y a pas de GTK.
+
+Le symptôme a d'abord été pris pour un bug de comparaison : le marqueur `▶`
+du lieu courant et le `·` des autres devenaient tous deux `?`, donc
+indiscernables. **La trace a tranché en une minute ce que la lecture du code
+n'aurait pas tranché.** Mesurer, pas supposer.
+
+---
+
+## 14.6 Où en est le chantier
+
+| # | Étape | État |
+|---|---|---|
+| 1 | Le contrat, la bibliothèque, l'outil, la doc | **fait le 16 septembre 2026** |
+| 2 | Le retourneur — le flip du dock | à faire |
+| 3 | L'établi — la face outils, et la règle de visibilité | à faire |
+| 4 | L'auvent et le vocabulaire des contrôles | à faire |
+| 5 | Fichiers : publication, dépouillement, clavier, repli | à faire |
+
+**Rien n'est visible à l'écran à ce stade**, et c'est normal : l'étape 1
+n'écrit que le contrat. Le dock d'aujourd'hui ne connaît pas encore l'action
+`outils-presenter`, et le refuse proprement.
+
+### Le risque principal est labwc, pas GTK
+
+Le flip change la **largeur** de la surface layer-shell. Or labwc 0.8.3
+renvoie hors écran tout popover porté par une surface redimensionnée — un
+invariant payé trois fois dans ce projet : centre de notifications, nappe du
+dock, tiroirs.
+
+La parade retenue pour l'étape 2 : **un seul redimensionnement, avant le
+mouvement, popovers fermés**. La surface prend d'emblée la largeur de la
+plus large des deux faces, et c'est le fond arrondi — dessiné en CSS sur un
+enfant — qui s'élargit à l'intérieur. La surface ne bouge plus pendant
+l'animation.
+
+C'est pour cela que le retourneur passe avant tout le reste : s'il ne tient
+pas au banc, la thèse entière se renégocie, et il vaut mieux le savoir à
+l'étape 2 qu'à l'étape 5.
+
+### Un effet de bord à connaître
+
+Recompiler et réinstaller le shell **installera le lecteur vidéo**.
+`--compiler` réinstalle tout, et `claude-os-video` attend dans
+`meson.build` depuis le 10 septembre 2026. Ce n'est pas un problème, c'est
+l'occasion de le voir enfin à l'écran — voir [`docs/11`](11-lecteur-video.md).
+
+---
+
+## 14.7 Les décisions, et pourquoi
+
+| Décision | Raison |
+|---|---|
+| `org.gtk.Menus` / `org.gtk.Actions`, pas de protocole à nous | GTK les parle des deux côtés, elles sont spécifiées, le canal est déjà éprouvé entre le dock et la barre d'état |
+| Un chemin D-Bus fixe | une application non-GTK n'a pas à deviner la règle de dérivation de `GApplication` |
+| L'application se présente | sinon elle ne saurait qu'au premier clic, et son repli clignoterait |
+| La barre par application, pas par fenêtre | l'`app_id` est le seul identifiant que le compositeur donne |
+| Le dock dessine les contrôles | la cohérence visuelle par construction ; et un processus ne dessine pas dans la surface d'un autre |
+| Un vocabulaire fermé, pas un langage d'interface | ce qui n'est pas prévu se refuse et se dit, plutôt que d'afficher un trou |
+| L'état de l'action dit le lieu courant | la sémantique radio de GMenu ; un attribut « courant » serait une seconde vérité |
+| Le repli est obligatoire | une application ne peut pas dépendre d'un autre processus pour rester utilisable |
+| `Prise` n'est accepté que du dock | sinon n'importe quel programme du bus pourrait priver une application de ses outils |
+| La barre porte la navigation, le clic droit les verbes | décision de l'utilisateur, 16 septembre 2026 |

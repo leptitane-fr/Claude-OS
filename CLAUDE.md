@@ -6,7 +6,52 @@ Ce fichier est chargé automatiquement à l'ouverture d'une session. Il dit
 
 ---
 
-## Où en est le projet — 15 septembre 2026
+## Où en est le projet — 16 septembre 2026
+
+**LE BUREAU DEVIENT UNE SURFACE D'OUTILS PARTAGÉE** (chantier ouvert le
+16 septembre 2026). Une application de cette distribution **ne dessinera
+plus son chrome** : ni barre d'outils, ni volet latéral. Elle **déclare** ce
+qu'elle sait faire, et le dock le dessine — en se retournant par un flip
+quand une application passe devant. Le gestionnaire de fichiers n'est que le
+**premier client** de cette mécanique ; ce qui compte est l'environnement,
+destiné aux applications à venir.
+
+**Tout ce qu'il faut pour écrire une application qui s'y branche est dans
+[`docs/14`](docs/14-surface-outils.md) et
+[`shell/src/outils.h`](shell/src/outils.h)**, et nulle part ailleurs. Ne pas
+redécouvrir le protocole en lisant le dock.
+
+**L'ÉTAPE 1 EST FAITE : le contrat.** `outils.h` / `outils.c` côté
+application, et `claude-os-outils` de l'autre bout — il lit une barre
+publiée, sait **jouer le dock**, et porte l'**application témoin** qui sert
+d'exemple. Le protocole a été joué en entier sur un bus isolé avant qu'un
+seul pixel ne soit dessiné : présentation, lecture du modèle, `Prise`,
+allumage du lieu courant, et retour au repli quand le dock s'en va.
+
+Quatre points à retenir avant d'y toucher :
+
+- **RIEN N'EST VISIBLE À L'ÉCRAN**, et c'est normal. Le dock d'aujourd'hui
+  ne connaît pas encore l'action `outils-presenter` et la refuse proprement
+  — vérifié sur la session réelle. Les étapes 2 à 5 (retourneur, établi,
+  auvent, Fichiers) restent à écrire.
+- **LE REPLI N'EST PAS FACULTATIF.** Une application dont les outils vivent
+  dans un autre processus doit rester utilisable sans lui : lancée seule,
+  au banc, ou le dock tombé. Elle garde son volet interne, escamoté tant que
+  le dock tient la barre.
+- **LA BARRE PORTE LA NAVIGATION, LE CLIC DROIT PORTE LES VERBES.** Décision
+  de l'utilisateur. Copier, coller, trier, changer de vue restent au menu
+  contextuel et au clavier. Une application qui remplirait la barre de
+  verbes ne serait pas en panne — elle serait hors sujet.
+- **LE RISQUE PRINCIPAL EST labwc, PAS GTK.** Le flip change la largeur de
+  la surface layer-shell, et labwc 0.8.3 renvoie hors écran tout popover
+  porté par une surface redimensionnée — invariant déjà payé trois fois ici.
+  D'où l'ordre des travaux : le retourneur avant tout le reste, pour que la
+  thèse se vérifie à l'étape 2 et non à l'étape 5.
+
+Et un défaut payé le jour même, qui vaut pour tout programme sans GTK :
+**sans `setlocale (LC_ALL, "")`, tout accent sort en « ? »**. GTK l'appelle
+pour ses applications, ce qui masque le problème partout ailleurs dans ce
+dépôt.
 
 **Le mode tablette est en service** (11 au 14 septembre 2026) : détection du
 retournement, rotation paysage ↔ chevalet, et un **clavier à l'écran** en deux
@@ -820,6 +865,7 @@ sur lui — sur un conteneur.
 | **Zone morte tactile** | Apparue le 13 septembre, **disparue le 14 sans intervention** : intermittente, cause inconnue. Rien n'a été inscrit en dur dans le clavier. Si elle revient : `claude-os-root python3 tools/diag-tactile.py coins`, puis `carte`. |
 | **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
 | **Le nuage** | **Google Drive EN SERVICE depuis le 15 septembre 2026** — monté, parcouru, écrit. OneDrive écrit mais **jamais monté** : la création d'une application Azure est fermée aux comptes Microsoft personnels, et le report est un choix de l'utilisateur. Ni panneau de réglages, ni icônes, ni clic éprouvé à l'écran. Voir [`docs/13`](docs/13-nuage.md). |
+| **Surface d'outils** | **Étape 1 sur 5 faite le 16 septembre 2026** : le contrat (`outils.h`, `outils.c`, `claude-os-outils`), éprouvé de bout en bout sur un bus isolé. Restent le retourneur, l'établi et sa règle de visibilité, l'auvent, puis Fichiers en premier client. Rien n'est visible à l'écran à ce stade. Voir [`docs/14`](docs/14-surface-outils.md). |
 | Reports | icônes sur le bureau. |
 
 ---
@@ -1038,6 +1084,7 @@ Il garantit qu'on ne peut plus être enfermé dehors. Il ne couvre pas le cas
 | La session meurt | `~/.local/state/claude-os/session.log` (et `.1`) |
 | Le bureau démarre mal | `~/.local/state/claude-os/shell.log` |
 | Le filet est intervenu | `/var/log/claude-os-filet.log` |
+| La barre d'outils d'une application ne s'affiche pas | `claude-os-outils <son-nom-de-bus>` — il dit lequel des deux côtés se tait |
 
 Le greeter et la session consignent leur contexte, leur sortie complète et
 leur **code de retour**. Un journal vide alors qu'une tentative a eu lieu

@@ -238,6 +238,22 @@ executable('claude-os-nuage-phrase',
   dependencies : [glib, secret],
   install : true)
 
+# LE CONTRAT DES OUTILS, des deux cotes.
+#
+# outils.c est la moitie « application » : elle est liee a chaque
+# application qui publie une barre. claude-os-outils est l'autre moitie,
+# celle du diagnostic -- il lit une barre publiee, sait jouer le dock, et
+# porte l'application temoin qui sert d'exemple de reference.
+#
+# SANS GTK, et c'est voulu : un outil de diagnostic qui tire un runtime
+# graphique complet ne peut pas servir le jour ou c'est le graphique qui est
+# en panne. Le contrat lui-meme ne demande rien de graphique -- le temoin en
+# est la preuve, il tourne sur un GApplication tout court.
+executable('claude-os-outils',
+  'src/outils-diag.c', 'src/outils.c',
+  dependencies : [giounix],
+  install : true)
+
 # LE VERROU N'EST PAS UNE APPLICATION GTK, et c'est explique en tete de
 # verrou.c : le protocole demande une surface d'un type que GTK ne sait pas
 # produire, et aucune bibliotheque equivalente a gtk4-layer-shell n'existe
