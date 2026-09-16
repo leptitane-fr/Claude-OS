@@ -137,8 +137,14 @@ vk_code = custom_target('vk-code',
   output  : 'virtual-keyboard-unstable-v1-protocol.c',
   command : [wlscanner, 'private-code', '@INPUT@', '@OUTPUT@'])
 
+# retourneur.c est la, et le dock ne s'en sert pas encore : c'est l'etape 3
+# de la surface d'outils (docs/14). Il y figure des maintenant pour qu'il
+# soit compile par la chaine officielle -- warning_level=2, -Os, LTO -- et
+# non par le seul banc d'essai. Un banc qui ne compile pas comme la cible ne
+# prouve rien ; le meme raisonnement vaut pour un module qu'elle ignore.
 executable('claude-os-dock',
   'src/dock.c', 'src/toplevels.c', 'src/visibility.c', 'src/glissiere.c',
+  'src/retourneur.c',
   'src/tablette.c', 'src/rotation.c',
   'src/clavier-ecran.c', 'src/clavier.c', 'src/saisie.c', 'src/mots.c',
   ftl_header, ftl_code, im_header, im_code, vk_header, vk_code, commun,

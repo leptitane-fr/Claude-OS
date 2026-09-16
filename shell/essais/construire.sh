@@ -61,7 +61,7 @@ construire() {
 flags() { pkg-config --cflags --libs "$@" || { echo "pkg-config a échoué pour : $*" >&2; exit 1; }; }
 
 CIBLES=("$@")
-[ ${#CIBLES[@]} -gt 0 ] || CIBLES=(fabrique-mire sonde-offload video pointeur)
+[ ${#CIBLES[@]} -gt 0 ] || CIBLES=(fabrique-mire sonde-offload video pointeur retourneur)
 
 ECHECS=0
 echo "Construction des programmes d'essai :"
@@ -111,6 +111,19 @@ for c in "${CIBLES[@]}"; do
 			else
 				echo "  pointeur : wayland-scanner a échoué" >&2; ECHECS=$((ECHECS+1))
 			fi
+			;;
+		retourneur)
+			# Le retourneur et sa face d'essai. Compile ici et PAS depuis
+			# meson.build : c'est un instrument de banc, pas un composant du
+			# bureau -- retourneur.c, lui, est bien dans meson.build, c'est
+			# le programme qui l'exerce qui n'y est pas.
+			# shellcheck disable=SC2046
+			gcc "${COMMUN[@]}" -I"$ICI/../src" \
+			    "$ICI/retourneur-essai.c" "$ICI/../src/retourneur.c" \
+			    -o "$BUILD/retourneur-essai" \
+			    $(flags gtk4 gtk4-layer-shell-0) -lm \
+			    || { echo "  retourneur : ÉCHEC de la compilation" >&2; ECHECS=$((ECHECS+1)); }
+			echo "  retourneur…"
 			;;
 		sonde-pouces)
 			# La portée des pouces, tablette en main : elle fixe la largeur

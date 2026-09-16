@@ -21,6 +21,22 @@ destiné aux applications à venir.
 [`shell/src/outils.h`](shell/src/outils.h)**, et nulle part ailleurs. Ne pas
 redécouvrir le protocole en lisant le dock.
 
+**L'ÉTAPE 2 EST FAITE : le retourneur** (`retourneur.c`), le widget à deux
+faces qui fait basculer le dock. C'est la pièce dont dépendait toute la
+thèse, et elle tient : **la surface ne change pas de taille pendant le
+mouvement** — mesuré dans la trace Wayland, trois `configure` au démarrage,
+tous à la même taille, aucun ensuite. La parade est de mesurer au plus large
+des deux faces ; ce qui s'élargit est la pilule, pas la fenêtre. Seize images
+par retournement, **zéro au repos**. Banc : `shell/essais/banc-retourneur.sh`,
+13 vérifications, 0 en échec.
+
+**ET LE RENDU LOGICIEL NE SAIT PAS DESSINER LA 3D — IL LE DIT EN ROSE.** Sous
+`GskCairoRenderer`, une face portant une perspective est peinte en rose vif.
+MADOO utilise `ngl`, où la rotation est correcte ; mais un repli logiciel
+reste possible, et le retourneur bascule alors sur un **écrasement vertical**
+plutôt que d'afficher un dock rose. Le banc vérifie que ce repli s'annonce :
+si le message disparaît, la détection est morte.
+
 **L'ÉTAPE 1 EST FAITE : le contrat.** `outils.h` / `outils.c` côté
 application, et `claude-os-outils` de l'autre bout — il lit une barre
 publiée, sait **jouer le dock**, et porte l'**application témoin** qui sert
@@ -865,7 +881,7 @@ sur lui — sur un conteneur.
 | **Zone morte tactile** | Apparue le 13 septembre, **disparue le 14 sans intervention** : intermittente, cause inconnue. Rien n'a été inscrit en dur dans le clavier. Si elle revient : `claude-os-root python3 tools/diag-tactile.py coins`, puis `carte`. |
 | **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
 | **Le nuage** | **Google Drive EN SERVICE depuis le 15 septembre 2026** — monté, parcouru, écrit. OneDrive écrit mais **jamais monté** : la création d'une application Azure est fermée aux comptes Microsoft personnels, et le report est un choix de l'utilisateur. Ni panneau de réglages, ni icônes, ni clic éprouvé à l'écran. Voir [`docs/13`](docs/13-nuage.md). |
-| **Surface d'outils** | **Étape 1 sur 5 faite le 16 septembre 2026** : le contrat (`outils.h`, `outils.c`, `claude-os-outils`), éprouvé de bout en bout sur un bus isolé. Restent le retourneur, l'établi et sa règle de visibilité, l'auvent, puis Fichiers en premier client. Rien n'est visible à l'écran à ce stade. Voir [`docs/14`](docs/14-surface-outils.md). |
+| **Surface d'outils** | **Étapes 1 et 2 sur 5 faites le 16 septembre 2026** : le contrat (`outils.h`, `outils.c`, `claude-os-outils`), éprouvé de bout en bout sur un bus isolé ; et le retourneur (`retourneur.c`), éprouvé au banc — la surface ne change pas de taille, 13 vérifications sur 13. Restent l'établi et sa règle de visibilité, l'auvent, puis Fichiers en premier client. **Rien n'est encore visible à l'écran**, et la rotation n'a jamais été vue sur la vraie machine. Voir [`docs/14`](docs/14-surface-outils.md). |
 | Reports | icônes sur le bureau. |
 
 ---

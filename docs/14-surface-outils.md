@@ -377,7 +377,7 @@ n'aurait pas tranché.** Mesurer, pas supposer.
 | # | Étape | État |
 |---|---|---|
 | 1 | Le contrat, la bibliothèque, l'outil, la doc | **fait le 16 septembre 2026** |
-| 2 | Le retourneur — le flip du dock | à faire |
+| 2 | Le retourneur — le flip du dock | **fait le 16 septembre 2026** — voir 14.7 |
 | 3 | L'établi — la face outils, et la règle de visibilité | à faire |
 | 4 | L'auvent et le vocabulaire des contrôles | à faire |
 | 5 | Fichiers : publication, dépouillement, clavier, repli | à faire |
@@ -412,7 +412,107 @@ l'occasion de le voir enfin à l'écran — voir [`docs/11`](11-lecteur-video.md
 
 ---
 
-## 14.7 Les décisions, et pourquoi
+## 14.7 Le retourneur — étape 2
+
+*Fait le 16 septembre 2026.* `shell/src/retourneur.{c,h}`, banc
+`shell/essais/banc-retourneur.sh`.
+
+Un widget à deux faces qui les échange par une rotation autour de son axe
+horizontal. Pourquoi un retournement et pas un fondu : les deux faces ne sont
+pas deux pages d'un même livre, c'est le **même objet vu de l'autre côté**.
+Un fondu laisserait croire qu'on a remplacé le dock ; le retournement dit
+qu'on l'a tourné.
+
+### La parade à labwc, et elle tient
+
+Le retourneur **mesure toujours au plus large des deux faces**. La surface a
+donc, au repos comme en mouvement, la taille de la plus encombrante : elle ne
+change pas pendant le flip. Ce qui s'élargit, c'est la pilule — le fond
+arrondi, dessiné en CSS sur la face, pas sur la fenêtre.
+
+Mesuré dans la trace Wayland, et non dans les compteurs du programme :
+
+```
+zwlr_layer_surface_v1#39.configure(3, 896, 34)
+zwlr_layer_surface_v1#39.configure(4, 896, 34)
+zwlr_layer_surface_v1#39.configure(5, 896, 34)
+```
+
+Trois configure, **tous au démarrage, tous à la même taille, et plus aucun
+ensuite** — y compris après plusieurs retournements entre une face de cinq
+boutons et une de quatorze. La surface ne bouge pas.
+
+### Ce que le banc établit
+
+| Question | Réponse |
+|---|---|
+| Images par retournement | **16 à 17** |
+| Images au repos, avant et après | **0**, sur trois secondes |
+| Tailles de surface distinctes | **1** |
+| Départ signalé, popover fermé | une fois, avant la première image |
+| Popover demandé en plein mouvement | refusé |
+| Clic sur la face cachée | sans effet |
+
+13 vérifications, 0 en échec.
+
+### LE RENDU LOGICIEL NE SAIT PAS DESSINER LA 3D
+
+**Et il le dit en rose vif.** Sous `GSK_RENDERER=cairo`, une face portant
+`gsk_transform_perspective()` est peinte en rose — la couleur dont GSK marque
+un nœud qu'il ne sait pas rendre. Découvert au banc, qui tourne en rendu
+logiciel par construction.
+
+Avec `ngl`, la même face tourne correctement : les verticales convergent, les
+bords gauche et droit penchent en sens opposés et le centre reste droit —
+c'est la perspective juste.
+
+MADOO utilise `ngl`. Mais un repli logiciel reste possible — pilote en panne,
+machine virtuelle, banc — et un dock qui virerait au rose à chaque bascule
+serait un désastre visible. **Le retourneur détecte donc le renderer**
+(`GskCairoRenderer`) et remplace la rotation par un **écrasement vertical** :
+la hauteur suit le cosinus de l'angle, ce qui est la rotation dont on a
+retiré la profondeur. L'objet se referme et se rouvre ; cairo sait le faire ;
+et le journal dit qu'on est passé par là.
+
+Le banc vérifie ce message. **S'il disparaît, la détection ne marche plus**,
+et le dock virera au rose sur toute machine tombée en rendu logiciel.
+
+### Trois pièges de mesure payés ce jour-là
+
+Ils valent pour tout banc de ce dépôt :
+
+- **La trace de `WAYLAND_DEBUG` nomme les objets `nom#id`, pas `nom@id`.** Un
+  motif écrit avec `@` ne trouve rien, et le banc annonce fièrement zéro. Le
+  test passait parce qu'il ne mesurait rien.
+- **`gtk4-layer-shell` n'émet jamais `set_size`** dans ce montage : ancrée sur
+  un seul bord, la surface prend la taille de son buffer et c'est le
+  compositeur qui renvoie un `configure`. Compter les `set_size` revient à
+  compter zéro quoi qu'il arrive. Le banc exige désormais que la trace
+  **parle** avant de juger ce qu'elle dit.
+- **`g_message` écrit sur la sortie d'erreur**, qui porte ici la trace
+  Wayland. Chercher le message dans le seul journal standard, c'était ne
+  jamais le trouver.
+
+### Un instrument, et pourquoi il est dans le code de production
+
+`CLAUDE_OS_RETOURNEUR_MS` règle la durée du mouvement. Un retournement dure
+moins d'un tiers de seconde et `grim` met plus longtemps que cela à produire
+une capture : sans ce réglage, **aucune image du mouvement ne peut être
+photographiée**, et la justesse de la perspective ne se vérifierait que de
+visu sur la machine. C'est par là qu'on a établi le rose de cairo. Hors banc,
+la variable n'existe pas et la constante s'applique.
+
+### Ce qui reste à voir sur MADOO
+
+Le banc n'a pas d'écran, donc pas de rendu accéléré : **la rotation n'a
+jamais été vue avec le renderer de la vraie machine sur le vrai écran.** Les
+captures `ngl` du banc le prouvent en logiciel émulé, pas en conditions
+réelles. À confirmer à l'étape 3, quand le dock portera vraiment ses deux
+faces.
+
+---
+
+## 14.8 Les décisions, et pourquoi
 
 | Décision | Raison |
 |---|---|
