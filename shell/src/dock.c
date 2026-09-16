@@ -22,6 +22,7 @@
 #include <math.h>
 
 #include "config.h"
+#include "auvent.h"
 #include "clavier-ecran.h"
 #include "etabli.h"
 #include "glissiere.h"
@@ -1378,6 +1379,13 @@ nappe_zone (int largeur, int hauteur, gpointer data)
         zone = cairo_region_create_rectangle (&haut);
         cairo_region_union_rectangle (zone, &pilule);
     }
+    /* OU EST LA PILULE, EN DEBOGAGE. La fenetre fait parfois tout l'ecran --
+     * nappe tendue, auvent ouvert -- et rien, dans le journal, ne disait ou
+     * la face avait atterri. C'est ainsi qu'une pilule centree au milieu de
+     * l'ecran a pu passer inapercue jusqu'au 16 septembre 2026. */
+    g_debug ("pilule : %d,%d %dx%d dans %dx%d", pilule.x, pilule.y,
+             pilule.width, pilule.height, largeur, hauteur);
+
     gdk_surface_set_input_region (surface, zone);
     cairo_region_destroy (zone);
 }
@@ -1391,12 +1399,20 @@ on_nappe_appui (GtkGestureClick *g, int n, double x, double y, gpointer data)
 {
     (void) g; (void) n; (void) data;
 
-    if (shell_visibility_etat () != SHELL_VIS_CONVOQUE)
-        return;
-
     graphene_rect_t r;
     if (gtk_widget_compute_bounds (face_visible (), D.fenetre, &r)
         && graphene_rect_contains_point (&r, &GRAPHENE_POINT_INIT ((float) x, (float) y)))
+        return;
+
+    /* UN AUVENT OUVERT SE REFERME AVANT TOUT AUTRE EFFET, et le clic
+     * s'arrete la. Il confisque le clavier (voir on_etabli_auvent) : le
+     * premier geste a cote doit le rendre, pas renvoyer le dock. */
+    if (D.etabli != NULL && shell_etabli_auvent_ouvert (D.etabli)) {
+        shell_etabli_fermer_auvent (D.etabli);
+        return;
+    }
+
+    if (shell_visibility_etat () != SHELL_VIS_CONVOQUE)
         return;
 
     shell_visibility_congedier ();
@@ -1404,8 +1420,18 @@ on_nappe_appui (GtkGestureClick *g, int n, double x, double y, gpointer data)
 
 /* Les listes au survol et le menu du clic droit sont des surfaces a part :
  * elles resteraient en l'air pendant que le dock descend. */
+/* DEUX FERMETURES, ET LES CONFONDRE BOUCLE.
+ *
+ * dock_fermer_popovers() ne touche qu'aux surfaces GTK. C'est ce qu'il faut
+ * quand l'etabli change de taille -- y compris quand c'est l'auvent qui
+ * vient de s'ouvrir : y fermer l'auvent le refermerait dans la foulee.
+ *
+ * dock_fermer_surfaces() ferme l'auvent EN PLUS. C'est ce qu'il faut avant
+ * un retournement, ou quand le dock s'en va : un volet de saisie laisse
+ * ouvert sur une face qui tourne serait une porte sur rien.
+ */
 static void
-dock_fermer_surfaces (void)
+dock_fermer_popovers (void)
 {
     gtk_popover_popdown (GTK_POPOVER (D.menu));
 
@@ -1423,6 +1449,14 @@ dock_fermer_surfaces (void)
         if (h->popover != NULL)
             gtk_popover_popdown (GTK_POPOVER (h->popover));
     }
+}
+
+static void
+dock_fermer_surfaces (void)
+{
+    if (D.etabli != NULL)
+        shell_etabli_fermer_auvent (D.etabli);
+    dock_fermer_popovers ();
 }
 
 /* Le relais vers la barre d'etat.
@@ -1557,6 +1591,20 @@ on_etat (ShellVisEtat etat, gpointer data)
  *   masquer    renvoie, quel que soit l'etat
  *   annoncer   redit son etat a la barre -- elle le demande en demarrant,
  *              pour le cas ou elle aurait ete relancee seule */
+/* Actionner un outil de l'etabli, sur le bus. Voir etabli.h : c'est
+ * l'instrument du banc, et le point d'accroche d'un raccourci clavier. */
+static void
+on_action_outil (GSimpleAction *a, GVariant *p, gpointer d)
+{
+    (void) a; (void) d;
+
+    int n = (p != NULL && g_variant_is_of_type (p, G_VARIANT_TYPE_INT32))
+          ? g_variant_get_int32 (p) : 0;
+
+    if (D.etabli == NULL || !shell_etabli_actionner_outil (D.etabli, n))
+        g_message ("etabli : pas d'outil n°%d a actionner", n);
+}
+
 /* Ce que fait le bouton de retour, sur le bus : pour les scripts, pour le
  * banc, et pour le jour ou une touche voudra s'y brancher. */
 static void
@@ -1664,6 +1712,7 @@ static const GActionEntry actions[] = {
      * entre dans le dock. */
     { SHELL_OUTILS_PRESENTER, on_presentation, "s", NULL, NULL, { 0 } },
     { "bureau",   on_action_bureau,   NULL, NULL, NULL, { 0 } },
+    { "outil",    on_action_outil,    "i",  NULL, NULL, { 0 } },
     { "clavier",  on_action_clavier,  NULL, NULL, NULL, { 0 } },
     { "basculer", on_action_basculer, NULL, NULL, NULL, { 0 } },
     { "afficher", on_action_afficher, NULL, NULL, NULL, { 0 } },
@@ -1705,6 +1754,50 @@ on_etabli_retour (gpointer data)
     face_a_jour ();
 }
 
+/* L'AUVENT PREND LE CLAVIER, ET LE REND.
+ *
+ * Le dock n'en a jamais voulu : « la saisie continue d'aller a la fenetre
+ * active meme quand la souris le survole ». La regle tenait parce que rien,
+ * dans le dock, ne se tapait.
+ *
+ * EXCLUSIVE, ET C'EST UNE MESURE, PAS UN GOUT. ON_DEMAND paraissait le choix
+ * poli -- le champ recoit les touches parce qu'on a clique dedans, et
+ * l'application les reprend d'un clic chez elle. Mesure au banc le
+ * 16 septembre 2026 : labwc 0.8.3 n'accorde le focus clavier d'une surface
+ * ON_DEMAND qu'apres un CLIC DEDANS. Le volet montait, le champ portait son
+ * contour bleu de focus GTK, et la frappe partait a l'application. Il aurait
+ * fallu cliquer une seconde fois dans le champ pour y ecrire -- apres avoir
+ * clique le bouton qui l'ouvre.
+ *
+ * EXCLUSIVE donne le focus a l'instant meme : verifie sur le meme banc, la
+ * frappe arrive sans un clic. La contrepartie est reelle -- l'application ne
+ * recoit plus une touche tant que le volet est la -- et c'est pourquoi le
+ * dock tend sa NAPPE en meme temps : un clic n'importe ou referme l'auvent
+ * et rend le clavier. Trois portes de sortie, donc : Echap, un clic a cote,
+ * et le changement d'application.
+ *
+ * Remis a NONE a la fermeture, sans quoi le dock garderait le clavier de la
+ * session entiere pour un champ referme depuis longtemps. */
+static void
+on_etabli_auvent (gboolean ouvert, gpointer data)
+{
+    (void) data;
+    if (D.fenetre == NULL)
+        return;
+
+    gtk_layer_set_keyboard_mode (GTK_WINDOW (D.fenetre),
+                                 ouvert ? GTK_LAYER_SHELL_KEYBOARD_MODE_EXCLUSIVE
+                                        : GTK_LAYER_SHELL_KEYBOARD_MODE_NONE);
+
+    /* La nappe, pour que le clic a cote ait un destinataire. En ETABLI le
+     * dock n'en tend pas -- il n'est pas un invite qu'on congedie -- mais un
+     * volet qui confisque le clavier doit pouvoir se refermer d'un geste. */
+    nappe_tendre (ouvert);
+
+    g_debug ("auvent : %s, clavier %s", ouvert ? "ouvert" : "ferme",
+             ouvert ? "exclusif" : "none");
+}
+
 /* L'etabli vient de changer d'encombrement : la plus large des deux faces a
  * peut-etre change, donc la taille de la fenetre. On ferme, pour la meme
  * raison qu'avant un retournement. */
@@ -1712,7 +1805,11 @@ static void
 on_etabli_taille (gpointer data)
 {
     (void) data;
-    dock_fermer_surfaces ();
+
+    /* LES POPOVERS SEULEMENT. L'ouverture de l'auvent passe par ici -- elle
+     * change la taille -- et y fermer l'auvent le refermerait dans
+     * l'instant. Voir dock_fermer_popovers(). */
+    dock_fermer_popovers ();
 
     /* Le modele arrive apres la decision de visibilite : c'est ici que la
      * face se decide vraiment, la premiere fois. */
@@ -1827,6 +1924,7 @@ on_activate (GtkApplication *app, gpointer user_data)
     D.etabli = SHELL_ETABLI (etabli);
     shell_etabli_sur_retour (D.etabli, on_etabli_retour, NULL);
     shell_etabli_sur_taille (D.etabli, on_etabli_taille, NULL);
+    shell_etabli_sur_auvent (D.etabli, on_etabli_auvent, NULL);
 
     GtkWidget *retourneur = shell_retourneur_new (dock, etabli);
     D.retourneur = SHELL_RETOURNEUR (retourneur);

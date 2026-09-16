@@ -179,6 +179,10 @@
  * ne sont pas écrits ; les déclarer aujourd'hui ne produirait rien, et le
  * dock le dira sur sa sortie d'erreur plutôt que d'afficher un trou.
  *
+ * TROIS FAÇONS DE REFERMER L'AUVENT, et il en faut trois : tant qu'il est
+ * ouvert, il tient le clavier de la session (voir auvent.h). Échap, un clic
+ * n'importe où ailleurs, et le passage à une autre application.
+ *
  * -------------------------------------------------------------------------
  * ÉPROUVER SANS LE DOCK
  * -------------------------------------------------------------------------
@@ -235,7 +239,7 @@ G_BEGIN_DECLS
 
 /* Le contrôle que l'auvent déploie. « saisie » seul est écrit à ce jour. */
 #define SHELL_OUTILS_A_CONTROLE  "x-claude-controle"
-#define SHELL_OUTILS_SAISIE      "saisie"
+#define SHELL_OUTILS_SAISIE      "saisie"  /* écrit le 16 septembre 2026 */
 #define SHELL_OUTILS_LISTE       "liste"   /* prévu, non écrit */
 #define SHELL_OUTILS_CHOIX       "choix"   /* prévu, non écrit */
 

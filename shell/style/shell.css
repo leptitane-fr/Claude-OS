@@ -161,6 +161,30 @@ window.shell {
 .etabli-retour        { color: @text-dim; }
 .etabli-retour:hover  { background-color: @surface-alt; color: @text; }
 
+/* L'auvent : le volet qui monte au-dessus de la pilule.
+
+   MÊME MATIÈRE QUE LA PILULE, et posé juste au-dessus d'elle — assez près
+   pour qu'on lise les deux comme un seul objet qui s'est ouvert, assez
+   détaché pour qu'on voie que c'est un volet. */
+.auvent {
+  background-color: @surface;
+  border: 1px solid @border;
+  border-radius: 16px;
+  padding: 8px 12px;
+  margin: 0 0 6px 0;
+  box-shadow: 0 8px 28px @shadow,
+              0 2px  6px @shadow-close;
+}
+
+.auvent-saisie {
+  min-height: 34px;
+  border-radius: 10px;
+  background-color: @surface-sunk;
+  border: 1px solid @border;
+  box-shadow: none;
+  padding: 2px 10px;
+}
+
 /* -------------------------------------------------------------------------
    Barre d'état — bas à droite
 

@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "auvent.h"
 #include "outils.h"
 
 #define ICONE_LIEU   24
@@ -10,7 +11,9 @@
 struct _ShellEtabli {
     GtkWidget  parent_instance;
 
-    GtkWidget *rangee;      /* la pilule : tout est dedans                  */
+    GtkWidget *colonne;     /* l'auvent au-dessus, la pilule en dessous     */
+    GtkWidget *rangee;      /* la pilule                                    */
+    ShellAuvent *auvent;
     GtkWidget *apps;        /* au bureau, fourni par le dock                */
     GtkWidget *lieux;
     GtkWidget *fil;
@@ -49,7 +52,29 @@ struct _ShellEtabli {
     gpointer          retour_data;
     ShellEtabliTaille taille_cb;
     gpointer          taille_data;
+    ShellEtabliAuvent auvent_cb;
+    gpointer          auvent_data;
 };
+
+/* Ce qu'un bouton d'auvent a besoin de savoir pour ouvrir le sien. Attaché
+ * au bouton, libéré avec lui : les entrées sont refaites à chaque
+ * reconstruction, et une table parallèle se désynchroniserait. */
+typedef struct {
+    ShellEtabli *etabli;
+    char        *action;     /* le nom NU, sans le préfixe */
+    char        *controle;
+    char        *invite;
+} Ouvreur;
+
+static void
+ouvreur_libre (gpointer data)
+{
+    Ouvreur *o = data;
+    g_free (o->action);
+    g_free (o->controle);
+    g_free (o->invite);
+    g_free (o);
+}
 
 typedef struct {
     GMenuModel *modele;
@@ -136,6 +161,71 @@ allumer (ShellEtabli *e)
         else
             gtk_widget_remove_css_class (w, "ici");
     }
+}
+
+/* -------------------------------------------------------------------------
+ * L'auvent
+ * ------------------------------------------------------------------------- */
+
+/* La valeur du contrôle part vers l'application, telle quelle.
+ *
+ * L'ACTION EST ACTIVÉE DIRECTEMENT, et non par un GtkActionable : le bouton
+ * ouvre le volet, c'est le VOLET qui porte la valeur. Les brancher tous deux
+ * sur la même action reviendrait à l'activer sans paramètre au clic, ce que
+ * GTK refuse bruyamment -- payé le 16 septembre 2026, un avertissement par
+ * survol. */
+static void
+sur_valeur (const char *valeur, gpointer data)
+{
+    Ouvreur *o = data;
+
+    if (o->etabli->actions == NULL)
+        return;
+    g_action_group_activate_action (o->etabli->actions, o->action,
+                                    g_variant_new_string (valeur));
+}
+
+static void
+on_ouvrir (GtkButton *b, gpointer data)
+{
+    Ouvreur *o = data;
+    (void) b;
+
+    shell_auvent_ouvrir (o->etabli->auvent, o->controle, o->invite,
+                         sur_valeur, o);
+}
+
+static void
+on_auvent (gboolean ouvert, gpointer data)
+{
+    ShellEtabli *e = data;
+
+    /* Le dock en a besoin pour DEUX choses : le mode clavier de sa surface,
+     * et la fermeture de ses popovers -- la hauteur va changer. */
+    if (e->auvent_cb != NULL)
+        e->auvent_cb (ouvert, e->auvent_data);
+    if (e->taille_cb != NULL)
+        e->taille_cb (e->taille_data);
+}
+
+void
+shell_etabli_fermer_auvent (ShellEtabli *e)
+{
+    if (e != NULL)
+        shell_auvent_fermer (e->auvent);
+}
+
+gboolean
+shell_etabli_auvent_ouvert (ShellEtabli *e)
+{
+    return e != NULL && shell_auvent_ouvert (e->auvent);
+}
+
+void
+shell_etabli_sur_auvent (ShellEtabli *e, ShellEtabliAuvent f, gpointer data)
+{
+    e->auvent_cb   = f;
+    e->auvent_data = data;
 }
 
 /* -------------------------------------------------------------------------
@@ -298,18 +388,25 @@ poser_entree (ShellEtabli *e, GMenuModel *m, int i, const char *zone,
          * contrôle qui devait la remplir. Le dire plutôt que d'afficher un
          * trou : c'est la règle du contrat pour tout ce qu'on ne sait pas
          * encore dessiner. */
-        g_message ("établi : « %s » demande un auvent, pas encore écrit "
-                   "(étape 4) — bouton inerte", label ? label : "?");
+        /* LE BOUTON N'EST PAS BRANCHÉ SUR L'ACTION, il ouvre le volet.
+         *
+         * L'action d'un auvent attend la valeur du contrôle -- une chaîne
+         * pour une saisie. La brancher AUSSI sur le bouton reviendrait à
+         * l'activer sans paramètre au clic, ce que GTK refuse bruyamment :
+         * un avertissement par survol, en boucle. C'est le volet qui porte
+         * la valeur, et lui seul. */
         bouton = forme_bouton (icone, astuce ? astuce : label, cle);
 
-        /* INERTE, ET PAS SEULEMENT VIDE. L'action d'un auvent attend la
-         * valeur du contrôle -- une chaîne pour une saisie. La brancher sur
-         * un bouton qui n'a rien à lui donner fait crier GTK à chaque survol
-         * (« parameter type mismatch »), en boucle et sans fin. Mieux vaut
-         * un bouton qui ne répond pas et le dit. */
-        gtk_widget_set_sensitive (bouton, FALSE);
-        gtk_widget_set_tooltip_text (bouton,
-                                     "Cet outil attend l'auvent (à venir)");
+        Ouvreur *ouvreur = g_new0 (Ouvreur, 1);
+        ouvreur->etabli   = e;
+        ouvreur->action   = g_strdup (nom_nu (action));
+        ouvreur->controle = g_strdup (attribut (m, i, SHELL_OUTILS_A_CONTROLE));
+        ouvreur->invite   = g_strdup (attribut (m, i, SHELL_OUTILS_A_INVITE));
+
+        g_object_set_data_full (G_OBJECT (bouton), "ouvreur", ouvreur,
+                                ouvreur_libre);
+        g_signal_connect (bouton, "clicked", G_CALLBACK (on_ouvrir), ouvreur);
+
         gtk_box_append (GTK_BOX (ou), bouton);
         if (but != NULL)
             g_variant_unref (but);
@@ -451,6 +548,10 @@ shell_etabli_poser (ShellEtabli *e, GMenuModel *barre, GActionGroup *actions)
         g_strfreev (g_action_group_list_actions (actions));
     }
 
+    /* UN VOLET OUVERT SUR LA BARRE D'UNE AUTRE APPLICATION ÉCRIRAIT DANS LE
+     * VIDE : son action appartenait au groupe qu'on vient de remplacer. */
+    shell_auvent_fermer (e->auvent);
+
     gtk_widget_insert_action_group (GTK_WIDGET (e), SHELL_OUTILS_PREFIXE,
                                     actions);
     reconstruire (e);
@@ -463,6 +564,25 @@ shell_etabli_garni (ShellEtabli *e)
         && (gtk_widget_get_first_child (e->lieux)  != NULL
          || gtk_widget_get_first_child (e->fil)    != NULL
          || gtk_widget_get_first_child (e->outils) != NULL);
+}
+
+gboolean
+shell_etabli_actionner_outil (ShellEtabli *e, int n)
+{
+    if (e == NULL || n < 0)
+        return FALSE;
+
+    int i = 0;
+    for (GtkWidget *c = gtk_widget_get_first_child (e->outils);
+         c != NULL; c = gtk_widget_get_next_sibling (c), i++) {
+        if (i != n)
+            continue;
+        if (!GTK_IS_BUTTON (c))
+            return FALSE;
+        g_signal_emit_by_name (c, "clicked");
+        return TRUE;
+    }
+    return FALSE;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -514,14 +634,14 @@ etabli_measure (GtkWidget *w, GtkOrientation o, int pour,
                 int *min, int *nat, int *min_base, int *nat_base)
 {
     ShellEtabli *e = SHELL_ETABLI (w);
-    gtk_widget_measure (e->rangee, o, pour, min, nat, min_base, nat_base);
+    gtk_widget_measure (e->colonne, o, pour, min, nat, min_base, nat_base);
 }
 
 static void
 etabli_size_allocate (GtkWidget *w, int largeur, int hauteur, int base)
 {
     ShellEtabli *e = SHELL_ETABLI (w);
-    gtk_widget_allocate (e->rangee, largeur, hauteur, base, NULL);
+    gtk_widget_allocate (e->colonne, largeur, hauteur, base, NULL);
 }
 
 static void
@@ -541,7 +661,7 @@ etabli_dispose (GObject *o)
     g_clear_pointer (&e->allumables, g_ptr_array_unref);
     g_clear_pointer (&e->cibles, g_ptr_array_unref);
     g_clear_pointer (&e->sur_actions, g_ptr_array_unref);
-    g_clear_pointer (&e->rangee, gtk_widget_unparent);
+    g_clear_pointer (&e->colonne, gtk_widget_unparent);
 
     G_OBJECT_CLASS (shell_etabli_parent_class)->dispose (o);
 }
@@ -571,12 +691,21 @@ shell_etabli_new (GtkWidget *apps)
 {
     ShellEtabli *e = g_object_new (SHELL_TYPE_ETABLI, NULL);
 
+    /* L'AUVENT AU-DESSUS, LA PILULE EN DESSOUS. Une colonne, et non deux
+     * surfaces : le volet doit monter DU dock, pas apparaître à côté. */
+    e->colonne = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_valign (e->colonne, GTK_ALIGN_END);
+    gtk_widget_set_parent (e->colonne, GTK_WIDGET (e));
+
+    e->auvent = SHELL_AUVENT (shell_auvent_new ());
+    shell_auvent_sur_ouverture (e->auvent, on_auvent, e);
+    gtk_box_append (GTK_BOX (e->colonne), GTK_WIDGET (e->auvent));
+
     e->rangee = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_widget_add_css_class (e->rangee, "dock");
     gtk_widget_add_css_class (e->rangee, "etabli");
     gtk_widget_set_halign (e->rangee, GTK_ALIGN_CENTER);
-    gtk_widget_set_valign (e->rangee, GTK_ALIGN_END);
-    gtk_widget_set_parent (e->rangee, GTK_WIDGET (e));
+    gtk_box_append (GTK_BOX (e->colonne), e->rangee);
 
     e->apps   = apps;
     e->lieux  = zone ("etabli-lieux");

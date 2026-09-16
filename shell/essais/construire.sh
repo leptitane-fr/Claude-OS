@@ -61,7 +61,7 @@ construire() {
 flags() { pkg-config --cflags --libs "$@" || { echo "pkg-config a échoué pour : $*" >&2; exit 1; }; }
 
 CIBLES=("$@")
-[ ${#CIBLES[@]} -gt 0 ] || CIBLES=(fabrique-mire sonde-offload video pointeur retourneur etabli)
+[ ${#CIBLES[@]} -gt 0 ] || CIBLES=(fabrique-mire sonde-offload video pointeur retourneur etabli frappe)
 
 ECHECS=0
 echo "Construction des programmes d'essai :"
@@ -137,6 +137,20 @@ for c in "${CIBLES[@]}"; do
 			    $(flags gtk4 gio-unix-2.0) \
 			    || { echo "  etabli : ÉCHEC de la compilation" >&2; ECHECS=$((ECHECS+1)); }
 			echo "  etabli…"
+			;;
+		frappe)
+			# Le clavier virtuel du banc. Meme raison que pour le pointeur :
+			# le protocole n'est empaquete nulle part dans Debian, le XML est
+			# dans shell/protocols/ et le code client engendre ici.
+			XML="$ICI/../protocols/virtual-keyboard-unstable-v1.xml"
+			if wayland-scanner client-header "$XML" "$BUILD/virtual-keyboard-unstable-v1-client-protocol.h" \
+			   && wayland-scanner private-code "$XML" "$BUILD/virtual-keyboard-protocol.c"; then
+				# shellcheck disable=SC2046
+				construire frappe -I"$BUILD" "$BUILD/virtual-keyboard-protocol.c" \
+				    $(flags wayland-client xkbcommon) || ECHECS=$((ECHECS+1))
+			else
+				echo "  frappe : wayland-scanner a échoué" >&2; ECHECS=$((ECHECS+1))
+			fi
 			;;
 		sonde-pouces)
 			# La portée des pouces, tablette en main : elle fixe la largeur

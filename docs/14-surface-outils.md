@@ -292,7 +292,7 @@ un autre processus.
 |---|---|---|
 | `x-claude-zone` | une section | `lieux`, `fil`, `outils`, `auvent` |
 | `x-claude-forme` | une entrée | `lieu`, `bouton` (défaut), `etape`, `auvent` |
-| `x-claude-controle` | une entrée `auvent` | `saisie` — `liste` et `choix` sont prévus, non écrits |
+| `x-claude-controle` | une entrée `auvent` | `saisie` (écrit) — `liste` et `choix` sont prévus, non écrits |
 | `x-claude-invite` | une saisie | le texte d'invite |
 | `x-claude-astuce` | une entrée | l'infobulle |
 | `x-claude-cle` | une entrée | le raccourci à **montrer** |
@@ -379,7 +379,7 @@ n'aurait pas tranché.** Mesurer, pas supposer.
 | 1 | Le contrat, la bibliothèque, l'outil, la doc | **fait le 16 septembre 2026** |
 | 2 | Le retourneur — le flip du dock | **fait le 16 septembre 2026** — voir 14.7 |
 | 3 | L'établi — la face outils, et la règle de visibilité | **fait le 16 septembre 2026** — voir 14.8 |
-| 4 | L'auvent et le vocabulaire des contrôles | à faire |
+| 4 | L'auvent et le vocabulaire des contrôles | **fait le 16 septembre 2026** — voir 14.9 |
 | 5 | Fichiers : publication, dépouillement, clavier, repli | à faire |
 
 **Rien n'est visible à l'écran à ce stade**, et c'est normal : l'étape 1
@@ -636,7 +636,115 @@ de 1080.
 
 ---
 
-## 14.9 Les décisions, et pourquoi
+## 14.9 L'auvent — étape 4
+
+*Fait le 16 septembre 2026.* `shell/src/auvent.{c,h}`, le clavier virtuel de
+banc `shell/essais/frappe.c`.
+
+Un volet qui monte au-dessus de la pilule, ouvert par un bouton de la zone
+`outils`. Un contrôle écrit : la **saisie**.
+
+```
+                    ┌──────────────────────┐
+                    │  Nom du fichier…     │   ← l'auvent
+      ╭─────────────┴──────────────────────┴──────────────╮
+      │ ▣ ▣ │ 🏠 📄 🖼 🗑 │ Accueil › Images │ 🔍 │ ⌂ │
+      ╰──────────────────────────────────────────────────╯
+```
+
+Chaque frappe part vers l'application par son action ; la fermeture en envoie
+une dernière, **vide** — c'est ainsi qu'une application sait qu'il faut rendre
+la liste complète. Sans elle, une recherche refermée laisserait le filtre en
+place, et l'utilisateur chercherait pourquoi la moitié de ses fichiers a
+disparu.
+
+### EXCLUSIVE, et c'est une mesure, pas un goût
+
+Le dock n'avait jamais pris le clavier. Une saisie change cela, et seulement
+le temps qu'elle est ouverte.
+
+`ON_DEMAND` paraissait le choix poli : le champ reçoit les touches parce
+qu'on a cliqué dedans, et l'application les reprend d'un clic chez elle.
+**Mesuré au banc : labwc 0.8.3 n'accorde le focus clavier d'une surface
+`ON_DEMAND` qu'après un clic dedans.** Le volet montait, le champ portait son
+contour bleu de focus GTK, et la frappe partait à l'application. Il aurait
+fallu cliquer une seconde fois dans le champ — après avoir cliqué le bouton
+qui l'ouvre.
+
+`EXCLUSIVE` donne le focus à l'instant même : vérifié sur le même banc, la
+frappe arrive sans un clic.
+
+**La contrepartie est réelle** — l'application ne reçoit plus une touche tant
+que le volet est là — et c'est pourquoi le dock **tend sa nappe** en même
+temps. Trois portes de sortie, donc, et il en faut trois : Échap, un clic
+n'importe où ailleurs, et le passage à une autre application.
+
+### Un bug que seule la nappe a révélé
+
+Le retourneur **centrait sa face verticalement**. Cela valait tant que la
+fenêtre avait la taille de son contenu — mais le dock tend sa fenêtre à tout
+l'écran quand il est convoqué, et maintenant quand l'auvent est ouvert. La
+pilule, centrée dans 1080 px, **partait au milieu de l'écran**.
+
+Vu sur deux captures d'auvent où le dock avait tout simplement disparu du
+bas. Aucun test d'état ne l'aurait dit : le journal annonçait le bon état, et
+la pilule était introuvable. La face suit désormais son propre `valign`, et
+le journal dit où elle atterrit (`pilule : 516,996 887x84 dans 1920x1080`) —
+le banc vérifie que `y + hauteur` touche le bas sur **toutes** les
+allocations plein écran.
+
+### Deux fermetures, et les confondre boucle
+
+`dock_fermer_popovers()` ne touche qu'aux surfaces GTK — c'est ce qu'il faut
+quand l'établi change de taille, **y compris quand c'est l'auvent qui vient
+de s'ouvrir** : y fermer l'auvent le refermerait dans la foulée.
+`dock_fermer_surfaces()` ferme l'auvent en plus, avant un retournement ou un
+départ.
+
+### `frappe` — le clavier virtuel du banc
+
+**Aucun banc de ce dépôt ne savait taper.** On pouvait donc éprouver que le
+volet s'ouvrait, et rien de ce qu'il sert à faire.
+
+`shell/essais/frappe.c` donne au labwc sans écran un clavier, par
+`virtual-keyboard-unstable-v1` — celui-là même que le clavier à l'écran du
+mode tablette utilise. Il **fabrique une keymap pour ce qu'on tape** plutôt
+que d'utiliser la disposition du système : chercher le keycode d'un caractère
+dans un AZERTY demande de connaître ses niveaux, ses groupes et ses touches
+mortes, et le banc taperait alors autre chose selon la machine.
+
+```sh
+bash shell/essais/construire.sh frappe
+frappe "mire"
+frappe --touche Escape
+```
+
+Il resservira : l'écran de connexion, le code PIN, le clavier à l'écran.
+
+### Une commande pour actionner un outil
+
+`gapplication action os.claude.shell.dock outil 0` actionne le premier outil
+de l'établi. Le banc n'a pas d'yeux — il ne sait pas où le compositeur a posé
+un bouton, et un clic à coordonnées devinées éprouverait surtout notre
+capacité à deviner. C'est aussi le point d'accroche d'un raccourci clavier,
+le jour où l'on voudra ouvrir la recherche du dock sans quitter le clavier.
+
+### Ce que le banc établit
+
+`banc-etabli.sh`, **20 vérifications, 0 en échec** :
+
+| Question | Réponse |
+|---|---|
+| L'auvent s'ouvre | oui, et le dock passe le clavier en `exclusif` |
+| La frappe arrive à l'application | `mire`, caractère par caractère |
+| Échap referme | oui, et envoie la valeur vide |
+| Le clavier est rendu | oui, retour à `none` |
+| Un clic à côté referme | oui, sans quitter l'établi |
+| La pilule, nappe tendue | collée au bas sur 13 allocations plein écran |
+
+---
+
+## 14.10 Les décisions, et pourquoi
 
 | Décision | Raison |
 |---|---|

@@ -25,9 +25,10 @@
  * fournit le widget des applications ouvertes -- il sait déjà les
  * construire -- et l'établi fournit le reste.
  *
- * L'AUVENT n'est pas ici : c'est l'étape 4. Une entrée qui le demande est
- * dessinée en bouton ordinaire jusque-là, et le dit sur la sortie d'erreur
- * plutôt que d'afficher un trou.
+ * L'AUVENT est la cinquième zone, et la seule qui ne soit pas sur la ligne :
+ * un volet qui monte au-dessus de la pilule, ouvert par un bouton de la zone
+ * « outils ». Voir auvent.h -- notamment pour le clavier, que le dock doit
+ * prendre le temps qu'il est ouvert.
  *
  * -------------------------------------------------------------------------
  * CE QUI SE RECONSTRUIT, ET CE QUI NE FAIT QUE S'ALLUMER
@@ -62,6 +63,11 @@ G_DECLARE_FINAL_TYPE (ShellEtabli, shell_etabli, SHELL, ETABLI, GtkWidget)
 /* Le bouton de retour au bureau a été pressé. */
 typedef void (*ShellEtabliRetour) (gpointer user_data);
 
+/* L'auvent de l'établi s'ouvre ou se ferme. LE DOCK Y POSE LE MODE CLAVIER
+ * DE SA SURFACE : une saisie qui ne reçoit pas les touches n'est qu'un
+ * rectangle. Voir auvent.h, « le clavier, et c'est le vrai sujet ». */
+typedef void (*ShellEtabliAuvent) (gboolean ouvert, gpointer user_data);
+
 /* L'établi vient de changer d'encombrement -- une barre posée, retirée, ou
  * un modèle qui a bougé. LE DOCK Y FERME SES SURFACES : la largeur de la
  * face la plus large commande celle de la fenêtre, et labwc replace un
@@ -72,6 +78,14 @@ typedef void (*ShellEtabliTaille) (gpointer user_data);
 GtkWidget *shell_etabli_new (GtkWidget *apps);
 
 void shell_etabli_sur_retour (ShellEtabli *e, ShellEtabliRetour f, gpointer data);
+void shell_etabli_sur_auvent (ShellEtabli *e, ShellEtabliAuvent f, gpointer data);
+
+/* Refermer l'auvent, s'il est ouvert. Le dock s'en sert avant de se
+ * retourner et quand il change d'application : un volet de saisie laissé
+ * ouvert sur la barre d'une application qu'on vient de quitter écrirait
+ * dans le vide. */
+void shell_etabli_fermer_auvent (ShellEtabli *e);
+gboolean shell_etabli_auvent_ouvert (ShellEtabli *e);
 void shell_etabli_sur_taille (ShellEtabli *e, ShellEtabliTaille f, gpointer data);
 
 /* Poser la barre d'une application, ou la retirer en passant NULL.
@@ -86,5 +100,15 @@ void shell_etabli_poser (ShellEtabli *e, GMenuModel *barre, GActionGroup *action
  * vaut la peine de se retourner : un établi vide n'est pas une face, c'est
  * un dock amputé de ses icônes. */
 gboolean shell_etabli_garni (ShellEtabli *e);
+
+/* Actionner le n-ième outil de la zone « outils », comme si on l'avait
+ * cliqué. Rend FALSE s'il n'y en a pas tant.
+ *
+ * DEUX USAGES, ET LE SECOND JUSTIFIE LE PREMIER. Le banc d'essai n'a pas
+ * d'yeux : il ne sait pas où le compositeur a posé un bouton, et un clic à
+ * coordonnées devinées éprouverait surtout notre capacité à deviner. Mais
+ * c'est aussi le point d'accroche d'un raccourci clavier -- « la recherche
+ * du dock » sans quitter le clavier -- le jour où l'on en voudra un. */
+gboolean shell_etabli_actionner_outil (ShellEtabli *e, int n);
 
 G_END_DECLS

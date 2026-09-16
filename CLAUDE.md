@@ -21,6 +21,33 @@ destiné aux applications à venir.
 [`shell/src/outils.h`](shell/src/outils.h)**, et nulle part ailleurs. Ne pas
 redécouvrir le protocole en lisant le dock.
 
+**L'ÉTAPE 4 EST FAITE : l'auvent** (`auvent.c`) — le volet qui monte
+au-dessus de la pilule, avec un contrôle écrit : la **saisie**. Chaque frappe
+part vers l'application ; la fermeture en envoie une dernière, **vide**, sans
+quoi un filtre resterait posé sur une recherche refermée.
+
+**LE DOCK PREND LE CLAVIER, EN EXCLUSIF, ET C'EST UNE MESURE.** `ON_DEMAND`
+paraissait le choix poli — mais **labwc 0.8.3 n'accorde le focus clavier
+d'une surface `ON_DEMAND` qu'après un clic dedans** : le volet montait, le
+champ portait son contour bleu, et la frappe partait à l'application.
+`EXCLUSIVE` donne le focus à l'instant même. Contrepartie assumée :
+l'application ne reçoit plus une touche tant que le volet est là, d'où
+**trois portes de sortie** — Échap, un clic n'importe où ailleurs (le dock
+tend sa nappe pour cela), et le passage à une autre application.
+
+**ET UN BUG QUE SEULE LA NAPPE A RÉVÉLÉ** : le retourneur centrait sa face
+verticalement. Le dock tendant sa fenêtre à tout l'écran quand il est
+convoqué, **la pilule partait au milieu de l'écran** — vu sur deux captures
+où le dock avait disparu du bas, alors que le journal annonçait le bon état.
+La face suit désormais son propre `valign`.
+
+**`shell/essais/frappe.c` : LE BANC SAIT ENFIN TAPER.** Aucun banc de ce
+dépôt ne le savait ; on pouvait éprouver qu'un volet s'ouvrait, et rien de ce
+qu'il sert à faire. Clavier virtuel par `virtual-keyboard-unstable-v1`, avec
+une keymap **fabriquée pour ce qu'on tape** — chercher un caractère dans un
+AZERTY ferait taper autre chose selon la machine. Il resservira : écran de
+connexion, code PIN, clavier à l'écran.
+
 **L'ÉTAPE 3 EST FAITE : l'établi** (`etabli.c`), et **le chantier devient
 visible** : le dock porte deux faces, et l'une d'elles est remplie par une
 application. La règle du 11 septembre n'est pas remplacée, elle est
@@ -908,7 +935,7 @@ sur lui — sur un conteneur.
 | **Zone morte tactile** | Apparue le 13 septembre, **disparue le 14 sans intervention** : intermittente, cause inconnue. Rien n'a été inscrit en dur dans le clavier. Si elle revient : `claude-os-root python3 tools/diag-tactile.py coins`, puis `carte`. |
 | **Dock qui sort de l'écran** | Éprouvé au banc, **pas encore au doigt sur MADOO**. La bande du bord fait 10 px et le seuil 32 px : à ajuster à l'usage si un doigt venu du cadre la manque. |
 | **Le nuage** | **Google Drive EN SERVICE depuis le 15 septembre 2026** — monté, parcouru, écrit. OneDrive écrit mais **jamais monté** : la création d'une application Azure est fermée aux comptes Microsoft personnels, et le report est un choix de l'utilisateur. Ni panneau de réglages, ni icônes, ni clic éprouvé à l'écran. Voir [`docs/13`](docs/13-nuage.md). |
-| **Surface d'outils** | **Étapes 1 à 3 sur 5 faites le 16 septembre 2026** : le contrat (`outils.h`, `outils.c`, `claude-os-outils`), le retourneur (`retourneur.c`), et l'établi (`etabli.c`) avec sa règle de visibilité. Trois bancs, 39 vérifications, 0 en échec. Restent l'auvent (étape 4), puis Fichiers en premier client (étape 5). **Rien n'a encore été vu sur la vraie machine** : ni la rotation avec le renderer réel, ni le style de l'établi autrement que sur des captures, ni le doigt — ni si 86 px réservés en permanence se supportent à l'usage. Voir [`docs/14`](docs/14-surface-outils.md). |
+| **Surface d'outils** | **Étapes 1 à 4 sur 5 faites le 16 septembre 2026** : le contrat (`outils.h`), le retourneur (`retourneur.c`), l'établi (`etabli.c`) et sa règle de visibilité, l'auvent (`auvent.c`) et son contrôle de saisie. Trois bancs, 45 vérifications, 0 en échec. Reste Fichiers en premier client (étape 5). **Rien n'a encore été vu sur la vraie machine** : ni la rotation avec le renderer réel, ni le style autrement que sur des captures, ni le doigt — ni si 86 px réservés en permanence se supportent à l'usage. Voir [`docs/14`](docs/14-surface-outils.md). |
 | Reports | icônes sur le bureau. |
 
 ---

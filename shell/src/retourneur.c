@@ -189,7 +189,24 @@ placer (ShellRetourneur *r, GtkWidget *face, int largeur, int hauteur,
     fh = MIN (fh, hauteur);
 
     int x = (largeur - fw) / 2;
-    int y = (hauteur - fh) / 2;
+
+    /* LA FACE SUIT SON PROPRE ALIGNEMENT VERTICAL, ET C'EST UN BUG PAYE.
+     *
+     * Centrer valait tant que la fenetre avait la taille de son contenu.
+     * Mais le dock TEND SA FENETRE A TOUT L'ECRAN quand il est convoque
+     * par-dessus une application, ou quand l'auvent est ouvert -- et la
+     * pilule, centree dans 1080 px, partait au milieu de l'ecran. Vu au banc
+     * le 16 septembre 2026, sur deux captures d'auvent ou le dock avait tout
+     * simplement disparu du bas.
+     *
+     * Le dock et l'etabli s'alignent en bas ; un autre porteur de faces
+     * pourrait vouloir autre chose, et c'est lui qui le dit. */
+    int y;
+    switch (gtk_widget_get_valign (face)) {
+    case GTK_ALIGN_START:  y = 0; break;
+    case GTK_ALIGN_CENTER: y = (hauteur - fh) / 2; break;
+    default:               y = hauteur - fh; break;   /* END, FILL, BASELINE */
+    }
 
     gtk_widget_allocate (face, fw, fh, -1,
                          transformation (x, y, fw, fh, angle,

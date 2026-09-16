@@ -141,13 +141,6 @@ else
 fi
 N=$((N + 1))
 
-if grep -q 'demande un auvent' "$SORTIE/dock.log"; then
-	printf '  ok    %-52s %s\n' "l'auvent se signale comme non écrit (étape 4)" "annoncé"
-else
-	printf '  ÉCHEC %-52s %s\n' "l'auvent devait se signaler" "silence"
-	ECHECS=$((ECHECS + 1))
-fi
-N=$((N + 1))
 
 # --- 5. le lieu courant s'allume, et suit ---------------------------------
 #
@@ -181,6 +174,62 @@ verifier "le fil s'est allongé trois fois" 3 "$CREUSE"
 PORTE=$(grep -o 'établi : [0-9]* lieux, [0-9]* étapes, [0-9]* outils' "$SORTIE/dock.log" | tail -1)
 verifier "la barre est arrivée entière" "établi : 4 lieux, 4 étapes, 1 outils" "$PORTE"
 verifier "le dock est toujours en établi" etabli "$(etat)"
+
+# --- 6ter. L'AUVENT -------------------------------------------------------
+#
+# Le volet qui monte, et la seule partie du contrat où le dock prend le
+# clavier. Trois questions, et la troisième est celle qui fait peur :
+#
+#   - le volet s'ouvre-t-il, et la hauteur de la surface change-t-elle ?
+#   - la frappe arrive-t-elle à l'application ? C'est ce pour quoi
+#     `frappe` a été écrit : aucun banc d'ici ne savait taper.
+#   - le clavier repart-il à la fermeture ? Un dock qui garde le clavier de
+#     la session pour un champ refermé serait pire que pas d'auvent du tout.
+gapplication action os.claude.shell.dock outil 0 >/dev/null 2>&1
+sleep 1
+capture 06-auvent
+
+if grep -q 'auvent : ouvert, clavier exclusif' "$SORTIE/dock.log"; then
+	printf '  ok    %-52s %s\n' "l'auvent s'ouvre et le dock prend le clavier" "exclusif"
+else
+	printf '  ÉCHEC %-52s %s\n' "l'auvent devait s'ouvrir et prendre le clavier" "rien"
+	ECHECS=$((ECHECS + 1))
+fi
+N=$((N + 1))
+
+"$ICI/build/frappe" "mire" > "$SORTIE/frappe.log" 2>&1
+sleep 1
+TAPE=$(grep '\[banc\] chercher' "$SORTIE/temoin.log" | tail -1 | sed 's/.*« \(.*\) ».*/\1/')
+verifier "la frappe est arrivée à l'application" "mire" "${TAPE:-rien}"
+capture 07-auvent-saisi
+
+# Échap referme : le geste qu'on essaie sans qu'on vous l'explique.
+"$ICI/build/frappe" --touche Escape >> "$SORTIE/frappe.log" 2>&1
+sleep 1
+VIDE=$(grep -c '\[banc\] chercher «  »' "$SORTIE/temoin.log")
+verifier "la fermeture envoie la valeur vide" 1 "${VIDE:-0}"
+
+if grep -q 'auvent : ferme, clavier none' "$SORTIE/dock.log"; then
+	printf '  ok    %-52s %s\n' "le clavier est rendu à l'application" "none"
+else
+	printf '  ÉCHEC %-52s %s\n' "le clavier devait être rendu" "toujours pris"
+	ECHECS=$((ECHECS + 1))
+fi
+N=$((N + 1))
+capture 08-auvent-ferme
+
+# --- 6quater. un clic à côté referme l'auvent ----------------------------
+#
+# LA TROISIÈME PORTE DE SORTIE, et la plus importante : le volet confisque le
+# clavier (EXCLUSIVE). S'il ne se refermait qu'à Échap, une application
+# resterait muette sans qu'on sache pourquoi.
+gapplication action os.claude.shell.dock outil 0 >/dev/null 2>&1
+sleep 1
+"$POINTEUR" clic 300 300 >/dev/null 2>&1
+sleep 1
+FERME=$(grep -c 'auvent : ferme' "$SORTIE/dock.log")
+verifier "un clic à côté referme l'auvent" 2 "${FERME:-0}"
+verifier "et le dock est toujours en établi" etabli "$(etat)"
 
 # --- 6bis. le bouton de retour au bureau ---------------------------------
 #
@@ -218,6 +267,29 @@ pkill -f "foot -e sleep 300"
 sleep 1.8
 verifier "le témoin redevient actif : l'établi revient" etabli "$(etat)"
 capture 06-retour-temoin
+
+# --- 8bis. LA PILULE RESTE EN BAS, nappe tendue --------------------------
+#
+# Le dock tend sa fenêtre à tout l'écran quand il est convoqué par-dessus une
+# application, et quand l'auvent est ouvert. La face doit rester collée au
+# bas : centrée dans 1080 px, la pilule partirait au milieu de l'écran. C'est
+# arrivé, et aucun test d'état ne l'aurait dit -- le journal annonçait le bon
+# état, et la pilule était introuvable.
+# On ne regarde QUE les allocations où la fenêtre fait tout l'écran : c'est
+# le seul cas où la question se pose, et une ligne prise au hasard mesurerait
+# une pilule dont la surface a déjà la bonne taille.
+PLEIN=$(grep -o 'pilule : [0-9]*,[0-9]* [0-9]*x[0-9]* dans 1920x1080' "$SORTIE/dock.log")
+NB=$(printf '%s\n' "$PLEIN" | grep -c . || true)
+HORS=$(printf '%s\n' "$PLEIN" | awk 'NF {split($3,p,","); split($4,t,"x"); if (p[2]+t[2] < 1060) n++} END {print n+0}')
+printf '  ----- %-52s %s\n' "allocations plein écran examinées" "$NB"
+if [ "${NB:-0}" -eq 0 ]; then
+	printf '  ÉCHEC %-52s %s\n' "aucune allocation plein écran : rien mesuré" "0"
+	ECHECS=$((ECHECS + 1))
+	N=$((N + 1))
+else
+	verifier "la pilule reste collée au bas, nappe tendue" 0 "$HORS"
+fi
+capture 09-nappe
 
 # --- 9. le témoin s'en va : la barre part avec lui ------------------------
 pkill -f "etabli-essai"

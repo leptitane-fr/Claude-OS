@@ -142,7 +142,7 @@ vk_code = custom_target('vk-code',
 # application a declare.
 executable('claude-os-dock',
   'src/dock.c', 'src/toplevels.c', 'src/visibility.c', 'src/glissiere.c',
-  'src/retourneur.c', 'src/etabli.c',
+  'src/retourneur.c', 'src/etabli.c', 'src/auvent.c',
   'src/tablette.c', 'src/rotation.c',
   'src/clavier-ecran.c', 'src/clavier.c', 'src/saisie.c', 'src/mots.c',
   ftl_header, ftl_code, im_header, im_code, vk_header, vk_code, commun,
