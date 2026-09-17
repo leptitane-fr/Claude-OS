@@ -53,6 +53,32 @@ void console_son_relire (GtkWidget *rangee);
 GtkWidget *console_lumiere_new (gboolean apercu);
 void       console_lumiere_relire (GtkWidget *rangee);
 
+/* --- Systeme : memoire, disque, processeur --------------------------------
+ *
+ * La carte d'etat de la machine, posee sous la carte batterie : deux
+ * cartes qui disent ce que la machine a, l'une l'energie, l'autre les
+ * ressources.
+ *
+ * Trois lignes, meme forme : le nom a gauche, ce qui RESTE a droite, et la
+ * jauge de ce qui est PRIS dessous. La memoire affichee est
+ * « MemAvailable » et non « MemFree » -- le cache est rendu des qu'on le
+ * reclame, et compter la memoire libre ferait passer pour exsangue une
+ * machine qui respire.
+ *
+ * Aucune dependance nouvelle : /proc/meminfo, /proc/stat, statvfs(), et
+ * une zone thermique cherchee par son type. Le detail, les seuils et les
+ * pieges sont en tete de la section correspondante de console.c.
+ *
+ * Comme le son et la luminosite : rien n'est lu tant que la Console est
+ * fermee, et la relecture suit la minuterie de panel.c. */
+GtkWidget *console_systeme_new (gboolean apercu);
+
+/* Relit les trois mesures. La charge du processeur etant une difference
+ * entre deux lectures de /proc/stat, elle reste en tiret jusqu'a la
+ * deuxieme -- et repart de zero si la Console est restee fermee plus de
+ * quelques secondes, l'ancienne reference ne valant plus rien. */
+void console_systeme_relire (GtkWidget *rangee);
+
 /* --- Veille de l'ecran ---------------------------------------------------
  *
  * Choisit le profil de mise en veille progressive. « Auto » suit la prise :

@@ -6,7 +6,30 @@ Ce fichier est chargé automatiquement à l'ouverture d'une session. Il dit
 
 ---
 
-## Où en est le projet — 16 septembre 2026
+## Où en est le projet — 17 septembre 2026
+
+**LA CONSOLE DIT CE QUE LA MACHINE A SOUS LE CAPOT** (17 septembre 2026).
+Une carte de plus, sous la carte batterie : **mémoire disponible, espace
+disque, charge et température du processeur**. Les deux cartes disent ce dont
+la machine dispose — l'une son énergie, l'autre ses ressources — et se lisent
+d'un même regard. Trois points à retenir avant d'y toucher :
+
+- **« Disponible » n'est pas « libre ».** C'est `MemAvailable` qui est
+  affiché, pas `MemFree` : sur MADOO le second annonce 0,5 Gio quand 1,3 sont
+  réellement disponibles, le cache étant rendu dès qu'on le réclame.
+- **La charge du processeur est un écart entre deux lectures de
+  `/proc/stat`**, d'où le tiret des deux premières secondes — et une
+  référence de plus de cinq secondes est jetée, la Console ayant été
+  refermée entre-temps.
+- **La température se cherche par le TYPE de la zone thermique**
+  (`x86_pkg_temp`, puis `TCPU`), jamais par son numéro : la zone 0 de MADOO
+  est `INT3400`, qui rapporte 20 °C fixes.
+
+Aucune dépendance nouvelle — `/proc/meminfo`, `/proc/stat`, `statvfs()`, une
+zone thermique — et **une seule minuterie** : celle de `panel.c` qui servait
+déjà aux watts, rebaptisée `MESURES_REFRESH_MS`. Rien n'est lu Console
+fermée. Détail dans [`docs/04`](docs/04-environnement-bureau.md) §4.2, fil de
+la séance dans [`docs/07`](docs/07-journal-des-seances.md).
 
 **LE BUREAU DEVIENT UNE SURFACE D'OUTILS PARTAGÉE** (chantier ouvert le
 16 septembre 2026). Une application de cette distribution **ne dessinera
@@ -995,6 +1018,7 @@ sur lui — sur un conteneur.
 | **Verrouillage avant sommeil** | **Systématique depuis le 14 septembre 2026.** Le premier essai d'hibernation par le capot a ramené la session **déverrouillée**. Ancré dans `energie.c` et non dans `capot.c` : le capot n'est qu'une des façons de s'endormir, et logind émet `PrepareForSleep` pour toutes. Le verrou est posé AVANT le départ — au réveil, l'écran se rallume sur ce qui était affiché — grâce à un inhibiteur `sleep` en `delay` dont on ne prend que 400 ms. Ce n'est PAS le réglage « Demander le code PIN au réveil », qui concerne l'extinction d'écran machine présente. |
 | Réglages : durées brutes | Le panneau montre ce qui est écrit, pas ce qui est appliqué après bornage par `shell_energie_delais_mode()`. La Console, elle, dit vrai. |
 | `console.c` non converti | Le rétroéclairage y est encore soudé au widget du curseur, en double de `retroeclairage.c`. |
+| **Carte système de la Console** | **En service depuis le 17 septembre 2026** — mémoire, disque, processeur et température, vus à l'écran sur MADOO. **Pas encore vue au doigt** ni en mode tablette. Ses deux seuils d'alerte (15 % de mémoire disponible, 10 % de disque libre) sont écrits en tête de la section « SYSTÈME » de `console.c` et ne se règlent pas : si l'usage montre qu'ils tombent trop tôt ou trop tard, c'est une ligne à changer. |
 | Capot par mode | Le verrou s'ancre sur l'extinction ; le capot reste géré par logind, donc identique pour les trois modes. |
 | **Lecteur vidéo** | Écrit, compilé, mesuré sur batterie — **pas encore installé**, et **les gestes au doigt restent à éprouver**. Vitesse de lecture non faite, délibérément : voir `docs/11`. |
 | **Verrou sans clavier** | `claude-os-verrou` demande un clavier sans vérifier la capacité du siège : sans clavier, le compositeur le déconnecte (vu au banc). Sans conséquence sur MADOO aujourd'hui, mais un verrou qui meurt écran verrouillé laisse la session inaccessible. |

@@ -13,6 +13,7 @@
 #include <glib/gstdio.h>   /* g_access */
 #include <fcntl.h>
 #include <signal.h>        /* kill : la deconnexion */
+#include <sys/statvfs.h>   /* la place qui reste sur le disque */
 #include <unistd.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -606,6 +607,367 @@ console_lumiere_new (gboolean apercu)
     }
     console_lumiere_relire (l->boite);
     return l->boite;
+}
+
+
+/* =========================================================================
+ *  SYSTEME — ce que la machine a sous le capot
+ *
+ * Trois mesures, et seulement trois : la memoire disponible, la place qui
+ * reste sur le disque, la charge du processeur. Ce sont les chiffres qu'on
+ * vient chercher quand la machine rame ou qu'une copie refuse de finir ;
+ * le reste — le detail par coeur, les processus, le debit reseau — est le
+ * travail d'un moniteur, pas d'une Console. Elle dit l'etat, elle ne
+ * diagnostique pas.
+ *
+ * TOUT SE LIT DANS /proc ET /sys, RIEN NE S'AJOUTE. Ni libgtop ni demon :
+ * quatre fichiers texte et un appel systeme suffisent, et le shell ne lie
+ * pas une bibliotheque entiere pour lire des nombres — c'est la regle deja
+ * posee par sysfs.h pour la batterie.
+ *
+ * DISPONIBLE N'EST PAS LIBRE, ET C'EST LE PIEGE DE CETTE CARTE.
+ * « MemFree » ne compte que la memoire que personne n'a touchee : sur
+ * MADOO il annonce 0,5 Gio quand 1,3 sont reellement disponibles, le cache
+ * et les tampons etant rendus des qu'on les reclame. C'est « MemAvailable »
+ * que le noyau calcule pour cela. Afficher MemFree ferait passer pour
+ * exsangue une machine qui respire.
+ *
+ * LA CHARGE DU PROCESSEUR EST UNE DIFFERENCE, PAS UNE LECTURE. /proc/stat
+ * ne donne que des compteurs cumules depuis le demarrage ; leur valeur
+ * instantanee ne veut rien dire. Il faut deux lectures et l'ecart entre
+ * elles — d'ou le tiret affiche les deux premieres secondes qui suivent
+ * l'ouverture, le temps que la seconde arrive. Combler ce trou par la
+ * moyenne depuis le demarrage serait plus joli, et faux.
+ *
+ * LA TEMPERATURE SE CHERCHE PAR SON NOM. Les zones thermiques ne sont pas
+ * numerotees dans un ordre garanti, et sur MADOO la zone 0 est
+ * « INT3400 », qui rapporte 20 °C fixes — une consigne de pilote, pas la
+ * temperature d'une puce. On cherche donc « x86_pkg_temp », puis « TCPU »
+ * a defaut, et on se tait si aucune des deux n'existe.
+ *
+ * DISCIPLINE D'ENERGIE, LA MEME QUE LE RESTE DE LA CONSOLE : rien n'est lu
+ * tant que la Console est fermee. La relecture suit la minuterie de
+ * panel.c — celle qui sert deja aux watts de la batterie, et qui s'arrete
+ * a la fermeture.
+ * ========================================================================= */
+
+/* Seuils au-dela desquels la jauge passe au rouge. Ils ne portent que sur
+ * la memoire et le disque : un processeur a 100 % fait son travail, un
+ * disque plein empeche de travailler. */
+#define MEMOIRE_TENDUE_PCT 15   /* moins de 15 % de disponible             */
+#define DISQUE_TENDU_PCT   10   /* moins de 10 % de libre                  */
+
+/* Au-dela de cet ecart, la lecture precedente de /proc/stat ne sert plus
+ * de reference : la Console a ete refermee entre-temps, et la difference
+ * porterait sur toute la duree pendant laquelle personne ne regardait. */
+#define PROCESSEUR_ECART_MAX_US (5 * G_USEC_PER_SEC)
+
+typedef struct {
+    GtkWidget *valeur;
+    GtkWidget *jauge;
+} Mesure;
+
+typedef struct {
+    GtkWidget *boite;
+    Mesure     memoire;
+    Mesure     disque;
+    Mesure     processeur;
+    gboolean   apercu;
+
+    char      *zone_temp;      /* fichier temp de la zone retenue, ou NULL  */
+    gboolean   zone_cherchee;  /* la recherche n'a lieu qu'une fois         */
+
+    guint64    cpu_total;      /* derniere lecture de /proc/stat            */
+    guint64    cpu_repos;
+    gint64     cpu_date;       /* quand — 0 si aucune reference             */
+} Systeme;
+
+/* « 3,7 Gio », « 40 Gio », « 976 Mio ». Le shell tourne en francais et le
+ * %.1f de la libc y ecrit une virgule : c'est justement ce qu'on veut
+ * afficher, comme les watts de la carte batterie. */
+static char *
+taille_lisible (guint64 octets)
+{
+    double gio = octets / (1024.0 * 1024.0 * 1024.0);
+    if (gio >= 10.0)
+        return g_strdup_printf ("%.0f Gio", gio);
+    if (gio >= 1.0)
+        return g_strdup_printf ("%.1f Gio", gio);
+    return g_strdup_printf ("%.0f Mio", octets / (1024.0 * 1024.0));
+}
+
+/* Une valeur de /proc/meminfo, en kio. La cle est donnee avec ses
+ * deux-points, et doit commencer une ligne : sans cette verification, une
+ * recherche de « MemFree: » repondrait aussi bien depuis le milieu d'un
+ * autre nom. Zero si la ligne manque. */
+static guint64
+meminfo_kio (const char *texte, const char *cle)
+{
+    for (const char *p = strstr (texte, cle); p != NULL; p = strstr (p + 1, cle)) {
+        if (p != texte && p[-1] != '\n')
+            continue;
+        return g_ascii_strtoull (p + strlen (cle), NULL, 10);
+    }
+    return 0;
+}
+
+/* Premiere ligne de /proc/stat : « cpu » suivi des temps cumules, en tics.
+ * On somme tout, et on retient a part les deux champs de repos — idle et
+ * iowait. La machine qui attend son disque n'est pas occupee. */
+static gboolean
+processeur_compteurs (guint64 *total, guint64 *repos)
+{
+    g_autofree char *texte = NULL;
+    if (!g_file_get_contents ("/proc/stat", &texte, NULL, NULL))
+        return FALSE;
+    if (!g_str_has_prefix (texte, "cpu "))
+        return FALSE;
+
+    guint64 somme = 0, calme = 0;
+    char *fin = texte + 4;
+    for (int i = 0; i < 10; i++) {
+        char *debut = fin;
+        guint64 v = g_ascii_strtoull (debut, &fin, 10);
+        if (fin == debut)
+            break;                      /* fin de ligne */
+        somme += v;
+        if (i == 3 || i == 4)           /* idle, iowait */
+            calme += v;
+    }
+    if (somme == 0)
+        return FALSE;
+
+    *total = somme;
+    *repos = calme;
+    return TRUE;
+}
+
+/* Le fichier « temp » de la zone thermique qui parle du processeur, ou
+ * NULL. Voir la tete de section : la zone se cherche par son type, jamais
+ * par son numero. */
+static char *
+zone_temperature (void)
+{
+    static const char *types[] = { "x86_pkg_temp", "TCPU", NULL };
+
+    for (int t = 0; types[t] != NULL; t++) {
+        for (int i = 0; i < 32; i++) {
+            g_autofree char *dir = g_strdup_printf ("/sys/class/thermal/thermal_zone%d", i);
+            g_autofree char *type = shell_sysfs_read (dir, "type");
+            if (type == NULL)
+                continue;
+            if (g_strcmp0 (type, types[t]) == 0)
+                return g_strdup_printf ("%s/temp", dir);
+        }
+    }
+    return NULL;
+}
+
+/* Une mesure : son nom a gauche, sa valeur a droite, sa jauge dessous.
+ * Les trois se ressemblent parce qu'elles se comparent — l'oeil descend
+ * une colonne de jauges et voit tout de suite laquelle est pleine. */
+static GtkWidget *
+mesure_construire (Mesure *m, const char *nom, int largeur_valeur)
+{
+    GtkWidget *etiquette = gtk_label_new (nom);
+    gtk_widget_add_css_class (etiquette, "qs-sys-nom");
+    gtk_widget_set_halign (etiquette, GTK_ALIGN_START);
+    gtk_widget_set_hexpand (etiquette, TRUE);
+
+    m->valeur = gtk_label_new ("—");
+    gtk_widget_add_css_class (m->valeur, "qs-sys-valeur");
+    gtk_widget_set_halign (m->valeur, GTK_ALIGN_END);
+    /* Largeur fixe, comme les curseurs au-dessus et comme l'heure du coin :
+     * « 9 Gio libres » est plus etroit que « 40 Gio libres », et la carte
+     * changerait de largeur au fil des chiffres. */
+    gtk_label_set_width_chars (GTK_LABEL (m->valeur), largeur_valeur);
+    gtk_label_set_xalign (GTK_LABEL (m->valeur), 1.0);
+
+    GtkWidget *tete = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
+    gtk_box_append (GTK_BOX (tete), etiquette);
+    gtk_box_append (GTK_BOX (tete), m->valeur);
+
+    m->jauge = gtk_progress_bar_new ();
+    gtk_widget_add_css_class (m->jauge, "qs-sys-jauge");
+
+    GtkWidget *boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+    gtk_box_append (GTK_BOX (boite), tete);
+    gtk_box_append (GTK_BOX (boite), m->jauge);
+    return boite;
+}
+
+/* La jauge montre TOUJOURS ce qui est pris, le texte TOUJOURS ce qui
+ * reste. L'inverse a ete essaye sur le papier : une jauge qui se vide en
+ * se remplissant de rouge ne se lit pas. */
+static void
+mesure_poser (Mesure *m, double part_prise, const char *texte, gboolean tendu)
+{
+    gtk_label_set_text (GTK_LABEL (m->valeur), texte);
+    gtk_progress_bar_set_fraction (GTK_PROGRESS_BAR (m->jauge),
+                                   CLAMP (part_prise, 0.0, 1.0));
+    if (tendu)
+        gtk_widget_add_css_class (m->jauge, "tendu");
+    else
+        gtk_widget_remove_css_class (m->jauge, "tendu");
+}
+
+static void
+systeme_memoire (Systeme *s)
+{
+    g_autofree char *texte = NULL;
+    if (!g_file_get_contents ("/proc/meminfo", &texte, NULL, NULL))
+        return;
+
+    guint64 total = meminfo_kio (texte, "MemTotal:") * 1024;
+    guint64 dispo = meminfo_kio (texte, "MemAvailable:") * 1024;
+    if (total == 0)
+        return;
+
+    g_autofree char *libre = taille_lisible (dispo);
+    g_autofree char *dit   = g_strdup_printf ("%s libres", libre);
+    double part = 1.0 - (double) dispo / (double) total;
+    mesure_poser (&s->memoire, part,
+                  dit, dispo * 100 < total * MEMOIRE_TENDUE_PCT);
+
+    /* L'echange dans l'infobulle, pas sur la carte. Il ne se regarde qu'une
+     * fois la question posee — « pourquoi est-elle lente ? » — et une
+     * quatrieme jauge pour une reponse aussi rare encombrerait les trois
+     * autres. */
+    guint64 ech_total = meminfo_kio (texte, "SwapTotal:") * 1024;
+    guint64 ech_libre = meminfo_kio (texte, "SwapFree:") * 1024;
+    g_autofree char *t_total = taille_lisible (total);
+    g_autofree char *bulle = NULL;
+    if (ech_total > 0) {
+        g_autofree char *e_pris = taille_lisible (ech_total - ech_libre);
+        g_autofree char *e_tout = taille_lisible (ech_total);
+        bulle = g_strdup_printf ("%s de mémoire · échange : %s utilisés sur %s",
+                                 t_total, e_pris, e_tout);
+    } else {
+        bulle = g_strdup_printf ("%s de mémoire · aucun échange", t_total);
+    }
+    gtk_widget_set_tooltip_text (s->memoire.jauge, bulle);
+}
+
+static void
+systeme_disque (Systeme *s)
+{
+    struct statvfs st;
+    if (statvfs ("/", &st) != 0)
+        return;
+
+    /* f_bavail et non f_bfree : les blocs reserves a root ne sont pas
+     * disponibles pour le compte qui regarde. La jauge peut donc afficher
+     * quelques points de plus que « df », qui sort les reserves du calcul
+     * des deux cotes ; c'est la place reellement utilisable qui compte
+     * ici, pas la comptabilite du systeme de fichiers. */
+    guint64 libre = (guint64) st.f_bavail * st.f_frsize;
+    guint64 total = (guint64) st.f_blocks * st.f_frsize;
+    if (total == 0)
+        return;
+
+    g_autofree char *reste = taille_lisible (libre);
+    g_autofree char *dit   = g_strdup_printf ("%s libres", reste);
+    g_autofree char *tout  = taille_lisible (total);
+    g_autofree char *bulle = g_strdup_printf ("Racine du système · %s au total", tout);
+
+    mesure_poser (&s->disque, 1.0 - (double) libre / (double) total,
+                  dit, libre * 100 < total * DISQUE_TENDU_PCT);
+    gtk_widget_set_tooltip_text (s->disque.jauge, bulle);
+}
+
+static void
+systeme_processeur (Systeme *s)
+{
+    guint64 total = 0, repos = 0;
+    if (!processeur_compteurs (&total, &repos))
+        return;
+
+    gint64 maintenant = g_get_monotonic_time ();
+    gboolean utilisable = (s->cpu_date != 0
+                           && maintenant - s->cpu_date < PROCESSEUR_ECART_MAX_US
+                           && total > s->cpu_total);
+
+    if (!s->zone_cherchee) {
+        s->zone_cherchee = TRUE;
+        s->zone_temp = zone_temperature ();
+    }
+
+    if (utilisable) {
+        guint64 ecart = total - s->cpu_total;
+        guint64 calme = repos - s->cpu_repos;
+        int pourcent = (int) ((ecart - MIN (calme, ecart)) * 100 / ecart);
+
+        g_autofree char *degres = NULL;
+        if (s->zone_temp != NULL) {
+            g_autofree char *milli = NULL;
+            if (g_file_get_contents (s->zone_temp, &milli, NULL, NULL))
+                degres = g_strdup_printf (" · %d °C",
+                                          (int) (g_ascii_strtoll (milli, NULL, 10) / 1000));
+        }
+        g_autofree char *dit = g_strdup_printf ("%d %%%s", pourcent,
+                                                degres ? degres : "");
+        mesure_poser (&s->processeur, pourcent / 100.0, dit, FALSE);
+    }
+
+    s->cpu_total = total;
+    s->cpu_repos = repos;
+    s->cpu_date  = maintenant;
+}
+
+void
+console_systeme_relire (GtkWidget *rangee)
+{
+    Systeme *s = g_object_get_data (G_OBJECT (rangee), "systeme");
+    if (s == NULL || s->apercu)
+        return;
+
+    systeme_memoire (s);
+    systeme_disque (s);
+    systeme_processeur (s);
+}
+
+static void
+systeme_free (gpointer data)
+{
+    Systeme *s = data;
+    g_free (s->zone_temp);
+    g_free (s);
+}
+
+GtkWidget *
+console_systeme_new (gboolean apercu)
+{
+    Systeme *s = g_new0 (Systeme, 1);
+    s->apercu = apercu;
+
+    s->boite = gtk_box_new (GTK_ORIENTATION_VERTICAL, 10);
+    gtk_widget_add_css_class (s->boite, "qs-card");
+    gtk_widget_add_css_class (s->boite, "qs-sys");
+
+    /* Les largeurs de valeur sont comptees sur le pire cas de chacune :
+     * « 976 Mio libres » pour les deux tailles, « 100 % · 100 °C » pour le
+     * processeur. */
+    gtk_box_append (GTK_BOX (s->boite),
+                    mesure_construire (&s->memoire, "Mémoire", 15));
+    gtk_box_append (GTK_BOX (s->boite),
+                    mesure_construire (&s->disque, "Disque", 15));
+    gtk_box_append (GTK_BOX (s->boite),
+                    mesure_construire (&s->processeur, "Processeur", 15));
+
+    g_object_set_data_full (G_OBJECT (s->boite), "systeme", s, systeme_free);
+
+    if (apercu) {
+        mesure_poser (&s->memoire, 0.64, "1,3 Gio libres", FALSE);
+        mesure_poser (&s->disque, 0.26, "40 Gio libres", FALSE);
+        mesure_poser (&s->processeur, 0.12, "12 % · 42 °C", FALSE);
+    } else {
+        /* Premiere lecture ici : la carte arrive remplie, sauf le
+         * processeur qui attend sa seconde lecture. */
+        systeme_memoire (s);
+        systeme_disque (s);
+        systeme_processeur (s);
+    }
+    return s->boite;
 }
 
 /* =========================================================================

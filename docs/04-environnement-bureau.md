@@ -361,6 +361,63 @@ gauche** lui redonne une porte. **La bannière, elle, continue d'annoncer ce qui
 elle s'accroche au coin comme elle s'accrochait à la pilule, et c'était la
 moitié qu'on ne pouvait pas perdre.
 
+### La carte système — mémoire, disque, processeur
+
+`shell/src/console.c`, section « SYSTÈME ». **Sous la carte batterie**, et
+c'est le point : les deux cartes disent ce dont la machine *dispose* —
+l'une son énergie, l'autre ses ressources — et se lisent d'un même regard.
+Elles sont posées sous les bascules et au-dessus des réglages : on les
+**consulte**, on ne les manipule pas, et ce qui se manipule reste en haut de
+la Console, à portée de pouce.
+
+Trois lignes de même forme : le **nom** à gauche, ce qui **reste** à droite,
+et la jauge de ce qui est **pris** dessous.
+
+| ligne | ce qui s'affiche | source |
+|---|---|---|
+| Mémoire | « 1,3 Gio libres » | `MemAvailable` de `/proc/meminfo` |
+| Disque | « 39 Gio libres » | `statvfs("/")`, champ `f_bavail` |
+| Processeur | « 15 % · 50 °C » | écart entre deux lectures de `/proc/stat`, zone thermique du paquet |
+
+Ce qui a été tranché, et pourquoi :
+
+- **« Disponible » n'est pas « libre ».** `MemFree` ne compte que la mémoire
+  que personne n'a touchée : sur MADOO il annonce 0,5 Gio quand 1,3 sont
+  réellement disponibles, le cache et les tampons étant rendus dès qu'on les
+  réclame. C'est `MemAvailable` que le noyau calcule pour cela. Afficher
+  `MemFree` ferait passer pour exsangue une machine qui respire.
+- **La charge du processeur est une différence, pas une lecture.**
+  `/proc/stat` ne donne que des compteurs cumulés depuis le démarrage. D'où
+  le **tiret** affiché les deux premières secondes qui suivent l'ouverture,
+  le temps que la seconde lecture arrive — et le fait qu'une référence
+  vieille de plus de cinq secondes est **jetée** : la Console a été refermée
+  entre-temps, et l'écart porterait sur la durée pendant laquelle personne
+  ne regardait.
+- **La température se cherche par son nom, jamais par son numéro.** Sur
+  MADOO la zone 0 est `INT3400`, qui rapporte 20 °C fixes — une consigne de
+  pilote, pas la température d'une puce. On cherche `x86_pkg_temp`, puis
+  `TCPU` à défaut, et on se tait si aucune des deux n'existe.
+- **La jauge du disque peut afficher quelques points de plus que `df`.**
+  Elle compte sur `f_bavail`, la place réellement utilisable par le compte ;
+  `df` sort les blocs réservés à root des deux côtés de sa division. Mesuré
+  le 17 septembre : 26 % ici, 22 % pour `df`, pour les mêmes octets.
+- **Le rouge ne sort que pour la mémoire et le disque** — sous 15 % et 10 %
+  de disponible. Un processeur à 100 % n'est pas une alerte : c'est une
+  machine qui travaille.
+- **L'échange est dans l'infobulle, pas sur la carte.** Il ne se regarde
+  qu'une fois la question posée — « pourquoi est-elle lente ? » — et une
+  quatrième jauge pour une réponse aussi rare encombrerait les trois autres.
+
+**Aucune dépendance nouvelle** : deux fichiers de `/proc`, un appel
+`statvfs()`, un fichier de `/sys`. C'est la règle déjà posée par `sysfs.h`
+pour la batterie — le shell ne lie pas une bibliothèque entière pour lire des
+nombres.
+
+**Et rien n'est lu tant que la Console est fermée.** La relecture suit la
+minuterie de `panel.c`, celle qui servait déjà aux watts : une seule
+minuterie à 2 s pour tout ce qui bouge dans la Console, pas deux pour la
+même seconde.
+
 ### Le centre de notifications
 
 La cloche l'ouvre, au-dessus de la Console si elle est ouverte — les deux

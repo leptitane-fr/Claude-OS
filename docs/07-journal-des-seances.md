@@ -1789,6 +1789,71 @@ aurait mordu tôt ou tard.
 
 ---
 
+## 17 septembre 2026 — la Console dit ce que la machine a sous le capot
+
+Demande de Stef : **un moniteur système dans la Console** — mémoire
+disponible, espace disque, et ce qui va avec.
+
+**Trois mesures, et seulement trois** : mémoire, disque, processeur (avec sa
+température). Ce sont les chiffres qu'on vient chercher quand la machine rame
+ou qu'une copie refuse de finir. Le détail par cœur, les processus, le débit
+réseau sont le travail d'un moniteur, pas d'une Console : elle dit l'état,
+elle ne diagnostique pas. Le détail de la carte est dans
+[`docs/04`](04-environnement-bureau.md) §4.2 et en tête de la section
+« SYSTÈME » de `shell/src/console.c`.
+
+**Ce qui a été mesuré sur MADOO, et qui a décidé du contenu :**
+
+- `MemFree` annonce **0,5 Gio** quand `MemAvailable` en annonce **1,3**. La
+  différence est le cache, rendu dès qu'on le réclame. Afficher le premier
+  aurait donné une machine perpétuellement à bout de souffle. C'est le
+  second qui est affiché.
+- La **zone thermique 0 est `INT3400`**, et rapporte **20 °C fixes** — une
+  consigne de pilote. Un numéro de zone écrit en dur aurait affiché cette
+  valeur-là toute la journée. La zone se cherche donc par son type
+  (`x86_pkg_temp`, puis `TCPU`).
+- `statvfs("/")` donne **39,34 Gio** disponibles pour 53,12 au total, soit
+  **26 %** de pris ; `df` en annonce **22 %** pour les mêmes octets, parce
+  qu'il sort les blocs réservés à root des deux côtés de sa division. La
+  jauge montre la place réellement utilisable.
+
+**Une minuterie, pas deux.** La relecture s'est posée sur celle de
+`panel.c` qui servait déjà aux watts de la batterie — rebaptisée au passage
+`MESURES_REFRESH_MS`, son nom `WATT_` ne disant plus ce qu'elle fait. Elle ne
+tourne toujours que la Console ouverte.
+
+**Le trou des deux premières secondes est assumé.** La charge du processeur
+est un écart entre deux lectures de `/proc/stat` ; à l'ouverture il n'y a
+qu'une lecture, et la ligne affiche un **tiret**. Le combler par la moyenne
+depuis le démarrage aurait été plus joli, et faux. Une référence de plus de
+cinq secondes est jetée pour la même raison : entre deux ouvertures, l'écart
+porterait sur la durée pendant laquelle personne ne regardait.
+
+**Vérifié dans l'ordre de la méthode** : compilation hors dépôt sans un seul
+avertissement à `warning_level=2`, passage sous AddressSanitizer (rien),
+rendu au banc `test-render.sh` — puis **à l'écran sur MADOO**, après
+installation, tiroir ouvert au pointeur virtuel et capture par `grim`.
+
+**Deux pièges repayés au banc**, tous deux déjà connus :
+
+- `test-render.sh` lancé depuis une session Claude Code hérite de
+  `DBUS_SESSION_BUS_ADDRESS` **et** de `XDG_RUNTIME_DIR` : il ne fabrique
+  alors pas son bus jetable, et `grim` capture l'écran réel au lieu du banc
+  sans écran. Lancer avec `env -u DBUS_SESSION_BUS_ADDRESS -u WAYLAND_DISPLAY`.
+- **Le binaire d'essai lit la feuille de style INSTALLÉE**, pas celle du
+  dépôt : `SHELL_DATA_DIR` est figé à la compilation. Les jauges sont donc
+  sorties au bleu par défaut de GTK tant que le style n'était pas installé.
+  Pour juger l'aspect sans toucher au système : `--prefix=<scratch>` puis
+  `meson install`, et lancer le binaire de ce préfixe.
+
+**Reste ouvert** : la carte n'a **pas été vue au doigt** ni en mode tablette,
+et ses seuils (15 % de mémoire, 10 % de disque) ne sont **pas réglables** —
+ils sont écrits en tête de la section. Si l'un des deux se déclenche trop
+tôt ou trop tard à l'usage, c'est une ligne à changer, pas une mécanique à
+inventer.
+
+---
+
 ## Ce qui reste à faire — au 10 septembre 2026
 
 Par ordre d'importance.

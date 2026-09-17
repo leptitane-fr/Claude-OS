@@ -502,6 +502,33 @@ switch.qs-interrupteur:disabled { opacity: 0.42; }
    le reste du temps. */
 .qs-battery-detail { font-size: 12px; color: @text-dim; }
 
+/* --- La carte systeme : memoire, disque, processeur ----------------------
+ *
+ * Meme fond que la carte batterie : les deux disent ce dont la machine
+ * dispose, elles doivent se lire comme une paire. */
+.qs-sys-nom { font-size: 12px; color: @text; }
+.qs-sys-valeur {
+  font-size: 12px;
+  color: @text-dim;
+  font-feature-settings: "tnum";   /* chiffres de largeur fixe : la valeur
+                                      change toutes les deux secondes */
+}
+
+/* Jauges fines : elles se comparent d'un coup d'oeil en descendant la
+   colonne, et n'ont pas a peser autant que le pourcentage de batterie. */
+progressbar.qs-sys-jauge trough,
+progressbar.qs-sys-jauge progress {
+  min-height: 4px;
+  border-radius: 2px;
+}
+progressbar.qs-sys-jauge trough   { background-color: @surface-sunk; }
+progressbar.qs-sys-jauge progress { background-color: @accent; }
+
+/* Le rouge ne sort que sous les seuils de console.c -- memoire ou disque a
+   bout. Une jauge de processeur pleine n'est pas une alerte : c'est une
+   machine qui travaille. */
+progressbar.qs-sys-jauge.tendu progress { background-color: @danger; }
+
 /* Application ouverte : l'icône se détache très légèrement du fond. Le point
    sous l'icône porte déjà l'information, ceci ne fait que la renforcer — un
    dock où l'on cherche lequel des points est allumé a raté son but. */

@@ -33,7 +33,16 @@
 
 #include <stdlib.h>            /* atoi */
 
-#define WATT_REFRESH_MS 2000    /* uniquement panneau ouvert                 */
+/* La minuterie des mesures : watts de la batterie, memoire, disque,
+ * processeur. Elle ne tourne QUE panneau ouvert. Elle s'appelait « watt »
+ * tant que la carte batterie etait seule a bouger ; la carte systeme s'est
+ * posee sur la meme cadence plutot que d'ouvrir une seconde minuterie pour
+ * la meme seconde.
+ *
+ * 2 s : un chiffre qui change plus vite ne se lit plus, et la charge du
+ * processeur se mesure sur l'ecart entre deux lectures -- un intervalle
+ * trop court la rendrait nerveuse pour rien. */
+#define MESURES_REFRESH_MS 2000
 
 /* Cadence de relecture du son et de la luminosite, panneau ouvert seulement.
  *
@@ -107,7 +116,8 @@ struct _Panel {
     GtkWidget *son;             /* rangee volume                             */
     GtkWidget *lumiere;         /* rangee luminosite                         */
     GtkWidget *energie;         /* rangee veille de l'ecran                  */
-    guint      watt_timer;      /* 0 quand le panneau est ferme              */
+    GtkWidget *systeme;         /* carte memoire / disque / processeur       */
+    guint      mesures_timer;   /* 0 quand le panneau est ferme              */
     guint      suivi_timer;     /* idem : son et luminosite                  */
     gboolean   services_sondes; /* NetworkManager et BlueZ deja contactes ?  */
     gboolean   apercu;
@@ -581,9 +591,11 @@ battery_refresh (Panel *p)
 }
 
 static gboolean
-on_watt_tick (gpointer data)
+on_mesures_tick (gpointer data)
 {
-    battery_refresh (data);
+    Panel *p = data;
+    battery_refresh (p);
+    console_systeme_relire (p->systeme);
     return G_SOURCE_CONTINUE;
 }
 
@@ -765,8 +777,15 @@ on_panel_show (GtkWidget *contenu, gpointer data)
     console_energie_relire (p->energie);
 
     battery_refresh (p);
-    if (p->watt_timer == 0)
-        p->watt_timer = g_timeout_add (WATT_REFRESH_MS, on_watt_tick, p);
+
+    /* La carte systeme se relit ici et a chaque tour de minuterie. La
+     * charge du processeur se calcule sur l'ecart entre deux lectures :
+     * cette premiere pose la reference, et le chiffre parait au tour
+     * suivant. */
+    console_systeme_relire (p->systeme);
+
+    if (p->mesures_timer == 0)
+        p->mesures_timer = g_timeout_add (MESURES_REFRESH_MS, on_mesures_tick, p);
     if (!p->apercu && p->suivi_timer == 0)
         p->suivi_timer = g_timeout_add (SUIVI_REFRESH_MS, on_suivi_tick, p);
 
@@ -794,9 +813,9 @@ on_panel_closed (GtkWidget *contenu, gpointer data)
     gtk_revealer_set_transition_duration (GTK_REVEALER (p->reveleur),
                                           REVEAL_MS);
 
-    if (p->watt_timer != 0) {
-        g_source_remove (p->watt_timer);
-        p->watt_timer = 0;
+    if (p->mesures_timer != 0) {
+        g_source_remove (p->mesures_timer);
+        p->mesures_timer = 0;
     }
     if (p->suivi_timer != 0) {
         g_source_remove (p->suivi_timer);
@@ -875,6 +894,16 @@ panel_new (gboolean apercu, ConsoleFermer fermer, gpointer fermer_data)
     gtk_box_append (GTK_BOX (card), p->bat_icon);
     gtk_box_append (GTK_BOX (card), bat_texts);
     gtk_box_append (GTK_BOX (box), card);
+
+    /* --- carte systeme, sous la batterie ---
+     *
+     * Les deux cartes disent ce dont la machine dispose -- l'une l'energie,
+     * l'autre les ressources -- et se lisent d'un meme regard. Elles sont
+     * sous les bascules et au-dessus des reglages : on les CONSULTE, on ne
+     * les manipule pas, et ce qui se manipule reste a portee de pouce en
+     * haut de la Console. */
+    p->systeme = console_systeme_new (apercu);
+    gtk_box_append (GTK_BOX (box), p->systeme);
 
     gtk_box_append (GTK_BOX (box), reglages_build (p));
 
