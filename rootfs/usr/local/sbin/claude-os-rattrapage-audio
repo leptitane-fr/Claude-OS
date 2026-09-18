@@ -1,0 +1,39 @@
+#!/bin/sh
+# Claude OS — rattrapage de la carte son au démarrage.
+#
+# Sur cette machine (HP Madoo, Jasper Lake, pile SOF), le DSP audio répond
+# parfois trop tard au chargement du topology : le noyau abandonne sur un
+# « ipc tx timed out », le chargement de la carte échoue en entier, et la
+# machine démarre SANS AUCUNE carte son — pas seulement sans micro.
+#
+# Ce n'est pas un défaut de configuration mais une course au démarrage :
+# mesurée sur 100 démarrages du journal, elle se produit 5 fois.
+#
+# Recharger la pile SOF une fois, à froid, suffit à récupérer la carte.
+# Ce script ne fait rien du tout quand la carte est déjà là.
+#
+# POUR REVENIR EN ARRIÈRE :
+#   claude-os-root systemctl disable --now claude-os-rattrapage-audio.service
+#   claude-os-root rm /etc/systemd/system/claude-os-rattrapage-audio.service
+#   claude-os-root rm /usr/local/sbin/claude-os-rattrapage-audio
+
+TAG=claude-os-audio
+
+if grep -q '^ *[0-9]* \[' /proc/asound/cards 2>/dev/null; then
+    logger -t "$TAG" "carte son présente au démarrage — rien à faire"
+    exit 0
+fi
+
+logger -t "$TAG" "aucune carte son détectée — rechargement de la pile SOF"
+modprobe -r snd_sof_pci_intel_icl 2>/dev/null
+sleep 2
+modprobe snd_sof_pci_intel_icl 2>/dev/null
+sleep 4
+
+if grep -q '^ *[0-9]* \[' /proc/asound/cards 2>/dev/null; then
+    logger -t "$TAG" "carte son restaurée après rechargement"
+    exit 0
+fi
+
+logger -t "$TAG" "échec : la carte son reste absente après rechargement"
+exit 1

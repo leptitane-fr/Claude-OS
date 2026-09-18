@@ -6,7 +6,29 @@ Ce fichier est chargé automatiquement à l'ouverture d'une session. Il dit
 
 ---
 
-## Où en est le projet — 17 septembre 2026
+## Où en est le projet — 18 septembre 2026
+
+**LE SON ET LE MICRO MARCHENT, ET LE DÉPÔT SE TROMPAIT DEPUIS DIX JOURS**
+(18 septembre 2026). L'audio était réputé « réparé le 8 septembre » ; il ne
+l'était pas. Le `probe failed with error -22` revient **cinq démarrages sur
+cent** — et la machine démarre alors sans **aucune** carte son. Un service le
+rattrape désormais. Le microphone interne, lui, n'avait jamais fonctionné : il
+sort **quatre canaux pour deux capsules**, et les deux derniers portent une
+valeur figée à −6,6 dBFS qui écrasait une voix à −42. Trois points à retenir :
+
+- **Un défaut intermittent ne se constate pas, il se compte.** Cent
+  démarrages relus un par un ont dit 95 contre 5 là où l'observation d'un
+  seul avait conclu « réparé ». C'est la troisième fois que ce piège coûte
+  du temps ici.
+- **Le bip qui sert de juge** : jouer 440 Hz sur les haut-parleurs pendant
+  qu'on enregistre éprouve les deux chaînes d'un coup et écarte le matériel.
+  Trente décibels d'écart sur la durée exacte du bip, c'est sans appel.
+- **`arecord` ne dit pas ce que reçoivent les applications.** Il captait
+  parfaitement pendant que PipeWire rendait du silence — et c'est ce
+  désaccord qui portait le diagnostic.
+
+Détail dans [`docs/15`](docs/15-carte-son.md), fil de la séance dans
+[`docs/07`](docs/07-journal-des-seances.md).
 
 **LA CONSOLE DIT CE QUE LA MACHINE A SOUS LE CAPOT** (17 septembre 2026).
 Une carte de plus, sous la carte batterie : **mémoire disponible, espace
@@ -1006,7 +1028,7 @@ sur lui — sur un conteneur.
 
 | Sujet | État |
 |---|---|
-| **Audio** | **Réparé le 8 septembre 2026**, cette ligne ne décrit plus la machine. Le `probe failed with error -22` a disparu des journaux, PipeWire énumère cinq sorties dont « Jasper Lake HD Audio » par défaut, et les touches de volume la commandent — confirmé à l'oreille. L'historique de la panne reste dans `docs/07`. |
+| **Audio** | **LE « RÉPARÉ LE 8 SEPTEMBRE » ÉTAIT FAUX, ET LE SON COMME LE MICRO MARCHENT DEPUIS LE 18.** Le `probe failed with error -22` n'avait jamais disparu : compté sur cent démarrages, il revient **cinq fois** — la carte n'est alors pas instanciée du tout, et la machine démarre sans aucun périphérique audio. C'est un DSP qui tarde à répondre, pas une configuration fautive ; ce qui avait été acquis le 8 septembre est le contournement d'ACP, sans lequel rien ne sortait, mais ce n'était pas la panne. **Rattrapé** par `claude-os-rattrapage-audio.service`, qui recharge la pile SOF au démarrage si aucune carte n'est là, et ne fait rien sinon. **Le micro interne est réparé le même jour** : il sortait quatre canaux pour deux capsules, les deux derniers portant une valeur figée à −6,6 dBFS qui écrasait une voix à −42 — `audio.position = [ FL, FR, UNK, UNK ]` les exclut du mélange. Les deux ont été éprouvés par boucle acoustique (un bip joué et réenregistré), puis confirmés par l'utilisateur. **Reste ouvert : aucun profil UCM n'existe pour `sof-rt5682`**, donc rien ne bascule automatiquement au branchement d'un casque. Voir [`docs/15`](docs/15-carte-son.md). |
 | Affichage au démarrage | L'écran restait noir jusqu'à ce qu'on touche le pavé tactile. Probablement le conflit de terminal virtuel de l'invariant n°5 — **à reconfirmer** maintenant que greetd est sur le tty7, et à ne pas déclarer résolu sans l'avoir revu. |
 | Luminosité automatique | **Impossible par capteur — mesuré le 8 septembre 2026.** Aucun capteur de luminosité ambiante sur MADOO : `/sys/bus/iio/devices/` n'expose que deux accéléromètres, un gyroscope et un angle d'écran. Question close. **L'asservissement à l'inactivité, lui, est FAIT et VU FONCTIONNER** le 9 septembre — voir la veille progressive ci-dessus. |
 | **Reprise après suspension** | **ELLE NE MARCHAIT PAS — et c'est le démenti du 14 septembre qui était faux, pas l'alerte du 9.** Mesure du 16 septembre 2026 : **98 tentatives de veille, 98 gels**, le journal s'arrêtant chaque fois sur `PM: suspend entry (s2idle)`, batterie entre 65 et 78 % — donc pas une machine à plat. Les cycles de 64 s ne sont pas la batterie mais le **chien de garde de l'EC**, qui l'écrit dans `/sys/firmware/log` : « ap hang detected », 117 fois. La mesure du 14 (`07:23:42` → `07:24:00`) était une veille de **dix-huit secondes** : vraie, et non généralisable — un cas contre 98. **Réparé : `mem_sleep_default=deep`.** Le firmware MrChromebox annonce `ACPI: PM: (supports S0 S3 S4 S5)`, contrairement au firmware ChromeOS d'origine ; en S3, **5 réveils sur 5**, dont un par la chaîne logind complète. `pm_test` (`freezer`, `devices`, `platform` — les seules étapes valides en s2idle) passe les trois : le logiciel était hors de cause. **La leçon de méthode, deux fois plutôt qu'une :** un cas isolé ne dément pas une série, et un symptôme qui a deux causes possibles n'en désigne aucune. |
@@ -1247,6 +1269,8 @@ Il garantit qu'on ne peut plus être enfermé dehors. Il ne couvre pas le cas
 | Le bureau démarre mal | `~/.local/state/claude-os/shell.log` |
 | Le filet est intervenu | `/var/log/claude-os-filet.log` |
 | La barre d'outils d'une application ne s'affiche pas | `claude-os-outils <son-nom-de-bus>` — il dit lequel des deux côtés se tait |
+| **Aucun son, et aucune sortie listée** | `cat /proc/asound/cards` — s'il répond « no soundcards », la carte n'a pas été instanciée : `journalctl -t claude-os-audio` dit si le rattrapage a joué. Relance à la main : `claude-os-root systemctl start claude-os-rattrapage-audio.service` |
+| **Le micro n'enregistre rien** | `wpctl status` — la source par défaut doit être « Micro interne (DMIC) », pas « Headset », qui est le jack et rend du silence à vide |
 
 Le greeter et la session consignent leur contexte, leur sortie complète et
 leur **code de retour**. Un journal vide alors qu'une tentative a eu lieu

@@ -28,6 +28,12 @@ journaux, PipeWire énumère cinq sorties, et les touches de volume du clavier
 la commandent — confirmé à l'oreille. Ce fut longtemps le chantier n°1 ; il
 ne l'est plus.
 
+> **Démenti le 18 septembre 2026.** Le `-22` n'avait pas disparu : il revient
+> **cinq démarrages sur cent**, et il était là le 17 septembre au soir. Ce qui
+> a été acquis le 8 septembre est le contournement d'ACP, sans lequel aucun son
+> ne sortait — utile, mais ce n'était pas la panne. Voir
+> [`docs/15`](15-carte-son.md).
+
 **La rangée supérieure du clavier est câblée**, volume et plein écran
 compris. **Les notifications existent** — le shell est lui-même le serveur
 freedesktop. **Les barres de titre sont uniformisées**, avec trois boutons
@@ -375,7 +381,12 @@ les notifications. Les deux premiers ont été confirmés à l'usage par
 l'utilisateur ; le troisième a été éprouvé de bout en bout sur la session
 réelle, du bus D-Bus à la bannière.
 
-### L'audio, pour mémoire — réparé le 8 septembre 2026
+### L'audio, pour mémoire — cru réparé le 8 septembre 2026
+
+> **À lire avec la suite.** Cette section a été écrite en septembre, la panne
+> paraissant levée. Elle ne l'était pas : voir la séance du 18 septembre, plus
+> bas, et [`docs/15`](15-carte-son.md). On la garde telle quelle — elle montre
+> comment un défaut intermittent se fait prendre pour un défaut réparé.
 
 ```
 sof_rt5682 jsl_rt5682_def: probe with driver sof_rt5682 failed with error -22
@@ -537,7 +548,7 @@ Aller-retour complet par la vraie socket, démarrage du processus compris :
 Un `p` plus grand multiplierait l'attente sans rien coûter à l'attaquant, qui
 paralléliserait.
 
-### Trois pièges payés
+### Quatre pièges payés
 
 - **`gcry_kdf_derive()` ne sait pas faire Argon2**, malgré son nom. Elle rend
   « Invalid value », sans plus. Argon2 n'existe que dans l'API à poignée, dont
@@ -1851,6 +1862,129 @@ et ses seuils (15 % de mémoire, 10 % de disque) ne sont **pas réglables** —
 ils sont écrits en tête de la section. Si l'un des deux se déclenche trop
 tôt ou trop tard à l'usage, c'est une ligne à changer, pas une mécanique à
 inventer.
+
+---
+
+## 18 septembre 2026 — la carte son : une panne intermittente prise pour une panne réparée
+
+Demande de Stef, en deux points : **le son a fonctionné et ne fonctionne
+plus**, et **le micro n'a jamais fonctionné**. Le détail technique est dans
+[`docs/15`](15-carte-son.md) ; ce qui suit est le fil de la séance.
+
+**Les deux symptômes n'avaient qu'une racine commune : le firmware
+MrChromebox n'expose pas de table ACPI NHLT.** De là découlent une topologie
+qui déclare quatre microphones là où il y en a deux, et une carte qui échoue
+parfois à se charger en entier.
+
+### Ce qui a tranché : faire parler les haut-parleurs au micro
+
+La méthode qui a tout débloqué tient en une commande : **jouer un bip de
+440 Hz pendant qu'on enregistre**. Le niveau capté monte de trente décibels
+sur la durée exacte du bip, puis retombe.
+
+Un seul essai prouve alors les deux chaînes à la fois — la sortie émet, le
+micro entend — et **écarte le matériel définitivement**. Les deux pannes
+étaient logicielles, et on le savait au bout de dix minutes au lieu d'en
+douter jusqu'au bout.
+
+C'est la réponse au problème posé par une machine à distance : on ne peut pas
+faire de bruit dans la pièce, mais on peut lui demander d'en faire.
+
+### Panne 1 — il fallait compter, pas constater
+
+Le `probe failed with error -22` était réputé disparu depuis le 8 septembre.
+Il ne l'était pas. **Balayage des cent derniers démarrages du journal, un par
+un** :
+
+| Démarrages ayant détecté le DSP | Résultat |
+|---|---|
+| 95 | carte instanciée |
+| **5** | `failed to instantiate card` |
+
+Le 8 septembre, la carte est revenue après des installations de paquets, et
+on en a conclu une réparation. Elle serait revenue de la même façon sans rien
+installer, dix-neuf fois sur vingt. Le démarrage du 17 au soir était un
+mauvais tirage — d'où les douze heures sans son.
+
+**C'est la troisième fois que ce dépôt se fait prendre par un défaut
+intermittent** (voir la reprise après suspension, deux fois). La leçon ne
+change pas : un symptôme qu'on observe une fois guéri n'est pas guéri, et
+seule une série tranche. Ici, `journalctl --list-boots` et une boucle de
+quatre lignes ont suffi.
+
+Recharger la pile une fois suffit à récupérer la carte, vérifié en direct.
+C'est ce que fait désormais `claude-os-rattrapage-audio.service`, qui **ne
+fait rien quand la carte est là**. Éprouvé dans les deux cas, dont celui qui
+compte : carte retirée à la main, service lancé, carte revenue.
+
+### Panne 2 — le micro marchait, et personne ne l'entendait
+
+`arecord -D hw:0,5` captait parfaitement le bip. Au même moment, toute
+application recevait du silence. **Ce désaccord était le diagnostic.**
+
+Le micro sort en **quatre canaux** pour **deux capsules**. Les canaux 2 et 3
+portent une valeur figée — RMS 0,465 et crête 0,481, presque égales : la
+ligne ne bouge pas — soit **−6,6 dBFS**. PipeWire mélangeait les quatre vers
+la stéréo, et cette constante écrasait une voix à −42 dBFS.
+
+Le correctif tient en une ligne, `audio.position = [ FL, FR, UNK, UNK ]`.
+`UNK` exclut les deux canaux morts du mélange.
+
+S'y ajoutait une cause plus simple, et première dans l'ordre des faits : la
+**source par défaut était le micro du jack casque**, qui rend du zéro absolu
+quand rien n'est branché — `-999,0 dBFS`, littéralement pas un bit.
+
+### Trois pièges payés
+
+- **`arecord` ne prouve rien sur ce que reçoivent les applications.** Il
+  demandait les quatre canaux et l'on regardait les deux premiers. Mesurer ce
+  que l'utilisateur vit, pas ce qui est commode à mesurer — la faute est déjà
+  consignée dans [`docs/13`](13-nuage.md).
+- **`pw-record --target` écrivait du silence sans jamais ouvrir la carte** :
+  `hw_params` disait `closed` pendant que le fichier grossissait. Un
+  enregistrement vide ne prouve pas qu'un micro est muet. Lire `hw_params`
+  avant de conclure.
+- **Le vérificateur d'installation s'est fait prendre par une étoile.**
+  `wpctl` marque le périphérique par défaut d'une `*`, mais les noms de PCM en
+  contiennent une : « Headset (\*) ». Un `grep '\*'` attrape tout, et
+  `tools/validate-install.sh` a annoncé « micro par défaut : le JACK » quand le
+  micro interne était bien choisi. Le motif juste vise l'étoile **suivie du
+  numéro de nœud**. Écrit, puis vu échouer, puis corrigé — dans cet ordre, et
+  c'est bien ainsi qu'on a su qu'il mesurait quelque chose.
+- **Deux séances ont écrit dans `/etc/modprobe.d/99-claude-os-audio.conf` le
+  même 8 septembre**, à sept heures d'intervalle et pour deux motifs sans
+  rapport : le `dmic_num=0` de midi a été effacé par la mise à l'écart des
+  pilotes concurrents du soir, sans que personne le voie. Il valait mieux
+  qu'il parte — il aurait supprimé le micro pour toujours — mais c'est un
+  fichier par sujet, et un nom qui dit le sujet.
+
+**Ce qui a été réduit après coup** : `api.alsa.disable-mmap` et
+`api.alsa.period-size`, essayés d'abord, ont été **retirés** une fois vérifié
+que la position des canaux suffit seule. Un réglage qu'on ne sait pas
+justifier est un réglage qui trompera la prochaine séance.
+
+### Vérifié, et par qui
+
+Le bip a servi de juge à chaque étape, y compris après un rechargement à
+chaud de la carte — sortie et micro de bout en bout, **par PipeWire seul**,
+comme une vraie application. Puis **Stef a confirmé les deux** : « le test du
+micro est concluant, c'est avec lui que je rédige cette réponse », et le son
+« fonctionne parfaitement ».
+
+### Reste ouvert
+
+**Aucun profil UCM n'existe pour `sof-rt5682`**, ni dans Debian ni en amont.
+C'est la racine de tout : sans lui, ACP reste contourné, et **rien ne bascule
+automatiquement quand on branche un casque** — ni la sortie, ni son micro.
+L'écrire est le vrai remède, et c'est un chantier en soi.
+
+**Pourquoi le DSP traîne un démarrage sur vingt n'est pas élucidé.** Le
+service rattrape le symptôme ; le jour où la cause sera connue, il deviendra
+inutile.
+
+**Jamais essayés, faute de matériel branché** : la sortie casque, le micro du
+casque, et `DMIC16kHz` (`hw:0,6`), qui souffre probablement du même défaut de
+canaux sans que la règle le corrige.
 
 ---
 

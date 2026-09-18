@@ -353,7 +353,7 @@ Les quatre points doivent être vrais simultanément :
 
 | Risque | Détail | Gravité |
 |---|---|---|
-| **Audio** | Les Chromebooks Jasper Lake utilisent SOF (Sound Open Firmware) avec un codec discret et des amplificateurs de haut-parleurs pilotés séparément. Symptôme classique : le casque fonctionne, les haut-parleurs internes restent muets faute du bon profil UCM. Le noyau 6.12 de Debian 13 et un `alsa-ucm-conf` récent améliorent nettement la situation, sans garantie. | **AVÉRÉ — voir §1.8.** |
+| **Audio** | Les Chromebooks Jasper Lake utilisent SOF (Sound Open Firmware) avec un codec discret et des amplificateurs de haut-parleurs pilotés séparément. Symptôme classique : le casque fonctionne, les haut-parleurs internes restent muets faute du bon profil UCM. Le noyau 6.12 de Debian 13 et un `alsa-ucm-conf` récent améliorent nettement la situation, sans garantie. | **AVÉRÉ, et pire que prévu — voir §1.8.** Le profil UCM manque bel et bien, mais la carte ne s'instanciait pas du tout. Traité le 18 septembre 2026. |
 | **Wi-Fi** | Firmware `iwlwifi` non libre requis. S'il n'est pas embarqué dans l'image d'installation, la machine démarre sans réseau. | Moyenne, mais bloquante à l'installation. |
 | **Veille** | Le S0ix sur Chromebook hors ChromeOS est souvent imparfait : consommation en veille supérieure à l'origine. | Moyenne — confort. |
 | **Clavier** | Rangée de touches ChromeOS non standard ; pas de touches F1–F12 physiques. Nécessite un remappage. | Faible — purement logiciel. |
@@ -402,6 +402,26 @@ Deux pistes, dans cet ordre :
   de bissection.
 
 Le relevé complet est produit par `bash tools/validate-install.sh`.
+
+### Ce qu'il en était vraiment — 18 septembre 2026
+
+Les deux pistes ci-dessus ont été suivies, et **aucune des deux n'était la
+bonne**.
+
+La topologie retenue (`sof-jsl-rt5682-mx98360a.tplg`) est la bonne pour cette
+carte. Et le DMIC existe : il fonctionne, il a été enregistré. Ce qui manquait
+n'était ni le fichier ni le microphone, mais la **table ACPI NHLT**, que le
+firmware MrChromebox n'expose pas — donc rien ne décrit au DSP combien de
+capsules sont câblées.
+
+Surtout, l'échec **n'est pas permanent** : compté sur le journal,
+**cinq démarrages sur cent**. Le `-22` n'apparaît que lorsque le DSP tarde à
+répondre ; les quatre-vingt-quinze autres fois, la carte s'instancie
+normalement. C'est ce caractère intermittent qui a fait croire à une
+réparation le 8 septembre, puis à une rechute le 17.
+
+L'histoire complète, les mesures et les deux correctifs sont dans
+[`docs/15`](15-carte-son.md).
 
 ---
 

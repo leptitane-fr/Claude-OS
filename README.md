@@ -23,6 +23,11 @@ comme environnement de travail principal, doté de privilèges étendus sur le s
 > câblée, le bureau a un **centre de notifications** — le shell est lui-même
 > le serveur freedesktop — et des **barres de titre uniformes**. Reste ouvert
 > l'affichage qui n'apparaît qu'au premier contact du pavé tactile.
+>
+> *L'audio de cette ligne était un faux acquis : la panne était
+> intermittente, et cinq démarrages sur cent restaient sans aucune carte son.
+> Rattrapé le 18 septembre 2026, avec le microphone interne qui, lui, n'avait
+> jamais fonctionné — voir [`docs/15`](docs/15-carte-son.md).*
 
 ---
 
@@ -74,6 +79,11 @@ Le détail et les sources de chaque point sont dans [`docs/`](docs/).
 | [`docs/08-lecteurs-reseau.md`](docs/08-lecteurs-reseau.md) | **Les lecteurs réseau.** Pourquoi des montages du noyau et non gvfs (43 paquets contre 19, et un montage gvfs n'existe que pour GIO), comment l'interface évite de composer une commande privilégiée, ce qui a été mesuré sur le NAS, et ce qui n'est pas établi. |
 | [`docs/09-code-pin.md`](docs/09-code-pin.md) | **Le code PIN de l'écran de connexion.** Pourquoi le PIN déverrouille le mot de passe au lieu de le remplacer (c'est `pam_gnome_keyring` qui l'impose), le coffre Argon2id + AES-256-GCM et ce qui le protège, les paramètres mesurés sur MADOO, le clavier tactile — et, sans détour, **ce que ce confort retire à la sécurité au repos** sur un disque non chiffré. |
 | [`docs/10-clones-claude-desktop.md`](docs/10-clones-claude-desktop.md) | **Deux comptes Claude Desktop en même temps.** Pourquoi `--user-data-dir` et non `CLAUDE_USER_DATA_DIR` (l'application efface celle-ci en build packagé), ce que le cloisonnement sépare — l'état de l'application, pas les fichiers du dépôt —, et le piège du `cmdline` sans NUL qui faisait passer tout clone pour l'installation d'origine. |
+| [`docs/11-lecteur-video.md`](docs/11-lecteur-video.md) | **Le lecteur vidéo `claude-os-video`**, dont le fil rouge est l'économie d'énergie : les cinq phases, la campagne de mesures sur batterie, et les 0,86 W gagnés sur Chromium à fichier égal. |
+| [`docs/12-mode-tablette.md`](docs/12-mode-tablette.md) | **Le mode tablette.** Détection, rotation, et le clavier à l'écran dont la disposition est *calculée* — fréquences du français, zone du pouce mesurée, loi de Fitts. Ce qui a été décidé avec l'utilisateur, et ce qui reste une limite. |
+| [`docs/13-nuage.md`](docs/13-nuage.md) | **Les lecteurs nuage.** Pourquoi rclone plutôt que gvfs, ce qu'un jeton de rafraîchissement vaut (un mot de passe), les deux causes de lenteur trouvées au premier usage réel — et pourquoi OneDrive n'est pas monté. |
+| [`docs/14-surface-outils.md`](docs/14-surface-outils.md) | **La surface d'outils partagée.** Une application ne dessine plus son chrome : elle déclare ce qu'elle sait faire, et le dock le dessine. Avec `shell/src/outils.h`, tout ce qu'il faut pour écrire une application de cette distribution. |
+| [`docs/15-carte-son.md`](docs/15-carte-son.md) | **La carte son.** Comment un défaut *intermittent* — cinq démarrages sur cent sans aucune carte — s'est fait prendre pour un défaut réparé pendant dix jours, et pourquoi le micro interne sortait quatre canaux pour deux capsules. Le bip qui sert de juge, et les trois pièges payés. |
 
 ### Installation
 
@@ -183,9 +193,14 @@ désormais dans le panneau Énergie. Voir [`docs/05`](docs/05-energie.md) §5.5
    vérifié après une telle ouverture. Voir
    [`docs/09`](docs/09-code-pin.md), section « Ce qui n'est PAS établi ».
 
-**Clos le 8 septembre 2026 :** l'audio — le DSP chargeait mal sa topologie,
-c'était le risque n°1 de `docs/01` — la rangée supérieure du clavier, et les
-notifications, qui n'existaient tout simplement pas sur la machine.
+**Clos le 8 septembre 2026 :** la rangée supérieure du clavier, et les
+notifications, qui n'existaient tout simplement pas sur la machine. L'audio y
+figurait aussi — le DSP chargeait mal sa topologie, c'était le risque n°1 de
+`docs/01` — mais **il n'était pas clos** : la panne était intermittente, et on
+l'avait observée un jour de chance. Cinq démarrages sur cent restaient sans
+aucune carte son, et le microphone interne n'avait jamais fonctionné. Les deux
+sont traités depuis le **18 septembre 2026** ; voir
+[`docs/15`](docs/15-carte-son.md).
 
 Un point restera ouvert sans qu'on y puisse rien : la **synchronisation
 Google dans Chromium**. L'identifiant OAuth partagé que Debian livre a été

@@ -107,9 +107,10 @@ fi
 
 # -------------------------------------------------------------------- audio
 sec "4. Audio"
-w "> Point de risque n°1 du projet. Le symptôme classique sur ces Chromebooks"
-w "> est un casque fonctionnel et des haut-parleurs internes muets, faute de"
-w "> profil UCM."
+w "> Point de risque n°1 du projet, et il s'est réalisé autrement que prévu :"
+w "> non pas des haut-parleurs muets, mais AUCUNE carte son — cinq démarrages"
+w "> sur cent, le DSP répondant trop tard (voir docs/15). Le service"
+w "> claude-os-rattrapage-audio recharge alors la pile."
 w ""
 
 if [ -r /proc/asound/cards ] && grep -q '[0-9]' /proc/asound/cards 2>/dev/null; then
@@ -119,12 +120,33 @@ if [ -r /proc/asound/cards ] && grep -q '[0-9]' /proc/asound/cards 2>/dev/null; 
 		|| note "SOF non mentionné — vérifier le pilote"
 else
 	bad "aucune carte son détectée"
+	have systemctl && systemctl is-enabled claude-os-rattrapage-audio.service >/dev/null 2>&1 \
+		&& note "le rattrapage est activé — voir « journalctl -t claude-os-audio »" \
+		|| warn "le service claude-os-rattrapage-audio n'est pas activé"
 fi
 
 if have wpctl && wpctl status >/dev/null 2>&1; then
 	ok "PipeWire répond"
 	SINKS="$(wpctl status 2>/dev/null | sed -n '/Sinks:/,/^$/p' | grep -c '\.' || echo 0)"
 	[ "$SINKS" -gt 0 ] && ok "$SINKS sortie(s) audio disponible(s)" || bad "aucune sortie audio"
+
+	# L'entrée compte autant que la sortie : le micro interne a passé dix jours
+	# muet sans que rien ne le signale. La source par défaut doit être le DMIC,
+	# et non « Headset » — le jack, qui rend du silence quand rien n'y est
+	# branché. Voir docs/15.
+	# Attention au piège : les noms de PCM contiennent littéralement « (*) »
+	# — « Headset (*) » —, donc chercher une étoile attrape toutes les lignes.
+	# La marque du défaut est une étoile SUIVIE du numéro de nœud. On se limite
+	# en outre à la section Audio, la caméra ayant sa propre « Sources: ».
+	SRC_DEF="$(wpctl status 2>/dev/null | sed -n '/^Audio/,/^Video/p' \
+		| sed -n '/Sources:/,$p' | grep -E '\*[[:space:]]+[0-9]+\.' | head -1)"
+	case "$SRC_DEF" in
+		*DMIC*|*"Micro interne"*) ok "micro par défaut : le micro interne" ;;
+		*Headset*) bad "micro par défaut : le JACK — il rend du silence à vide" ;;
+		"")        bad "aucune source audio par défaut" ;;
+		*)         warn "micro par défaut inattendu :$SRC_DEF" ;;
+	esac
+
 	raw "$(wpctl status 2>/dev/null | sed -n '/Audio/,/Video/p' | head -30)"
 else
 	bad "PipeWire ne répond pas (wpctl absent ou service arrêté)"
@@ -132,6 +154,12 @@ fi
 
 UCM="$(ls /usr/share/alsa/ucm2/conf.d 2>/dev/null | head -20)"
 [ -n "$UCM" ] && note "profils UCM présents" || warn "aucun profil UCM sous conf.d"
+# Aucun profil n'existe pour « sof-rt5682 », ni dans Debian ni en amont : ACP
+# est donc contourné (99-claude-os-audio.conf), et rien ne bascule au
+# branchement d'un casque. C'est connu, et c'est la racine de docs/15.
+ls /usr/share/alsa/ucm2/conf.d 2>/dev/null | grep -qi 'sof-rt5682' \
+	&& note "profil UCM sof-rt5682 présent — ACP pourrait être réactivé" \
+	|| note "pas de profil UCM sof-rt5682 : ACP contourné, pas de bascule casque"
 
 echo
 printf '  \033[1mTest manuel requis :\033[0m écouter les HAUT-PARLEURS puis le CASQUE.\n'

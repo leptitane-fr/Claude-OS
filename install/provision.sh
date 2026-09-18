@@ -721,6 +721,25 @@ else
 	info "update-grub à lancer manuellement si absent ici"
 fi
 
+# ----------------------------------------------------------------- carte son
+
+say "Carte son"
+
+# Le DSP SOF de MADOO répond parfois trop tard au chargement de la topologie :
+# la carte échoue alors à s'instancier EN ENTIER, et la machine démarre sans
+# AUCUN périphérique audio — pas un micro muet, pas un haut-parleur muet, rien.
+# Compté sur cent démarrages du journal le 18 septembre 2026 : cinq fois.
+#
+# Le service ne fait rien quand la carte est là ; il recharge la pile une fois
+# quand elle manque. C'est un rattrapage de symptôme : la lenteur du DSP n'est
+# pas expliquée. Voir docs/15-carte-son.md.
+info "rattrapage de la carte son au démarrage"
+run "systemctl enable claude-os-rattrapage-audio.service >/dev/null 2>&1 || true"
+
+# Les deux règles WirePlumber (contournement d'ACP, canaux du micro interne)
+# sont déjà en place : rootfs/ les a copiées, et WirePlumber les lit au
+# démarrage de la session. Rien à activer.
+
 # ------------------------------------------------------------------- mémoire
 
 say "Réglages mémoire (4 Go)"

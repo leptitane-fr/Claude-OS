@@ -1,0 +1,14 @@
+[Unit]
+Description=Claude OS — rattrapage de la carte son (IPC timeout SOF au démarrage)
+Documentation=man:claude-os(1)
+After=sound.target systemd-modules-load.service
+Wants=sound.target
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sleep 5
+ExecStart=/usr/local/sbin/claude-os-rattrapage-audio
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
